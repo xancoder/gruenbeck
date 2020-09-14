@@ -5,20 +5,42 @@ import json
 import pathlib
 
 
-def main():
-    config = get_configuration()
+def main(config_file):
+    config = get_configuration(config_file)
 
-
-def get_configuration():
-    config_p = pathlib.Path("config.json")
-    if not config_p.exists():
-        print(f"[-] config file not found: {config_p}")
+    if config:
+        print("[*] configuration found")
     else:
-        print(f"[*] read config file: {config_p}")
-        with config_p.open() as json_data_file:
+        print("[-] no configuration found")
+
+
+def get_configuration(configuration_file: str) -> dict:
+    """
+    load json into a dictionary from a given valid file path string, otherwise return empty dictionary
+    :rtype: dict
+    """
+    config_path = pathlib.Path(configuration_file)
+    if not config_path.exists():
+        config = {}
+    else:
+        with config_path.open() as json_data_file:
             config = json.load(json_data_file)
     return config
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+
+    # parse commandline arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--config-file', '-c',
+        help='set config file',
+        required=False,
+        default='config.json'
+    )
+    args = parser.parse_args()
+
+    CONFIG_file = args.config_file
+
+    main(CONFIG_file)
