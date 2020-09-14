@@ -1,0 +1,5 @@
+{
+  "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.tsv",
+  "dataPath": "./data",
+  "dataFilePrefix": "gruenbeck_water_consumption"
+}
