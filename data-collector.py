@@ -2,16 +2,27 @@
 # -*- coding: utf-8 -*-
 
 import json
+import logging
 import pathlib
+
+# create main logger
+logger = logging.getLogger('data-collector')
+logger.setLevel(logging.INFO)
+
+# create logging formatter
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    '%Y-%m-%d %H:%M:%S'
+)
 
 
 def main(config_file):
     config = get_configuration(config_file)
 
     if config:
-        print("[*] configuration found")
+        logger.info("[*] configuration found")
     else:
-        print("[-] no configuration found")
+        logger.info("[-] no configuration found")
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -39,8 +50,22 @@ if __name__ == '__main__':
         required=False,
         default='config.json'
     )
+    parser.add_argument(
+        '--log-console', '-l',
+        help="activate console logging",
+        action='store_true'
+    )
     args = parser.parse_args()
 
     CONFIG_file = args.config_file
+
+    if args.log_console:
+        # create console handler
+        sh = logging.StreamHandler()
+        sh.setLevel(logging.INFO)
+        # add formatter to the handlers
+        sh.setFormatter(formatter)
+        # add the handlers to the logger
+        logger.addHandler(sh)
 
     main(CONFIG_file)
