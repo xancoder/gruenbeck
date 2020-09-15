@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import json
-import logging
+import logging.handlers
 import pathlib
 
 # create main logger
@@ -23,6 +23,8 @@ def main(config_file):
         logger.info("[*] configuration found")
     else:
         logger.info("[-] no configuration found")
+
+    logger.error("[-] error message")
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -55,6 +57,12 @@ if __name__ == '__main__':
         help="activate console logging",
         action='store_true'
     )
+    parser.add_argument(
+        '--log-error', '-e',
+        help='error logging to file',
+        required=False,
+        default='./log/gruenbeck_error.log'
+    )
     args = parser.parse_args()
 
     CONFIG_file = args.config_file
@@ -67,5 +75,14 @@ if __name__ == '__main__':
         sh.setFormatter(formatter)
         # add the handlers to the logger
         logger.addHandler(sh)
+
+    log_rotate_file = logging.handlers.RotatingFileHandler(
+        f'{args.log_error}',
+        maxBytes=8000000,
+        backupCount=5
+    )
+    log_rotate_file.setLevel(logging.ERROR)
+    log_rotate_file.setFormatter(formatter)
+    logger.addHandler(log_rotate_file)
 
     main(CONFIG_file)
