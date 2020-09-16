@@ -4,9 +4,10 @@
 import json
 import logging.handlers
 import pathlib
+import sys
 
 # create main logger
-logger = logging.getLogger('data-collector')
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # create logging formatter
@@ -17,14 +18,23 @@ formatter = logging.Formatter(
 
 
 def main(config_file):
+    logger.info(f"[*] run script: {sys.argv[0]}")
     config = get_configuration(config_file)
 
     if config:
-        logger.info("[*] configuration found")
+        logger.info(f"[*] configuration found: {config_file}")
     else:
-        logger.info("[-] no configuration found")
+        logger.error(f"[-] no configuration found: {config_file}")
+        sys.exit(1)
 
-    logger.error("[-] error message")
+    try:
+        data_path = check_output_folder(config['dataPath'])
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except PermissionError as err:
+        logger.error(f"[-] creation data folder failed: {err}")
+        sys.exit(1)
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -39,6 +49,20 @@ def get_configuration(configuration_file: str) -> dict:
         with config_path.open() as json_data_file:
             config = json.load(json_data_file)
     return config
+
+
+def check_output_folder(data_folder: str) -> object:
+    """
+    create an output folder if not exists
+    :rtype: object
+    """
+    data_folder_path = pathlib.Path(data_folder)
+    if not data_folder_path.exists():
+        data_folder_path.mkdir()
+        logger.info(f"[+] path created: {data_folder_path.absolute()}")
+    else:
+        logger.info(f"[*] path exists: {data_folder_path.absolute()}")
+    return data_folder_path
 
 
 if __name__ == '__main__':
