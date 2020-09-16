@@ -4,9 +4,10 @@
 import json
 import logging.handlers
 import pathlib
+import sys
 
 # create main logger
-logger = logging.getLogger('data-collector')
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # create logging formatter
@@ -17,14 +18,14 @@ formatter = logging.Formatter(
 
 
 def main(config_file):
+    logger.info(f"[*] run script: {sys.argv[0]}")
     config = get_configuration(config_file)
 
     if config:
-        logger.info("[*] configuration found")
+        logger.info(f"[*] configuration found: {config_file}")
     else:
-        logger.info("[-] no configuration found")
-
-    logger.error("[-] error message")
+        logger.error(f"[-] no configuration found: {config_file}")
+        sys.exit(1)
 
 
 def get_configuration(configuration_file: str) -> dict:
