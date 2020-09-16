@@ -27,6 +27,15 @@ def main(config_file):
         logger.error(f"[-] no configuration found: {config_file}")
         sys.exit(1)
 
+    try:
+        data_path = check_output_folder(config['dataPath'])
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except PermissionError as err:
+        logger.error(f"[-] creation data folder failed: {err}")
+        sys.exit(1)
+
 
 def get_configuration(configuration_file: str) -> dict:
     """
@@ -40,6 +49,20 @@ def get_configuration(configuration_file: str) -> dict:
         with config_path.open() as json_data_file:
             config = json.load(json_data_file)
     return config
+
+
+def check_output_folder(data_folder: str) -> object:
+    """
+    create an output folder if not exists
+    :rtype: object
+    """
+    data_folder_path = pathlib.Path(data_folder)
+    if not data_folder_path.exists():
+        data_folder_path.mkdir()
+        logger.info(f"[+] path created: {data_folder_path.absolute()}")
+    else:
+        logger.info(f"[*] path exists: {data_folder_path.absolute()}")
+    return data_folder_path
 
 
 if __name__ == '__main__':
