@@ -1,0 +1,197 @@
+parameter,access,device,value,unit,code,note
+D_D_1,read/write,,Double,[°dH],,Rohwasserhärte
+D_D_2,read/write,,Double,[°dH],,Sollwert Weichwasserhärte
+D_A_4_1,read/write,,String,(Name),,Kontaktdaten Installateur
+D_A_4_2,read/write,,String,(Tel. Nr.),,Kontaktdaten Installateur
+D_A_4_3,read/write,,String,(E-Mail Adresse),,Kontaktdaten Installateur
+D_C_1_1,read/write,,Int,,,"Sprache
+
+0=Deutsch
+1=Englisch
+2=Französisch
+3=Italienisch
+4=Niederländisch
+5=Russisch
+6=Spanisch
+7=Chinesisch"
+D_C_2_1,read/write,,Int,,,"Härteeinheit
+
+0=°dH
+1=°f
+2=°e
+3=ppm
+4=mol/m3"
+D_C_4_2,read/write,,String,(XX:XX),,Uhrzeit
+D_C_5_2,read/write,,String,(TT.MM.JJJJ),,Datum
+D_C_5_3,read/write,,Int,,,"Automatische Umschaltung Sommer-/Winterzeit
+
+0=nein
+1=ja"
+D_C_4_1,read/write,,Int,,,"Regenerationszeitpunkt wählen
+
+0=automatisch
+1=fest"
+D_C_4_3,read/write,,String,(XX:XX),,Startzeit Regeneration 1
+D_C_4_4,read/write,nur bei softliQ:MC,String,(XX:XX),,Startzeit Regeneration 2 (nur bei softliQ:MC)
+D_C_4_5,read/write,nur bei softliQ:MC,String,(XX:XX),,Startzeit Regeneration 3 (nur bei softliQ:MC)
+D_C_5_1,read/write,,Int,,,"Arbeitsweise
+
+0=eco
+1=power
+2=comfort (nur bei softliQ:MC verfügbar)
+3=individual (nur bei softliQ:MC verfügbar)"
+,,,,,,
+D_C_6_3,read/write,,Mo Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_4,read/write,,Di Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_5,read/write,,Mi Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_6,read/write,,Do Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_7,read/write,,Fr Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_8,read/write,,Sa Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_9,read/write,,So Arbeitsweise,,,Nur bei Arbeitsweise = 3 Arbeitsweise kann für jeden Wochentag individuell festgelegt werden
+D_C_6_1,read/write,,Int,,,"Aktives Display im Standby
+
+0=deaktiviert
+1=aktiviert"
+D_C_7_1,read/write,,Int,[Tage],,Service Intervalldauer
+D_C_8_1,read/write,nicht bei softliQ:SC18,Int,,,"LED-Leuchtring Funktion bei Wasserbehandlung, Bedienung, Störung (nicht bei softliQ:SC18)
+
+0= deaktiviert
+1= Bei Störung
+2= Bei Bedienung, Störung
+3= Bei Wasserbehandlung, Bedienung, Störung
+4= Dauerhaftes Leuchten"
+D_C_8_2,read/write,nicht bei softliQ:SC18,Int,,,"LED-Leuchtring blink bei Salz-Vorwarnung (nicht bei softliQ:SC18)
+
+0= nein
+1= ja"
+D_Y_8_1_1,read/write,,String,(E-Mail Adresse),,3 E-Mail Adressen für Weiterleitung Meldung/Störung (Base64 verschl.)
+D_Y_8_1_2,read/write,,String,(E-Mail Adresse),,3 E-Mail Adressen für Weiterleitung Meldung/Störung (Base64 verschl.)
+D_Y_8_1_3,read/write,,String,(E-Mail Adresse),,3 E-Mail Adressen für Weiterleitung Meldung/Störung (Base64 verschl.)
+D_Y_8_2,read/write,,String,,,SMTP-Server (Base64 verschl.)
+D_Y_8_3,read/write,,Int,,,Port.-Nr.
+D_Y_8_4,read/write,,String,,,Benutzername (Base64 verschl.)
+D_Y_8_5,read/write,,String,,,Passwort (Base64 verschl.)
+D_Y_8_6,read/write,,String,,,E-Mail-Adresse (Base64 verschl.)
+D_Y_8_7,read/write,,String,,,Telefonnummer (Base64 verschl.)
+D_Y_8_8,read/write,,String,,,Nachname (Base64 verschl.)
+D_Y_8_9,read/write,,String,,,Text für Störmeldeweiterleitung
+D_Y_8_10,read/write,,Int,,,"Test-E-Mail versenden
+
+0=nein
+1=ja"
+,,,,,,
+D_A_1_7,read,,Double,[m³/h],,Gesamtdurchfluss der Anlage (bei softliQ:MC = 0°Wasser + Wasser über Verschneidung)
+D_A_2_3,read,,Int,[Tage],,Salzreichweite in Tagen
+D_A_1_6,read,,Double,[°dH],,"Anzeigewert = Istwert Weichwasserhärte bei Anlagendurchfluss >0,00 m3/h
+Anzeigewert = Sollwert Weichwasserhärte bei Anlagendurchfluss = 0 m3/h"
+D_K_1,read,,Int,,,Zähler Regenerationen
+D_K_2,read,,Int,[m³],,Zähler Weichwassermenge (0°dH)
+D_A_2_2,read,,Int,,,Tage bis zur nächsten Wartung
+D_C_3_6_1,read,,String,,,IP-Adresse
+D_C_3_6_2,read,,String,,,Default Gateway
+D_C_3_6_3,read,,String,,,Primary DNS
+D_C_3_6_4,read,,String,,,Secondary DNS
+D_C_3_6_5,read,,Int,,,Status (1=verbunden)
+D_C_3_7_1,read,,String,,,Netzwerkstatus (Access Point) IP-Adresse
+D_C_3_7_2,read,,String,,,Netzwerkstatus (Access Point) SSID: (softliQ:SC???? bzw. softliQ:MC????)
+D_C_3_7_3,read,,Status,,,Netzwerkstatus (Access Point) Status (1=verbunden)
+#D_Y_1,read,,Int,[l],,Wasserverbrauch gestern
+D_Y_2_1,read,,Int,[l],,Wasserverbrauch gestern
+D_Y_2_2,read,,Int,[l],,Wasserverbrauch vor 2 Tagen
+D_Y_2_3,read,,Int,[l],,Wasserverbrauch vor 3 Tagen
+D_Y_2_4,read,,Int,[l],,Wasserverbrauch vor 4 Tagen
+D_Y_2_5,read,,Int,[l],,Wasserverbrauch vor 5 Tagen
+D_Y_2_6,read,,Int,[l],,Wasserverbrauch vor 6 Tagen
+D_Y_2_7,read,,Int,[l],,Wasserverbrauch vor 7 Tagen
+D_Y_2_8,read,,Int,[l],,Wasserverbrauch vor 8 Tagen
+D_Y_2_9,read,,Int,[l],,Wasserverbrauch vor 9 Tagen
+D_Y_2_10,read,,Int,[l],,Wasserverbrauch vor 10 Tagen
+D_Y_2_11,read,,Int,[l],,Wasserverbrauch vor 11 Tagen
+D_Y_2_12,read,,Int,[l],,Wasserverbrauch vor 12 Tagen
+D_Y_2_13,read,,Int,[l],,Wasserverbrauch vor 13 Tagen
+D_Y_2_14,read,,Int,[l],,Wasserverbrauch vor 14 Tagen
+#D_Y_2_27,read,,Int,[l],,Wasserverbrauch vor 27 Tagen
+D_Y_3,read,,Int,[kg],,Salzverbrauch pro Jahr
+D_Y_3_1,read,,Double,[kg],,Salzverbrauch gestern
+D_Y_3_2,read,,Double,[kg],,Salzverbrauch vor 2 Tagen
+D_Y_3_3,read,,Double,[kg],,Salzverbrauch vor 3 Tagen
+D_Y_3_4,read,,Double,[kg],,Salzverbrauch vor 4 Tagen
+D_Y_3_5,read,,Double,[kg],,Salzverbrauch vor 5 Tagen
+D_Y_3_6,read,,Double,[kg],,Salzverbrauch vor 6 Tagen
+D_Y_3_7,read,,Double,[kg],,Salzverbrauch vor 7 Tagen
+D_Y_3_8,read,,Double,[kg],,Salzverbrauch vor 8 Tagen
+D_Y_3_9,read,,Double,[kg],,Salzverbrauch vor 9 Tagen
+D_Y_3_10,read,,Double,[kg],,Salzverbrauch vor 10 Tagen
+D_Y_3_11,read,,Double,[kg],,Salzverbrauch vor 11 Tagen
+D_Y_3_12,read,,Double,[kg],,Salzverbrauch vor 12 Tagen
+D_Y_3_13,read,,Double,[kg],,Salzverbrauch vor 13 Tagen
+D_Y_3_14,read,,Double,[kg],,Salzverbrauch vor 14 Tagen
+D_A_3_2_1,read,,Int,[%],,Prozentsatz der letzten 1. Regenerationen
+D_A_3_2_2,read,,Int,[%],,Prozentsatz der letzten 2. Regenerationen
+D_A_3_2_3,read,,Int,[%],,Prozentsatz der letzten 3. Regenerationen
+D_A_3_2_4,read,,Int,[%],,Prozentsatz der letzten 4. Regenerationen
+D_A_3_2_5,read,,Int,[%],,Prozentsatz der letzten 5. Regenerationen
+D_A_3_2_6,read,,Int,[%],,Prozentsatz der letzten 6. Regenerationen
+D_A_3_2_7,read,,Int,[%],,Prozentsatz der letzten 7. Regenerationen
+D_A_3_2_8,read,,Int,[%],,Prozentsatz der letzten 8. Regenerationen
+D_A_3_2_9,read,,Int,[%],,Prozentsatz der letzten 9. Regenerationen
+D_A_3_2_10,read,,Int,[%],,Prozentsatz der letzten 10. Regenerationen
+D_A_3_2_11,read,,Int,[%],,Prozentsatz der letzten 11. Regenerationen
+D_A_3_2_12,read,,Int,[%],,Prozentsatz der letzten 12. Regenerationen
+D_A_3_2_13,read,,Int,[%],,Prozentsatz der letzten 13. Regenerationen
+D_A_3_2_14,read,,Int,[%],,Prozentsatz der letzten 14. Regenerationen
+,,,,,,
+D_Y_5,read,,Int,,,"Aktueller Regenerationsschritt
+
+0= keine Regeneration
+1= Soletank füllen
+2= Besalzen
+3= Verdrängen
+4= Rückspülen
+5= Erstfiltrat"
+D_Y_7,read,,String,(TT.MM.JJJJ),,Inbetriebnahme-Datum
+D_Y_8_11,read,,Int,,,"Ergebnis letzter E-Mail Versand
+
+0=keine Mail versandt
+1=Mail erfolgreich versandt
+2=Benutzerdaten fehlerhaft
+3= kein Internetzugang/Server nicht bereit"
+D_Y_10_1,read,nicht bei softliQ:SC,Int,[%],,Aktuelle Restkapazität Austauscher 1
+D_Y_10_2,read,nicht bei softliQ:SC,Int,[%],,Aktuelle Restkapazität Austauscher 2
+D_Y_13,read,,Int,,,"Austauscher in Betrieb softliQ:SC
+
+0= Austauscher gestört/in Regeneration
+1= Austauscher in Betrieb
+
+Austauscher in Betrieb softliQ:MC
+
+0= Beide Austauscher gestört
+1= Austauscher 1 in Betrieb
+2= Austauscher 2 in Betrieb
+3= Beide Austauscher in Betrieb"
+D_Y_14,read,,String,[TT.MM.JJJJ HH:MM],,Voraussichtliche nächste Regeneration
+D_A_1_1,read,,Double,[m³],005,Informationen Austauscher 1 (Code 005) Aktueller Durchfluss
+D_A_1_2,read,,Double,[m³*°dH],005,Informationen Austauscher 1 (Code 005)Restkapazität
+D_A_1_3,read,,Double,[m³*°dH],005,Informationen Austauscher 1 (Code 005) Kapazitätszahl
+D_A_2_1,read,,Double,[l oder min],005,Informationen Austauscher 1 (Code 005) Restzeit/-menge Reg.Schritt
+D_A_3_1,read,,String,[TT.MM.JJJ HH:MM],005,Informationen Austauscher 1 (Code 005) Letzte Regeneration
+D_A_3_2,read,,Int,[%],005,Informationen Austauscher 1 (Code 005) Über
+D_A_1_4,read,nur MC32,Double,[m³],005,Informationen Austauscher 2(Code 005) (nur MC32) Aktueller Durchfluss
+D_A_1_5,read,nur MC32,Double,[m³*°dH],005,Informationen Austauscher 2(Code 005) (nur MC32) Restkapazität
+D_A_1_8,read,nur MC32,Double,[m³*°dH],005,Informationen Austauscher 2(Code 005) (nur MC32) Kapazitätszahl
+D_A_2_4,read,nur MC32,Double,[l oder min],005,Informationen Austauscher 2(Code 005) (nur MC32) Restzeit/-menge Reg.Schritt
+D_A_3_4,read,nur MC32,String,[TT.MM.JJJ HH:MM],005,Informationen Austauscher 2(Code 005) (nur MC32) Letzte Regeneration
+D_A_3_5,read,nur MC32,Int,[%],005,Informationen Austauscher 2(Code 005) (nur MC32) Über
+D_A_1_9,read,nur MC32,Double,[m³],005,Informationen Verschneidung (Code 005) (nur MC32) Aktueller Durchfluss
+D_A_1_6,read,nur MC32,Double,[°dH],005,Informationen Verschneidung (Code 005) (nur MC32) Istwert Weichwasserhärte
+,,,,,,
+D_K_3,read,nur MC32,Double,[m³/°dH],005,Informationen Durchflüsse (Code 005) Parallelbetrieb Spitzenwert (nur MC32)
+D_K_4,read,nur MC32,Double,[min],005,Informationen Durchflüsse (Code 005) Überschreitung Nenndurchfluss in min (nur MC32)
+D_K_14,read,,Double,[m³/h],005,Informationen Durchflüsse (Code 005) Austauscher 1 Spitzenwert
+D_K_15,read,,Double,[min],005,Informationen Durchflüsse (Code 005) Überschreitung Nenndurchfluss A1 in min
+D_K_16,read,nur MC32,Double,[m³/h],005,Informationen Durchflüsse (Code 005) Austauscher 2 Spitzenwert (nur MC32)
+D_K_17,read,nur MC32,Double,[min],005,Informationen Durchflüsse (Code 005) Überschreitung Nenndurchfluss A2 in min (nur MC32)
+D_K_18,read,,Double,[m³],005,Informationen Wassermengen (Code 005) Weichwassermenge Austauscher 1
+D_K_19,read,nur MC32,Double,[m³],005,Informationen Wassermengen (Code 005) Weichwassermenge Austauscher 2 (nur MC32)
+D_K_20,read,nur MC32,Double,[m³],005,Informationen Wassermengen (Code 005) Rohwassermenge Verschneidung (nur MC32)
+D_K_21,read,,Double,[l],005,Informationen Wassermengen (Code 005) Nachspeisemenge
