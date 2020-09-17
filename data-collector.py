@@ -6,6 +6,8 @@ import logging.handlers
 import pathlib
 import sys
 
+import gruenbeck
+
 # create main logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,6 +36,12 @@ def main(config_file):
         sys.exit(1)
     except PermissionError as err:
         logger.error(f"[-] creation data folder failed: {err}")
+        sys.exit(1)
+
+    try:
+        gb_param = gruenbeck.Parameter(config['parameterFile'])
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
 
 
