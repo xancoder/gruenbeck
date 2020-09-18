@@ -1,5 +1,8 @@
 {
   "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.csv",
   "dataPath": "./data",
-  "dataFilePrefix": "gruenbeck_water_consumption"
+  "dataFilePrefix": "gruenbeck_water_consumption",
+  "softWaterSystem": {
+    "host": "softliq-sc-ae-85-48"
+  }
 }
