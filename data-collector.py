@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import csv
+import datetime
 import json
 import logging.handlers
 import pathlib
@@ -44,6 +46,9 @@ def main(config_file):
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
+    except IOError as err:
+        logger.error(err)
+        sys.exit(1)
 
     try:
         gb_result = gruenbeck.requests.get_data(
@@ -53,6 +58,44 @@ def main(config_file):
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
+    except ValueError as err:
+        logger.error(f"[-] failed to parse xml: {err}")
+        sys.exit(1)
+
+    # get current timestamp to be able to calculate 14 days backward
+    now = datetime.datetime.now()
+    # replace parameter code with dates for last 14 days backward
+    gb_result = {now - datetime.timedelta(days=idx): gb_result[parameter] for idx, parameter in enumerate(gb_result)}
+
+    # provides files per year and handle year change
+    years = set([x.year for x in gb_result])
+    for year in years:
+
+        # format date
+        data_new = {}
+        for timestamp in sorted(gb_result):
+            if timestamp.year == year:
+                data_new.update({
+                    timestamp.strftime(config['dataFile']['datePattern']): int(gb_result[timestamp])
+                })
+
+        # get stored data
+        data_existing = {}
+        file_name = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+        if file_name.exists():
+            with file_name.open(mode='r') as csv_file:
+                csv_reader = csv.DictReader(csv_file)
+                for row in csv_reader:
+                    tmp_date = row[config['dataFile']['fieldnames']['date']]
+                    tmp_value = row[config['dataFile']['fieldnames']['value']]
+                    tmp_value = int(tmp_value) if tmp_value.isnumeric() else tmp_value
+                    data_existing.update({tmp_date: tmp_value})
+
+        # merge values
+        data_existing.update(data_new)
+
+        logger.info(f"[*] data to write: {data_existing}")
+        write_data(file_name, config['dataFile']['fieldnames'], data_existing)
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -81,6 +124,22 @@ def check_output_folder(data_folder: str) -> object:
     else:
         logger.info(f"[*] path exists: {data_folder_path.absolute()}")
     return data_folder_path
+
+
+def write_data(file_name, fieldnames, data_existing):
+    # build data structure to write
+    write_list = []
+    for item in sorted(data_existing):
+        write_list.append({
+            fieldnames['date']: item,
+            fieldnames['value']: data_existing[item]
+        })
+
+    # write file
+    with file_name.open(mode='w') as csv_out_file:
+        writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(write_list)
 
 
 if __name__ == '__main__':

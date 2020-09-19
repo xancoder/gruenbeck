@@ -1,6 +1,6 @@
 # data collector - soft water system - Grünbeck
 
-> This python script collects water consumption data from a "Grünbeck" soft water system
+> This python script collects water consumption data from a "Grünbeck" soft water system and stores into csv file
 
 ## Getting Started
 
