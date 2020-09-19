@@ -44,6 +44,9 @@ def main(config_file):
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
+    except IOError as err:
+        logger.error(err)
+        sys.exit(1)
 
     try:
         gb_result = gruenbeck.requests.get_data(
