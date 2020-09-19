@@ -56,7 +56,9 @@ def main(config_file):
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
-
+    except ValueError as err:
+        logger.error(f"[-] failed to parse xml: {err}")
+        sys.exit(1)
 
 def get_configuration(configuration_file: str) -> dict:
     """
