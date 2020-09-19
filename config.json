@@ -1,7 +1,14 @@
 {
-  "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.csv",
+  "dataFile": {
+    "datePattern": "%Y-%m-%d",
+    "fieldnames": {
+      "date": "date",
+      "value": "value"
+    },
+    "prefix": "gruenbeck_water_consumption"
+  },
   "dataPath": "./data",
-  "dataFilePrefix": "gruenbeck_water_consumption",
+  "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.csv",
   "softWaterSystem": {
     "host": "softliq-sc-ae-85-48"
   }
