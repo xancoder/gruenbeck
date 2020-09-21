@@ -112,7 +112,7 @@ def get_configuration(configuration_file: str) -> dict:
     return config
 
 
-def check_output_folder(data_folder: str) -> object:
+def check_output_folder(data_folder: str) -> pathlib.Path:
     """
     create an output folder if not exists
     :param data_folder: string of folder to store data
@@ -127,7 +127,7 @@ def check_output_folder(data_folder: str) -> object:
     return path_object
 
 
-def write_data(file_object, fieldnames, data):
+def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     """
     write data to csv file
     :param file_object: pathlib.Path of output file
