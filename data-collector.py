@@ -3,9 +3,14 @@
 
 import csv
 import datetime
+import email.mime.application
+import email.mime.multipart
+import email.mime.text
 import json
 import logging.handlers
 import pathlib
+import smtplib
+import ssl
 import sys
 
 import gruenbeck
@@ -97,6 +102,8 @@ def main(config_file):
         logger.info(f"[*] data to write: {data_existing}")
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
+        send_mail(config['mail'], data_path)
+
 
 def get_configuration(configuration_file: str) -> dict:
     """
@@ -147,6 +154,51 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(write_list)
+
+
+def send_mail(param: dict, data_folder: pathlib.Path) -> None:
+    """
+    send an email with static text and files from given folder as attachments
+    :param param: needed mail configuration
+    :param data_folder:
+    """
+    smtp_server = param['smtpServer']
+    smtp_port = param['smtpPort']
+    sender_email = param['senderEmail']
+    sender_password = param['senderPassword']
+    receiver_email = ",".join(param['recipients'])
+
+    message = email.mime.multipart.MIMEMultipart("alternative")
+    message["Subject"] = param['subject']
+    message["From"] = sender_email
+    message["To"] = receiver_email
+
+    text = "your stored data"
+    html = "<html><head></head><body>your stored data</body></html>"
+
+    # Turn these into plain/html MIMEText objects
+    part_text = email.mime.text.MIMEText(text, "plain")
+    part_html = email.mime.text.MIMEText(html, "html")
+    message.attach(part_text)
+    message.attach(part_html)
+
+    for f in data_folder.glob('*.csv') or []:
+        with f.open(mode="rb") as fil:
+            part = email.mime.application.MIMEApplication(
+                fil.read(),
+                Name=f.name
+            )
+        # After the file is closed
+        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+        message.attach(part)
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, param['recipients'], message.as_string())
 
 
 if __name__ == '__main__':
