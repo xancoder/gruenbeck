@@ -3,9 +3,14 @@
 
 import csv
 import datetime
+import email.mime.application
+import email.mime.multipart
+import email.mime.text
 import json
 import logging.handlers
 import pathlib
+import smtplib
+import ssl
 import sys
 
 import gruenbeck
@@ -81,9 +86,9 @@ def main(config_file):
 
         # get stored data
         data_existing = {}
-        file_name = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
-        if file_name.exists():
-            with file_name.open(mode='r') as csv_file:
+        file_obj = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+        if file_obj.exists():
+            with file_obj.open(mode='r') as csv_file:
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
                     tmp_date = row[config['dataFile']['fieldnames']['date']]
@@ -95,7 +100,9 @@ def main(config_file):
         data_existing.update(data_new)
 
         logger.info(f"[*] data to write: {data_existing}")
-        write_data(file_name, config['dataFile']['fieldnames'], data_existing)
+        write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
+
+        send_mail(config['mail'], data_path)
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -112,34 +119,86 @@ def get_configuration(configuration_file: str) -> dict:
     return config
 
 
-def check_output_folder(data_folder: str) -> object:
+def check_output_folder(data_folder: str) -> pathlib.Path:
     """
     create an output folder if not exists
-    :rtype: object
+    :param data_folder: string of folder to store data
+    :return: object: pathlib.Path of the given string
     """
-    data_folder_path = pathlib.Path(data_folder)
-    if not data_folder_path.exists():
-        data_folder_path.mkdir()
-        logger.info(f"[+] path created: {data_folder_path.absolute()}")
+    path_object = pathlib.Path(data_folder)
+    if not path_object.exists():
+        path_object.mkdir()
+        logger.info(f"[+] path created: {path_object.absolute()}")
     else:
-        logger.info(f"[*] path exists: {data_folder_path.absolute()}")
-    return data_folder_path
+        logger.info(f"[*] path exists: {path_object.absolute()}")
+    return path_object
 
 
-def write_data(file_name, fieldnames, data_existing):
+def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
+    """
+    write data to csv file
+    :param file_object: pathlib.Path of output file
+    :param fieldnames: fieldnames as column headers
+    :param data: dictionary data to write
+    """
     # build data structure to write
     write_list = []
-    for item in sorted(data_existing):
+    for item in sorted(data):
         write_list.append({
             fieldnames['date']: item,
-            fieldnames['value']: data_existing[item]
+            fieldnames['value']: data[item]
         })
 
     # write file
-    with file_name.open(mode='w') as csv_out_file:
+    with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(write_list)
+
+
+def send_mail(param: dict, data_folder: pathlib.Path) -> None:
+    """
+    send an email with static text and files from given folder as attachments
+    :param param: needed mail configuration
+    :param data_folder:
+    """
+    smtp_server = param['smtpServer']
+    smtp_port = param['smtpPort']
+    sender_email = param['senderEmail']
+    sender_password = param['senderPassword']
+    receiver_email = ",".join(param['recipients'])
+
+    message = email.mime.multipart.MIMEMultipart("alternative")
+    message["Subject"] = param['subject']
+    message["From"] = sender_email
+    message["To"] = receiver_email
+
+    text = "your stored data"
+    html = "<html><head></head><body>your stored data</body></html>"
+
+    # Turn these into plain/html MIMEText objects
+    part_text = email.mime.text.MIMEText(text, "plain")
+    part_html = email.mime.text.MIMEText(html, "html")
+    message.attach(part_text)
+    message.attach(part_html)
+
+    for f in data_folder.glob('*.csv') or []:
+        with f.open(mode="rb") as fil:
+            part = email.mime.application.MIMEApplication(
+                fil.read(),
+                Name=f.name
+            )
+        # After the file is closed
+        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+        message.attach(part)
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(sender_email, sender_password)
+        server.sendmail(sender_email, param['recipients'], message.as_string())
 
 
 if __name__ == '__main__':

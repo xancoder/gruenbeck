@@ -8,6 +8,16 @@
     "prefix": "gruenbeck_water_consumption"
   },
   "dataPath": "./data",
+  "mail": {
+    "recipients": [
+      "reciver@example.de"
+    ],
+    "senderEmail": "example@gmail.com",
+    "senderPassword": "strongPassword",
+    "smtpPort": "587",
+    "smtpServer": "smtp.gmail.com",
+    "subject": "[data collector] - gruenbeck"
+  },
   "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.csv",
   "softWaterSystem": {
     "host": "softliq-sc-ae-85-48"
