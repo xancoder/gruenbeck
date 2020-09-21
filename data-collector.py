@@ -115,15 +115,16 @@ def get_configuration(configuration_file: str) -> dict:
 def check_output_folder(data_folder: str) -> object:
     """
     create an output folder if not exists
-    :rtype: object
+    :param data_folder: string of folder to store data
+    :return: object: pathlib.Path of the given string
     """
-    data_folder_path = pathlib.Path(data_folder)
-    if not data_folder_path.exists():
-        data_folder_path.mkdir()
-        logger.info(f"[+] path created: {data_folder_path.absolute()}")
+    path_object = pathlib.Path(data_folder)
+    if not path_object.exists():
+        path_object.mkdir()
+        logger.info(f"[+] path created: {path_object.absolute()}")
     else:
-        logger.info(f"[*] path exists: {data_folder_path.absolute()}")
-    return data_folder_path
+        logger.info(f"[*] path exists: {path_object.absolute()}")
+    return path_object
 
 
 def write_data(file_object, fieldnames, data):
