@@ -81,9 +81,9 @@ def main(config_file):
 
         # get stored data
         data_existing = {}
-        file_name = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
-        if file_name.exists():
-            with file_name.open(mode='r') as csv_file:
+        file_obj = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+        if file_obj.exists():
+            with file_obj.open(mode='r') as csv_file:
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
                     tmp_date = row[config['dataFile']['fieldnames']['date']]
@@ -95,7 +95,7 @@ def main(config_file):
         data_existing.update(data_new)
 
         logger.info(f"[*] data to write: {data_existing}")
-        write_data(file_name, config['dataFile']['fieldnames'], data_existing)
+        write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
 
 def get_configuration(configuration_file: str) -> dict:
@@ -126,17 +126,23 @@ def check_output_folder(data_folder: str) -> object:
     return data_folder_path
 
 
-def write_data(file_name, fieldnames, data_existing):
+def write_data(file_object, fieldnames, data):
+    """
+    write data to csv file
+    :param file_object: pathlib.Path of output file
+    :param fieldnames: fieldnames as column headers
+    :param data: dictionary data to write
+    """
     # build data structure to write
     write_list = []
-    for item in sorted(data_existing):
+    for item in sorted(data):
         write_list.append({
             fieldnames['date']: item,
-            fieldnames['value']: data_existing[item]
+            fieldnames['value']: data[item]
         })
 
     # write file
-    with file_name.open(mode='w') as csv_out_file:
+    with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(write_list)
