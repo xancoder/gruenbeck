@@ -19,7 +19,7 @@ bash init_venv.sh
 
 ### modify the config.json
 
-The configuration file `./config.json` should be modified to your own needs and settings.
+The configuration file `./src/config.json` should be modified to your own needs and settings.
 
 ### manually running
 
