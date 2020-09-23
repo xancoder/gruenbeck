@@ -102,7 +102,10 @@ def main(config_file):
         logger.info(f"[*] data to write: {data_existing}")
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
-        send_mail(config['mail'], data_path)
+        if 'mail' in config:
+            send_mail(config['mail'], data_path)
+        else:
+            logger.info(f"[*] no mail configured")
 
 
 def get_configuration(configuration_file: str) -> dict:
