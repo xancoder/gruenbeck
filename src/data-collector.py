@@ -29,7 +29,7 @@ formatter = logging.Formatter(
 
 def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
-    config = get_configuration(config_file)
+    config = check_configuration(config_file)
 
     if config:
         logger.info(f"[*] configuration found: {config_file}")
@@ -108,7 +108,7 @@ def main(config_file):
             logger.info(f"[*] no mail configured")
 
 
-def get_configuration(configuration_file: str) -> dict:
+def check_configuration(configuration_file: str) -> dict:
     """
     load json into a dictionary from a given valid file path string, otherwise return empty dictionary
     :rtype: dict
