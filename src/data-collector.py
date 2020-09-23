@@ -31,15 +31,7 @@ def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
 
     config = get_configuration(config_file)
-
-    try:
-        data_path = check_output_folder(config['dataPath'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except PermissionError as err:
-        logger.error(f"[-] creation data folder failed: {err}")
-        sys.exit(1)
+    data_path = get_data_folder(config)
 
     try:
         gb_param = src.gruenbeck.Parameter(config['parameterFile'])
@@ -113,19 +105,17 @@ def get_configuration(config_file):
     return config
 
 
-def check_output_folder(data_folder: str) -> pathlib.Path:
-    """
-    create an output folder if not exists
-    :param data_folder: string of folder to store data
-    :return: object: pathlib.Path of the given string
-    """
-    path_object = pathlib.Path(data_folder)
-    if not path_object.exists():
-        path_object.mkdir()
-        logger.info(f"[+] path created: {path_object.absolute()}")
-    else:
-        logger.info(f"[*] path exists: {path_object.absolute()}")
-    return path_object
+def get_data_folder(config):
+    try:
+        data_path = src.datacollector.check_data_folder(config['dataPath'])
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except PermissionError as err:
+        logger.error(f"[-] creation data folder failed: {err}")
+        sys.exit(1)
+    logger.info(f"[*] data_path: {data_path}")
+    return data_path
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
