@@ -13,8 +13,8 @@ import smtplib
 import ssl
 import sys
 
-import gruenbeck
-import gruenbeck.requests
+import src.gruenbeck
+import src.gruenbeck.requests
 
 # create main logger
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def main(config_file):
         sys.exit(1)
 
     try:
-        gb_param = gruenbeck.Parameter(config['parameterFile'])
+        gb_param = src.gruenbeck.Parameter(config['parameterFile'])
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
@@ -56,7 +56,7 @@ def main(config_file):
         sys.exit(1)
 
     try:
-        gb_result = gruenbeck.requests.get_data(
+        gb_result = src.gruenbeck.requests.get_data(
             config['softWaterSystem']['host'],
             gb_param.get_parameter_by_note('Wasserverbrauch')
         )
@@ -213,7 +213,7 @@ if __name__ == '__main__':
         '--config-file', '-c',
         help='set config file',
         required=False,
-        default='config.json'
+        default='./config.json'
     )
     parser.add_argument(
         '--log-console', '-l',
@@ -224,7 +224,7 @@ if __name__ == '__main__':
         '--log-error', '-e',
         help='error logging to file',
         required=False,
-        default='./log/gruenbeck_error.log'
+        default='../log/gruenbeck_error.log'
     )
     args = parser.parse_args()
 

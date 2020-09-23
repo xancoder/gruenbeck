@@ -51,7 +51,7 @@ class Parameter:
 
 
 if __name__ == '__main__':
-    parameter_file = '../assets/Gruenbeck_Webserver_Dokumentation.csv'
+    parameter_file = '../../assets/Gruenbeck_Webserver_Dokumentation.csv'
     tmp = Parameter(parameter_file)
 
     for item in tmp.get_parameter_list():
