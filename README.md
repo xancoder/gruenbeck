@@ -24,7 +24,7 @@ The configuration file `./config.json` should be modified to your own needs and 
 ### manually running
 
 ```shell script
-./venv/bin/python3 data-collector.py -l
+./venv/bin/python3 ./src/data-collector.py -l
 ```
 
 ## crontab
@@ -38,7 +38,7 @@ crontab -e
 with the following line. Please 
 
 ```shell script
-0 16 * * MON cd /path/to/gruenbeck && ./venv/bin/python3 data-collector.py
+0 16 * * MON cd /path/to/gruenbeck && ./venv/bin/python3 ./src/data-collector.py
 ```
 
 In this example the script starts every week on Monday 1600. The design decision on the weekly run is based on the 14-day memory of the soft water system. More frequent runs would cause more writes and less would leave less time in cause of failures.
