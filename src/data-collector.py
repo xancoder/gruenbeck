@@ -6,13 +6,13 @@ import datetime
 import email.mime.application
 import email.mime.multipart
 import email.mime.text
-import json
 import logging.handlers
 import pathlib
 import smtplib
 import ssl
 import sys
 
+import src.datacollector
 import src.gruenbeck
 import src.gruenbeck.requests
 
@@ -29,13 +29,8 @@ formatter = logging.Formatter(
 
 def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
-    config = check_configuration(config_file)
 
-    if config:
-        logger.info(f"[*] configuration found: {config_file}")
-    else:
-        logger.error(f"[-] no configuration found: {config_file}")
-        sys.exit(1)
+    config = get_configuration(config_file)
 
     try:
         data_path = check_output_folder(config['dataPath'])
@@ -108,17 +103,13 @@ def main(config_file):
             logger.info(f"[*] no mail configured")
 
 
-def check_configuration(configuration_file: str) -> dict:
-    """
-    load json into a dictionary from a given valid file path string, otherwise return empty dictionary
-    :rtype: dict
-    """
-    config_path = pathlib.Path(configuration_file)
-    if not config_path.exists():
-        config = {}
-    else:
-        with config_path.open() as json_data_file:
-            config = json.load(json_data_file)
+def get_configuration(config_file):
+    try:
+        config = src.datacollector.check_configuration(config_file)
+    except FileNotFoundError as error:
+        logger.error(f"{error}")
+        sys.exit(1)
+    logger.info(f"[*] config: {config}")
     return config
 
 
