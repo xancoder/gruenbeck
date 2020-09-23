@@ -6,15 +6,15 @@ import datetime
 import email.mime.application
 import email.mime.multipart
 import email.mime.text
-import json
 import logging.handlers
 import pathlib
 import smtplib
 import ssl
 import sys
 
-import gruenbeck
-import gruenbeck.requests
+import src.datacollector
+import src.gruenbeck
+import src.gruenbeck.requests
 
 # create main logger
 logger = logging.getLogger(__name__)
@@ -29,25 +29,12 @@ formatter = logging.Formatter(
 
 def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
+
     config = get_configuration(config_file)
-
-    if config:
-        logger.info(f"[*] configuration found: {config_file}")
-    else:
-        logger.error(f"[-] no configuration found: {config_file}")
-        sys.exit(1)
+    data_path = get_data_folder(config)
 
     try:
-        data_path = check_output_folder(config['dataPath'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except PermissionError as err:
-        logger.error(f"[-] creation data folder failed: {err}")
-        sys.exit(1)
-
-    try:
-        gb_param = gruenbeck.Parameter(config['parameterFile'])
+        gb_param = src.gruenbeck.Parameter(config['parameterFile'])
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
         sys.exit(1)
@@ -56,7 +43,7 @@ def main(config_file):
         sys.exit(1)
 
     try:
-        gb_result = gruenbeck.requests.get_data(
+        gb_result = src.gruenbeck.requests.get_data(
             config['softWaterSystem']['host'],
             gb_param.get_parameter_by_note('Wasserverbrauch')
         )
@@ -102,36 +89,33 @@ def main(config_file):
         logger.info(f"[*] data to write: {data_existing}")
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
-        send_mail(config['mail'], data_path)
+        if 'mail' in config:
+            send_mail(config['mail'], data_path)
+        else:
+            logger.info(f"[*] no mail configured")
 
 
-def get_configuration(configuration_file: str) -> dict:
-    """
-    load json into a dictionary from a given valid file path string, otherwise return empty dictionary
-    :rtype: dict
-    """
-    config_path = pathlib.Path(configuration_file)
-    if not config_path.exists():
-        config = {}
-    else:
-        with config_path.open() as json_data_file:
-            config = json.load(json_data_file)
+def get_configuration(config_file):
+    try:
+        config = src.datacollector.check_configuration(config_file)
+    except FileNotFoundError as error:
+        logger.error(f"{error}")
+        sys.exit(1)
+    logger.info(f"[*] config: {config}")
     return config
 
 
-def check_output_folder(data_folder: str) -> pathlib.Path:
-    """
-    create an output folder if not exists
-    :param data_folder: string of folder to store data
-    :return: object: pathlib.Path of the given string
-    """
-    path_object = pathlib.Path(data_folder)
-    if not path_object.exists():
-        path_object.mkdir()
-        logger.info(f"[+] path created: {path_object.absolute()}")
-    else:
-        logger.info(f"[*] path exists: {path_object.absolute()}")
-    return path_object
+def get_data_folder(config):
+    try:
+        data_path = src.datacollector.check_data_folder(config['dataPath'])
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except PermissionError as err:
+        logger.error(f"[-] creation data folder failed: {err}")
+        sys.exit(1)
+    logger.info(f"[*] data_path: {data_path}")
+    return data_path
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
@@ -210,7 +194,7 @@ if __name__ == '__main__':
         '--config-file', '-c',
         help='set config file',
         required=False,
-        default='config.json'
+        default='./config.json'
     )
     parser.add_argument(
         '--log-console', '-l',
@@ -221,7 +205,7 @@ if __name__ == '__main__':
         '--log-error', '-e',
         help='error logging to file',
         required=False,
-        default='./log/gruenbeck_error.log'
+        default='../log/gruenbeck_error.log'
     )
     args = parser.parse_args()
 
