@@ -77,8 +77,6 @@ def main(config_file):
 
         # merge values
         data_existing.update(data_new)
-
-        logger.info(f"[*] data to write: {data_existing}")
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
     if 'mail' in config:
@@ -139,6 +137,7 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         })
 
     # write file
+    logger.info(f"[*] data to write: {data}")
     with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
