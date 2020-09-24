@@ -32,12 +32,12 @@ def main(config_file):
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
-    gb_param = get_device_parameter(config)
+    device_parameter = get_device_parameter(config)
 
     try:
-        gb_result = gruenbeck.requests.get_data(
+        device_data = gruenbeck.requests.get_data(
             config['softWaterSystem']['host'],
-            gb_param.get_parameter_by_note('Wasserverbrauch')
+            device_parameter.get_parameter_by_note('Wasserverbrauch')
         )
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
@@ -49,18 +49,18 @@ def main(config_file):
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
     # replace parameter code with dates for last 14 days backward
-    gb_result = {now - datetime.timedelta(days=idx): gb_result[parameter] for idx, parameter in enumerate(gb_result)}
+    device_data = {now - datetime.timedelta(days=idx): device_data[parameter] for idx, parameter in enumerate(device_data)}
 
     # provides files per year and handle year change
-    years = set([x.year for x in gb_result])
+    years = set([x.year for x in device_data])
     for year in years:
 
         # format date
         data_new = {}
-        for timestamp in sorted(gb_result):
+        for timestamp in sorted(device_data):
             if timestamp.year == year:
                 data_new.update({
-                    timestamp.strftime(config['dataFile']['datePattern']): int(gb_result[timestamp])
+                    timestamp.strftime(config['dataFile']['datePattern']): int(device_data[timestamp])
                 })
 
         # get stored data
