@@ -89,7 +89,7 @@ def get_configuration(config_file):
     try:
         config = datacollector.check_configuration(config_file)
     except FileNotFoundError as error:
-        logger.error(f"{error}")
+        logger.error(error)
         sys.exit(1)
     logger.info(f"[*] config: {config}")
     return config
