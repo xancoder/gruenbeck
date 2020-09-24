@@ -12,26 +12,23 @@ class Parameter:
 
     def read(self):
         file_path = pathlib.Path(self.path_file)
-        if not file_path.exists():
-            raise IOError(f"[-] parameter database file not found: {file_path.absolute()}")
-        else:
-            with file_path.open() as input_file:
-                reader = csv.DictReader(input_file)
-                for row in reader:
-                    # skip empty lines or with starting with '#'
-                    if not row['parameter'] or row['parameter'].startswith('#'):
-                        continue
-                    # build parameter dictionary
-                    self.parameters.update({
-                        row['parameter']: {
-                            "access": row['access'],
-                            "device": row["device"],
-                            "value": row["value"],
-                            "unit": row["unit"],
-                            "code": row["code"],
-                            "note": row["note"]
-                        }
-                    })
+        with file_path.open() as input_file:
+            reader = csv.DictReader(input_file)
+            for row in reader:
+                # skip empty lines or with starting with '#'
+                if not row['parameter'] or row['parameter'].startswith('#'):
+                    continue
+                # build parameter dictionary
+                self.parameters.update({
+                    row['parameter']: {
+                        "access": row['access'],
+                        "device": row["device"],
+                        "value": row["value"],
+                        "unit": row["unit"],
+                        "code": row["code"],
+                        "note": row["note"]
+                    }
+                })
 
     def get_count(self):
         return len(self.parameters)

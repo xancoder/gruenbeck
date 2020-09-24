@@ -32,15 +32,7 @@ def main(config_file):
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
-
-    try:
-        gb_param = gruenbeck.Parameter(config['parameterFile'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except IOError as err:
-        logger.error(err)
-        sys.exit(1)
+    gb_param = get_device_parameter(config)
 
     try:
         gb_result = gruenbeck.requests.get_data(
@@ -116,6 +108,19 @@ def get_data_folder(config):
         sys.exit(1)
     logger.info(f"[*] data_path: {data_path}")
     return data_path
+
+
+def get_device_parameter(config):
+    try:
+        parameter = gruenbeck.Parameter(config['parameterFile'])
+    except KeyError as error:
+        logger.error(f"[-] no config parameter: {error}")
+        sys.exit(1)
+    except FileNotFoundError as error:
+        logger.error(error)
+        sys.exit(1)
+    logger.info(f"[*] parameter: {parameter.parameters}")
+    return parameter
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
