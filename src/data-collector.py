@@ -98,11 +98,11 @@ def get_configuration(config_file):
 def get_data_folder(config):
     try:
         data_path = datacollector.check_data_folder(config['dataPath'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
+    except KeyError as error:
+        logger.error(f"[-] no config parameter: {error}")
         sys.exit(1)
-    except PermissionError as err:
-        logger.error(f"[-] creation data folder failed: {err}")
+    except PermissionError as error:
+        logger.error(f"[-] creation data folder failed: {error}")
         sys.exit(1)
     logger.info(f"[*] data_path: {data_path}")
     return data_path
