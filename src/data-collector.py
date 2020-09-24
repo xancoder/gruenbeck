@@ -32,20 +32,12 @@ def main(config_file):
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
+    device_parameter = get_device_parameter(config)
 
     try:
-        gb_param = gruenbeck.Parameter(config['parameterFile'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except IOError as err:
-        logger.error(err)
-        sys.exit(1)
-
-    try:
-        gb_result = gruenbeck.requests.get_data(
+        device_data = gruenbeck.requests.get_data(
             config['softWaterSystem']['host'],
-            gb_param.get_parameter_by_note('Wasserverbrauch')
+            device_parameter.get_parameter_by_note('Wasserverbrauch')
         )
     except KeyError as err:
         logger.error(f"[-] no config parameter: {err}")
@@ -57,18 +49,18 @@ def main(config_file):
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
     # replace parameter code with dates for last 14 days backward
-    gb_result = {now - datetime.timedelta(days=idx): gb_result[parameter] for idx, parameter in enumerate(gb_result)}
+    device_data = {now - datetime.timedelta(days=idx): device_data[parameter] for idx, parameter in enumerate(device_data)}
 
     # provides files per year and handle year change
-    years = set([x.year for x in gb_result])
+    years = set([x.year for x in device_data])
     for year in years:
 
         # format date
         data_new = {}
-        for timestamp in sorted(gb_result):
+        for timestamp in sorted(device_data):
             if timestamp.year == year:
                 data_new.update({
-                    timestamp.strftime(config['dataFile']['datePattern']): int(gb_result[timestamp])
+                    timestamp.strftime(config['dataFile']['datePattern']): int(device_data[timestamp])
                 })
 
         # get stored data
@@ -85,21 +77,19 @@ def main(config_file):
 
         # merge values
         data_existing.update(data_new)
-
-        logger.info(f"[*] data to write: {data_existing}")
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
-        if 'mail' in config:
-            send_mail(config['mail'], data_path)
-        else:
-            logger.info(f"[*] no mail configured")
+    if 'mail' in config:
+        send_mail(config['mail'], data_path)
+    else:
+        logger.info(f"[*] no mail configured")
 
 
 def get_configuration(config_file):
     try:
         config = datacollector.check_configuration(config_file)
     except FileNotFoundError as error:
-        logger.error(f"{error}")
+        logger.error(error)
         sys.exit(1)
     logger.info(f"[*] config: {config}")
     return config
@@ -108,14 +98,27 @@ def get_configuration(config_file):
 def get_data_folder(config):
     try:
         data_path = datacollector.check_data_folder(config['dataPath'])
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
+    except KeyError as error:
+        logger.error(f"[-] no config parameter: {error}")
         sys.exit(1)
-    except PermissionError as err:
-        logger.error(f"[-] creation data folder failed: {err}")
+    except PermissionError as error:
+        logger.error(f"[-] creation data folder failed: {error}")
         sys.exit(1)
     logger.info(f"[*] data_path: {data_path}")
     return data_path
+
+
+def get_device_parameter(config):
+    try:
+        parameter = gruenbeck.Parameter(config['parameterFile'])
+    except KeyError as error:
+        logger.error(f"[-] no config parameter: {error}")
+        sys.exit(1)
+    except FileNotFoundError as error:
+        logger.error(error)
+        sys.exit(1)
+    logger.info(f"[*] parameter: {parameter.parameters}")
+    return parameter
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
@@ -134,6 +137,7 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         })
 
     # write file
+    logger.info(f"[*] data to write: {data}")
     with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
