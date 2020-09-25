@@ -170,10 +170,6 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
     text = f"your stored data"
     part_text = email.mime.text.MIMEText(text, "plain")
     message.attach(part_text)
-    # html email
-    html = f"<html><head></head><body>your stored data</body></html>"
-    part_html = email.mime.text.MIMEText(html, "html")
-    message.attach(part_html)
 
     files_to_send = data_folder.glob('*.csv') or []
     for f in sorted(files_to_send):
