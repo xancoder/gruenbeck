@@ -33,23 +33,12 @@ def main(config_file):
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
     device_parameter = get_device_parameter(config)
-
-    try:
-        device_data = gruenbeck.requests.get_data(
-            config['softWaterSystem']['host'],
-            device_parameter.get_parameter_by_note('Wasserverbrauch')
-        )
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except ValueError as err:
-        logger.error(f"[-] failed to parse xml: {err}")
-        sys.exit(1)
+    device_data = get_device_data(config, device_parameter)
 
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
     # replace parameter code with dates for last 14 days backward
-    device_data = {now - datetime.timedelta(days=idx): device_data[parameter] for idx, parameter in enumerate(device_data)}
+    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
 
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
@@ -121,6 +110,21 @@ def get_device_parameter(config):
     return parameter
 
 
+def get_device_data(config, parameter):
+    try:
+        result = gruenbeck.requests.get_data(
+            config['softWaterSystem']['host'],
+            parameter.get_parameter_by_note('Wasserverbrauch')
+        )
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except ValueError as err:
+        logger.error(f"[-] failed to parse xml: {err}")
+        sys.exit(1)
+    return result
+
+
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     """
     write data to csv file
@@ -156,29 +160,27 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
     sender_password = param['senderPassword']
     receiver_email = ",".join(param['recipients'])
 
-    message = email.mime.multipart.MIMEMultipart("alternative")
+    message = email.mime.multipart.MIMEMultipart("mixed")
     message["Subject"] = param['subject']
     message["From"] = sender_email
     message["To"] = receiver_email
 
-    text = "your stored data"
-    html = "<html><head></head><body>your stored data</body></html>"
-
     # Turn these into plain/html MIMEText objects
+    # text email
+    text = f"your stored data"
     part_text = email.mime.text.MIMEText(text, "plain")
-    part_html = email.mime.text.MIMEText(html, "html")
     message.attach(part_text)
-    message.attach(part_html)
 
-    for f in data_folder.glob('*.csv') or []:
+    files_to_send = data_folder.glob('*.csv') or []
+    for f in sorted(files_to_send):
         with f.open(mode="rb") as fil:
-            part = email.mime.application.MIMEApplication(
+            part_file = email.mime.application.MIMEApplication(
                 fil.read(),
                 Name=f.name
             )
         # After the file is closed
-        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
-        message.attach(part)
+        part_file['Content-Disposition'] = f'attachment; filename="{f.name}"'
+        message.attach(part_file)
 
     context = ssl.create_default_context()
     with smtplib.SMTP(smtp_server, smtp_port) as server:
