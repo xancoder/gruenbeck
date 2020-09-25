@@ -49,7 +49,7 @@ def main(config_file):
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
     # replace parameter code with dates for last 14 days backward
-    device_data = {now - datetime.timedelta(days=idx): device_data[parameter] for idx, parameter in enumerate(device_data)}
+    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
 
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
