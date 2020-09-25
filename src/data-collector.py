@@ -33,18 +33,7 @@ def main(config_file):
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
     device_parameter = get_device_parameter(config)
-
-    try:
-        device_data = gruenbeck.requests.get_data(
-            config['softWaterSystem']['host'],
-            device_parameter.get_parameter_by_note('Wasserverbrauch')
-        )
-    except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
-    except ValueError as err:
-        logger.error(f"[-] failed to parse xml: {err}")
-        sys.exit(1)
+    device_data = get_device_data(config, device_parameter)
 
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
@@ -119,6 +108,21 @@ def get_device_parameter(config):
         sys.exit(1)
     logger.info(f"[*] parameter: {parameter.parameters}")
     return parameter
+
+
+def get_device_data(config, parameter):
+    try:
+        result = gruenbeck.requests.get_data(
+            config['softWaterSystem']['host'],
+            parameter.get_parameter_by_note('Wasserverbrauch')
+        )
+    except KeyError as err:
+        logger.error(f"[-] no config parameter: {err}")
+        sys.exit(1)
+    except ValueError as err:
+        logger.error(f"[-] failed to parse xml: {err}")
+        sys.exit(1)
+    return result
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
