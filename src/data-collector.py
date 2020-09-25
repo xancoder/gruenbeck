@@ -165,24 +165,26 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
     message["From"] = sender_email
     message["To"] = receiver_email
 
-    text = "your stored data"
-    html = "<html><head></head><body>your stored data</body></html>"
-
     # Turn these into plain/html MIMEText objects
+    # text email
+    text = f"your stored data"
     part_text = email.mime.text.MIMEText(text, "plain")
-    part_html = email.mime.text.MIMEText(html, "html")
     message.attach(part_text)
+    # html email
+    html = f"<html><head></head><body>your stored data</body></html>"
+    part_html = email.mime.text.MIMEText(html, "html")
     message.attach(part_html)
 
-    for f in data_folder.glob('*.csv') or []:
+    files_to_send = data_folder.glob('*.csv') or []
+    for f in sorted(files_to_send):
         with f.open(mode="rb") as fil:
-            part = email.mime.application.MIMEApplication(
+            part_file = email.mime.application.MIMEApplication(
                 fil.read(),
                 Name=f.name
             )
         # After the file is closed
-        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
-        message.attach(part)
+        part_file['Content-Disposition'] = f'attachment; filename="{f.name}"'
+        message.attach(part_file)
 
     context = ssl.create_default_context()
     with smtplib.SMTP(smtp_server, smtp_port) as server:
