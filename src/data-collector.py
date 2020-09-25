@@ -160,7 +160,7 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
     sender_password = param['senderPassword']
     receiver_email = ",".join(param['recipients'])
 
-    message = email.mime.multipart.MIMEMultipart("alternative")
+    message = email.mime.multipart.MIMEMultipart("mixed")
     message["Subject"] = param['subject']
     message["From"] = sender_email
     message["To"] = receiver_email
