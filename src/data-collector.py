@@ -68,10 +68,7 @@ def main(config_file):
         data_existing.update(data_new)
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
 
-    if 'mail' in config:
-        send_mail(config['mail'], data_path)
-    else:
-        logger.info(f"[*] no mail configured")
+    get_mail(config, data_path)
 
 
 def get_configuration(config_file):
@@ -146,6 +143,14 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(write_list)
+
+
+def get_mail(config, data_path):
+    try:
+        send_mail(config['mail'], data_path)
+    except KeyError as err:
+        logger.error(f"[-] no mail configured: {err}")
+        sys.exit(1)
 
 
 def send_mail(param: dict, data_folder: pathlib.Path) -> None:
