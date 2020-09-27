@@ -3,13 +3,8 @@
 
 import csv
 import datetime
-import email.mime.application
-import email.mime.multipart
-import email.mime.text
 import logging.handlers
 import pathlib
-import smtplib
-import ssl
 import sys
 
 import datacollector
@@ -148,53 +143,14 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
 
 def get_mail(config, data_path):
     try:
-        send_mail(config['mail'], data_path)
-    except KeyError as err:
-        logger.error(f"[-] no mail configured: {err}")
+        datacollector.send_mail(config['mail'], data_path)
+        logger.info("[*] mail send")
+    except KeyError as error:
+        logger.error(f"[-] no mail configured: {error}")
         sys.exit(1)
-
-
-def send_mail(param: dict, data_folder: pathlib.Path) -> None:
-    """
-    send an email with static text and files from given folder as attachments
-    :param param: needed mail configuration
-    :param data_folder:
-    """
-    smtp_server = param['smtpServer']
-    smtp_port = param['smtpPort']
-    sender_email = param['senderEmail']
-    sender_password = param['senderPassword']
-    receiver_email = ",".join(param['recipients'])
-
-    message = email.mime.multipart.MIMEMultipart("mixed")
-    message["Subject"] = param['subject']
-    message["From"] = sender_email
-    message["To"] = receiver_email
-
-    # Turn these into plain/html MIMEText objects
-    # text email
-    text = f"your stored data"
-    part_text = email.mime.text.MIMEText(text, "plain")
-    message.attach(part_text)
-
-    files_to_send = data_folder.glob('*.csv') or []
-    for f in sorted(files_to_send):
-        with f.open(mode="rb") as fil:
-            part_file = email.mime.application.MIMEApplication(
-                fil.read(),
-                Name=f.name
-            )
-        # After the file is closed
-        part_file['Content-Disposition'] = f'attachment; filename="{f.name}"'
-        message.attach(part_file)
-
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.ehlo()
-        server.starttls(context=context)
-        server.ehlo()
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, param['recipients'], message.as_string())
+    except ValueError as error:
+        logger.error(f"[-] wrong configuration: {error}")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
