@@ -3,13 +3,8 @@
 
 import csv
 import datetime
-import email.mime.application
-import email.mime.multipart
-import email.mime.text
 import logging.handlers
 import pathlib
-import smtplib
-import ssl
 import sys
 
 import datacollector
@@ -35,15 +30,11 @@ def main(config_file):
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
 
-    # get current timestamp to be able to calculate 14 days backward
-    now = datetime.datetime.now()
-    # replace parameter code with dates for last 14 days backward
-    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
+    device_data = add_timestamp_as_key_device_data(device_data)
 
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
     for year in years:
-
         # format date
         data_new = {}
         for timestamp in sorted(device_data):
@@ -51,7 +42,6 @@ def main(config_file):
                 data_new.update({
                     timestamp.strftime(config['dataFile']['datePattern']): int(device_data[timestamp])
                 })
-
         # get stored data
         data_existing = {}
         file_obj = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
@@ -63,11 +53,9 @@ def main(config_file):
                     tmp_value = row[config['dataFile']['fieldnames']['value']]
                     tmp_value = int(tmp_value) if tmp_value.isnumeric() else tmp_value
                     data_existing.update({tmp_date: tmp_value})
-
         # merge values
         data_existing.update(data_new)
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
-
     get_mail(config, data_path)
 
 
@@ -122,6 +110,14 @@ def get_device_data(config, parameter):
     return result
 
 
+def add_timestamp_as_key_device_data(device_data):
+    # get current timestamp to be able to calculate 14 days backward
+    now = datetime.datetime.now()
+    # replace parameter code with dates for last 14 days backward
+    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
+    return device_data
+
+
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     """
     write data to csv file
@@ -147,53 +143,14 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
 
 def get_mail(config, data_path):
     try:
-        send_mail(config['mail'], data_path)
-    except KeyError as err:
-        logger.error(f"[-] no mail configured: {err}")
+        datacollector.send_mail(config['mail'], data_path)
+        logger.info("[*] mail send")
+    except KeyError as error:
+        logger.error(f"[-] no mail configured: {error}")
         sys.exit(1)
-
-
-def send_mail(param: dict, data_folder: pathlib.Path) -> None:
-    """
-    send an email with static text and files from given folder as attachments
-    :param param: needed mail configuration
-    :param data_folder:
-    """
-    smtp_server = param['smtpServer']
-    smtp_port = param['smtpPort']
-    sender_email = param['senderEmail']
-    sender_password = param['senderPassword']
-    receiver_email = ",".join(param['recipients'])
-
-    message = email.mime.multipart.MIMEMultipart("mixed")
-    message["Subject"] = param['subject']
-    message["From"] = sender_email
-    message["To"] = receiver_email
-
-    # Turn these into plain/html MIMEText objects
-    # text email
-    text = f"your stored data"
-    part_text = email.mime.text.MIMEText(text, "plain")
-    message.attach(part_text)
-
-    files_to_send = data_folder.glob('*.csv') or []
-    for f in sorted(files_to_send):
-        with f.open(mode="rb") as fil:
-            part_file = email.mime.application.MIMEApplication(
-                fil.read(),
-                Name=f.name
-            )
-        # After the file is closed
-        part_file['Content-Disposition'] = f'attachment; filename="{f.name}"'
-        message.attach(part_file)
-
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        server.ehlo()
-        server.starttls(context=context)
-        server.ehlo()
-        server.login(sender_email, sender_password)
-        server.sendmail(sender_email, param['recipients'], message.as_string())
+    except ValueError as error:
+        logger.error(f"[-] wrong configuration: {error}")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
