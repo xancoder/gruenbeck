@@ -40,7 +40,6 @@ def main(config_file):
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
     for year in years:
-
         # format date
         data_new = {}
         for timestamp in sorted(device_data):
@@ -48,7 +47,6 @@ def main(config_file):
                 data_new.update({
                     timestamp.strftime(config['dataFile']['datePattern']): int(device_data[timestamp])
                 })
-
         # get stored data
         data_existing = {}
         file_obj = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
@@ -60,11 +58,9 @@ def main(config_file):
                     tmp_value = row[config['dataFile']['fieldnames']['value']]
                     tmp_value = int(tmp_value) if tmp_value.isnumeric() else tmp_value
                     data_existing.update({tmp_date: tmp_value})
-
         # merge values
         data_existing.update(data_new)
         write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
-
     get_mail(config, data_path)
 
 
