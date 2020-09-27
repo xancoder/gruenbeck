@@ -35,10 +35,7 @@ def main(config_file):
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
 
-    # get current timestamp to be able to calculate 14 days backward
-    now = datetime.datetime.now()
-    # replace parameter code with dates for last 14 days backward
-    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
+    device_data = add_timestamp_as_key_device_data(device_data)
 
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
@@ -120,6 +117,14 @@ def get_device_data(config, parameter):
         logger.error(f"[-] failed to parse xml: {err}")
         sys.exit(1)
     return result
+
+
+def add_timestamp_as_key_device_data(device_data):
+    # get current timestamp to be able to calculate 14 days backward
+    now = datetime.datetime.now()
+    # replace parameter code with dates for last 14 days backward
+    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
+    return device_data
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
