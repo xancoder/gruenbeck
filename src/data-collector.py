@@ -9,7 +9,6 @@ import sys
 
 import datacollector
 import gruenbeck
-import gruenbeck.requests
 
 # create main logger
 logger = logging.getLogger(__name__)
@@ -23,13 +22,12 @@ formatter = logging.Formatter(
 
 
 def main(config_file):
-    logger.info(f"[*] run script: {sys.argv[0]}")
+    logger.info(f'[*] run script: {sys.argv[0]}')
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
-
     device_data = add_timestamp_as_key_device_data(device_data)
 
     # provides files per year and handle year change
@@ -60,54 +58,58 @@ def main(config_file):
 
 
 def get_configuration(config_file):
+    config = None
     try:
         config = datacollector.check_configuration(config_file)
-    except FileNotFoundError as error:
-        logger.error(error)
+    except FileNotFoundError as err:
+        logger.error(f'[-] no configuration: {err}')
         sys.exit(1)
-    logger.info(f"[*] config: {config}")
+    logger.info(f'[*] config: {config}')
     return config
 
 
 def get_data_folder(config):
+    data_path = None
     try:
         data_path = datacollector.check_data_folder(config['dataPath'])
-    except KeyError as error:
-        logger.error(f"[-] no config parameter: {error}")
-        sys.exit(1)
-    except PermissionError as error:
-        logger.error(f"[-] creation data folder failed: {error}")
-        sys.exit(1)
-    logger.info(f"[*] data_path: {data_path}")
+    except KeyError as err:
+        handle_error(config, f'[-] no config parameter: {err}')
+    except PermissionError as err:
+        handle_error(config, f'[-] creation data folder failed: {err}')
+    logger.info(f'[*] data_path: {data_path}')
     return data_path
 
 
 def get_device_parameter(config):
+    parameter = None
     try:
         parameter = gruenbeck.Parameter(config['parameterFile'])
-    except KeyError as error:
-        logger.error(f"[-] no config parameter: {error}")
-        sys.exit(1)
-    except FileNotFoundError as error:
-        logger.error(error)
-        sys.exit(1)
-    logger.info(f"[*] parameter: {parameter.parameters}")
+    except KeyError as err:
+        handle_error(config, f'[-] no config parameter: {err}')
+    except FileNotFoundError as err:
+        handle_error(config, f'{err}')
+    logger.info(f'[*] parameter: {parameter.parameters}')
     return parameter
 
 
 def get_device_data(config, parameter):
+    result = None
     try:
-        result = gruenbeck.requests.get_data(
+        result = gruenbeck.get_data_from_mux_http(
             config['softWaterSystem']['host'],
             parameter.get_parameter_by_note('Wasserverbrauch')
         )
     except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
+        handle_error(config, f'[-] no config parameter: {err}')
     except ValueError as err:
-        logger.error(f"[-] failed to parse xml: {err}")
-        sys.exit(1)
+        handle_error(config, f'[-] failed to parse xml: {err}')
     return result
+
+
+def handle_error(config, error_text: str) -> None:
+    logger.error(error_text)
+    datacollector.send_mail_text(config, 'gruenbeck data collector failure', error_text)
+    sys.exit(1)
 
 
 def add_timestamp_as_key_device_data(device_data):
@@ -134,7 +136,7 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         })
 
     # write file
-    logger.info(f"[*] data to write: {data}")
+    logger.info(f'[*] data to write: {data}')
     with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -144,12 +146,12 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
 def get_mail(config, data_path):
     try:
         datacollector.send_mail(config['mail'], data_path)
-        logger.info("[*] mail send")
+        logger.info('[*] mail send')
     except KeyError as error:
-        logger.error(f"[-] no mail configured: {error}")
+        logger.error(f'[-] no mail configured: {error}')
         sys.exit(1)
     except ValueError as error:
-        logger.error(f"[-] wrong configuration: {error}")
+        logger.error(f'[-] wrong configuration: {error}')
         sys.exit(1)
 
 
@@ -166,7 +168,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--log-console', '-l',
-        help="activate console logging",
+        help='activate console logging',
         action='store_true'
     )
     parser.add_argument(
