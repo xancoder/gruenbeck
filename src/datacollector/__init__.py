@@ -42,22 +42,22 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
     smtp_port = param['smtpPort']
     sender_email = param['senderEmail']
     sender_password = param['senderPassword']
-    receiver_email = ",".join(param['recipients'])
+    receiver_email = ','.join(param['recipients'])
 
-    message = email.mime.multipart.MIMEMultipart("mixed")
-    message["Subject"] = param['subject']
-    message["From"] = sender_email
-    message["To"] = receiver_email
+    message = email.mime.multipart.MIMEMultipart('mixed')
+    message['Subject'] = param['subject']
+    message['From'] = sender_email
+    message['To'] = receiver_email
 
     # Turn these into plain/html MIMEText objects
     # text email
-    text = f"your stored data"
-    part_text = email.mime.text.MIMEText(text, "plain")
+    text = f'your stored data'
+    part_text = email.mime.text.MIMEText(text, 'plain')
     message.attach(part_text)
 
     files_to_send = data_folder.glob('*.csv') or []
     for f in sorted(files_to_send):
-        with f.open(mode="rb") as fil:
+        with f.open(mode='rb') as fil:
             part_file = email.mime.application.MIMEApplication(
                 fil.read(),
                 Name=f.name

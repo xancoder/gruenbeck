@@ -22,13 +22,12 @@ formatter = logging.Formatter(
 
 
 def main(config_file):
-    logger.info(f"[*] run script: {sys.argv[0]}")
+    logger.info(f'[*] run script: {sys.argv[0]}')
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
-
     device_data = add_timestamp_as_key_device_data(device_data)
 
     # provides files per year and handle year change
@@ -65,7 +64,7 @@ def get_configuration(config_file):
     except FileNotFoundError as err:
         logger.error(f'[-] no configuration: {err}')
         sys.exit(1)
-    logger.info(f"[*] config: {config}")
+    logger.info(f'[*] config: {config}')
     return config
 
 
@@ -137,7 +136,7 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
         })
 
     # write file
-    logger.info(f"[*] data to write: {data}")
+    logger.info(f'[*] data to write: {data}')
     with file_object.open(mode='w') as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -147,12 +146,12 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
 def get_mail(config, data_path):
     try:
         datacollector.send_mail(config['mail'], data_path)
-        logger.info("[*] mail send")
+        logger.info('[*] mail send')
     except KeyError as error:
-        logger.error(f"[-] no mail configured: {error}")
+        logger.error(f'[-] no mail configured: {error}')
         sys.exit(1)
     except ValueError as error:
-        logger.error(f"[-] wrong configuration: {error}")
+        logger.error(f'[-] wrong configuration: {error}')
         sys.exit(1)
 
 
@@ -169,7 +168,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--log-console', '-l',
-        help="activate console logging",
+        help='activate console logging',
         action='store_true'
     )
     parser.add_argument(
