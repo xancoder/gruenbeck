@@ -68,11 +68,9 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
 
     try:
         context = ssl.create_default_context()
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
             server.login(sender_email, sender_password)
             server.sendmail(sender_email, param['recipients'], message.as_string())
+            server.quit()
     except smtplib.SMTPAuthenticationError as error:
         raise ValueError(error)
