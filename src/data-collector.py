@@ -9,7 +9,6 @@ import sys
 
 import datacollector
 import gruenbeck
-import gruenbeck.requests
 
 # create main logger
 logger = logging.getLogger(__name__)
@@ -97,7 +96,7 @@ def get_device_parameter(config):
 
 def get_device_data(config, parameter):
     try:
-        result = gruenbeck.requests.get_data(
+        result = gruenbeck.get_data_from_mux_http(
             config['softWaterSystem']['host'],
             parameter.get_parameter_by_note('Wasserverbrauch')
         )
