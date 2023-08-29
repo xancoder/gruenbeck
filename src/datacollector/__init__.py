@@ -66,6 +66,36 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
         part_file['Content-Disposition'] = f'attachment; filename="{f.name}"'
         message.attach(part_file)
 
+    mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
+
+
+def send_mail_text(param: dict, subject: str, text: str) -> None:
+    """
+    send an email with static text and files from given folder as attachments
+    :param param: needed mail configuration
+    :param subject:
+    :param body text:
+    """
+    smtp_server = param['smtpServer']
+    smtp_port = param['smtpPort']
+    sender_email = param['senderEmail']
+    sender_password = param['senderPassword']
+    receiver_email = ','.join(param['recipients'])
+
+    message = email.mime.multipart.MIMEMultipart('mixed')
+    message['Subject'] = subject
+    message['From'] = sender_email
+    message['To'] = receiver_email
+
+    # Turn these into plain/html MIMEText objects
+    # text email
+    part_text = email.mime.text.MIMEText(text, 'plain')
+    message.attach(part_text)
+
+    mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
+
+
+def mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server):
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:

@@ -59,54 +59,58 @@ def main(config_file):
 
 
 def get_configuration(config_file):
+    config = None
     try:
         config = datacollector.check_configuration(config_file)
-    except FileNotFoundError as error:
-        logger.error(error)
+    except FileNotFoundError as err:
+        logger.error(f'[-] no configuration: {err}')
         sys.exit(1)
     logger.info(f"[*] config: {config}")
     return config
 
 
 def get_data_folder(config):
+    data_path = None
     try:
         data_path = datacollector.check_data_folder(config['dataPath'])
-    except KeyError as error:
-        logger.error(f"[-] no config parameter: {error}")
-        sys.exit(1)
-    except PermissionError as error:
-        logger.error(f"[-] creation data folder failed: {error}")
-        sys.exit(1)
-    logger.info(f"[*] data_path: {data_path}")
+    except KeyError as err:
+        handle_error(config, f'[-] no config parameter: {err}')
+    except PermissionError as err:
+        handle_error(config, f'[-] creation data folder failed: {err}')
+    logger.info(f'[*] data_path: {data_path}')
     return data_path
 
 
 def get_device_parameter(config):
+    parameter = None
     try:
         parameter = gruenbeck.Parameter(config['parameterFile'])
-    except KeyError as error:
-        logger.error(f"[-] no config parameter: {error}")
-        sys.exit(1)
-    except FileNotFoundError as error:
-        logger.error(error)
-        sys.exit(1)
-    logger.info(f"[*] parameter: {parameter.parameters}")
+    except KeyError as err:
+        handle_error(config, f'[-] no config parameter: {err}')
+    except FileNotFoundError as err:
+        handle_error(config, f'{err}')
+    logger.info(f'[*] parameter: {parameter.parameters}')
     return parameter
 
 
 def get_device_data(config, parameter):
+    result = None
     try:
         result = gruenbeck.get_data_from_mux_http(
             config['softWaterSystem']['host'],
             parameter.get_parameter_by_note('Wasserverbrauch')
         )
     except KeyError as err:
-        logger.error(f"[-] no config parameter: {err}")
-        sys.exit(1)
+        handle_error(config, f'[-] no config parameter: {err}')
     except ValueError as err:
-        logger.error(f"[-] failed to parse xml: {err}")
-        sys.exit(1)
+        handle_error(config, f'[-] failed to parse xml: {err}')
     return result
+
+
+def handle_error(config, error_text: str) -> None:
+    logger.error(error_text)
+    datacollector.send_mail_text(config, 'gruenbeck data collector failure', error_text)
+    sys.exit(1)
 
 
 def add_timestamp_as_key_device_data(device_data):
