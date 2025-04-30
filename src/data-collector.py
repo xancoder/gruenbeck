@@ -6,6 +6,9 @@ import datetime
 import logging.handlers
 import pathlib
 import sys
+import time
+
+import requests
 
 import datacollector
 import gruenbeck
@@ -16,19 +19,21 @@ logger.setLevel(logging.INFO)
 
 # create logging formatter
 formatter = logging.Formatter(
-    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    '%Y-%m-%d %H:%M:%S'
+    "%(asctime)s - %(name)s - %(levelname)s - %(message)s", "%Y-%m-%d %H:%M:%S"
 )
 
 
 def main(config_file):
-    logger.info(f'[*] run script: {sys.argv[0]}')
+    logger.info(f"[*] run script: {sys.argv[0]}")
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
     device_data = add_timestamp_as_key_device_data(device_data)
+
+    # Track if any data was processed
+    data_processed = False
 
     # provides files per year and handle year change
     years = set([x.year for x in device_data])
@@ -37,24 +42,42 @@ def main(config_file):
         data_new = {}
         for timestamp in sorted(device_data):
             if timestamp.year == year:
-                data_new.update({
-                    timestamp.strftime(config['dataFile']['datePattern']): int(device_data[timestamp])
-                })
+                data_new.update(
+                    {
+                        timestamp.strftime(config["dataFile"]["datePattern"]): int(
+                            device_data[timestamp]
+                        )
+                    }
+                )
         # get stored data
         data_existing = {}
-        file_obj = pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+        file_obj = pathlib.Path(
+            f"{data_path}/{config['dataFile']['prefix']}_{year}.csv"
+        )
         if file_obj.exists():
-            with file_obj.open(mode='r') as csv_file:
+            with file_obj.open(mode="r") as csv_file:
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
-                    tmp_date = row[config['dataFile']['fieldnames']['date']]
-                    tmp_value = row[config['dataFile']['fieldnames']['value']]
+                    tmp_date = row[config["dataFile"]["fieldnames"]["date"]]
+                    tmp_value = row[config["dataFile"]["fieldnames"]["value"]]
                     tmp_value = int(tmp_value) if tmp_value.isnumeric() else tmp_value
                     data_existing.update({tmp_date: tmp_value})
         # merge values
         data_existing.update(data_new)
-        write_data(file_obj, config['dataFile']['fieldnames'], data_existing)
-    get_mail(config, data_path)
+        write_data(file_obj, config["dataFile"]["fieldnames"], data_existing)
+        data_processed = True
+
+    # Only attempt to send email if data was processed
+    if data_processed:
+        mail_result = get_mail(config, data_path)
+        if not mail_result:
+            logger.warning(
+                "[!] Data was collected successfully, but email sending failed"
+            )
+    else:
+        logger.warning("[!] No data was processed, skipping email sending")
+
+    logger.info("[*] Data collection completed")
 
 
 def get_configuration(config_file):
@@ -62,61 +85,126 @@ def get_configuration(config_file):
     try:
         config = datacollector.check_configuration(config_file)
     except FileNotFoundError as err:
-        logger.error(f'[-] no configuration: {err}')
+        logger.error(f"[-] no configuration: {err}")
         sys.exit(1)
-    logger.info(f'[*] config: {config}')
     return config
 
 
 def get_data_folder(config):
     data_path = None
     try:
-        data_path = datacollector.check_data_folder(config['dataPath'])
+        data_path = datacollector.check_data_folder(config["dataPath"])
     except KeyError as err:
-        handle_error(config, f'[-] no config parameter: {err}')
+        handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
     except PermissionError as err:
-        handle_error(config, f'[-] creation data folder failed: {err}')
-    logger.info(f'[*] data_path: {data_path}')
+        handle_error(
+            config, f"[-] creation data folder failed: {err}", exit_on_error=True
+        )
     return data_path
 
 
 def get_device_parameter(config):
     parameter = None
     try:
-        parameter = gruenbeck.Parameter(config['parameterFile'])
+        parameter = gruenbeck.Parameter(config["parameterFile"])
     except KeyError as err:
-        handle_error(config, f'[-] no config parameter: {err}')
+        handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
     except FileNotFoundError as err:
-        handle_error(config, f'{err}')
-    logger.info(f'[*] parameter: {parameter.parameters}')
+        handle_error(config, f"{err}", exit_on_error=True)
     return parameter
 
 
-def get_device_data(config, parameter):
+def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
-    try:
-        result = gruenbeck.get_data_from_mux_http(
-            config['softWaterSystem']['host'],
-            parameter.get_parameter_by_note('Wasserverbrauch')
-        )
-    except KeyError as err:
-        handle_error(config, f'[-] no config parameter: {err}')
-    except ValueError as err:
-        handle_error(config, f'[-] failed to parse xml: {err}')
+    attempts = 0
+    last_error = None
+
+    while attempts <= max_retries:
+        try:
+            if attempts > 0:
+                logger.info(
+                    f"[*] Retry attempt {attempts}/{max_retries} for API request"
+                )
+
+            result = gruenbeck.get_data_from_mux_http(
+                config["softWaterSystem"]["host"],
+                parameter.get_parameter_by_note("Wasserverbrauch"),
+            )
+
+            # If we got here, the request was successful
+            if attempts > 0:
+                logger.info(
+                    f"[*] Successfully retrieved data after {attempts} retry attempts"
+                )
+            return result
+
+        except KeyError as err:
+            # Configuration errors should not be retried
+            handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
+
+        except ValueError as err:
+            # XML parsing errors
+            last_error = err
+            logger.warning(
+                f"[-] failed to parse xml: {err}. Attempt {attempts+1}/{max_retries+1}"
+            )
+
+        except requests.exceptions.RequestException as err:
+            # Network-related errors
+            last_error = err
+            logger.warning(
+                f"[-] request failed: {err}. Attempt {attempts+1}/{max_retries+1}"
+            )
+
+        except Exception as err:
+            # Any other unexpected errors
+            last_error = err
+            logger.warning(
+                f"[-] unexpected error: {err}. Attempt {attempts+1}/{max_retries+1}"
+            )
+
+        attempts += 1
+
+        # If we've reached max retries, handle the error
+        if attempts > max_retries:
+            error_msg = f"[-] failed to get device data after {max_retries+1} attempts: {last_error}"
+            handle_error(config, error_msg, exit_on_error=True)
+
+        # Wait before retrying
+
+        time.sleep(retry_delay)
+
     return result
 
 
-def handle_error(config, error_text: str) -> None:
+def handle_error(config, error_text: str, exit_on_error=True) -> None:
     logger.error(error_text)
-    datacollector.send_mail_text(config, 'gruenbeck data collector failure', error_text)
-    sys.exit(1)
+
+    # Try to send an email notification about the error
+    try:
+        datacollector.send_mail_text(
+            config, "gruenbeck data collector failure", error_text
+        )
+        logger.info("[*] Error notification email sent")
+    except Exception as mail_error:
+        logger.error(f"[-] Failed to send error notification email: {mail_error}")
+
+    # Exit the program if requested
+    if exit_on_error:
+        logger.info("[*] Exiting program due to error")
+        sys.exit(1)
+    else:
+        logger.warning("[!] Continuing execution despite error")
 
 
 def add_timestamp_as_key_device_data(device_data):
     # get current timestamp to be able to calculate 14 days backward
     now = datetime.datetime.now()
     # replace parameter code with dates for last 14 days backward
-    device_data = {now - datetime.timedelta(days=idx): device_data[param] for idx, param in enumerate(device_data)}
+    device_data = {
+        now - datetime.timedelta(days=idx): device_data[param]
+        for idx, param in enumerate(device_data)
+    }
     return device_data
 
 
@@ -130,14 +218,11 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     # build data structure to write
     write_list = []
     for item in sorted(data):
-        write_list.append({
-            fieldnames['date']: item,
-            fieldnames['value']: data[item]
-        })
+        write_list.append({fieldnames["date"]: item, fieldnames["value"]: data[item]})
 
     # write file
-    logger.info(f'[*] data to write: {data}')
-    with file_object.open(mode='w') as csv_out_file:
+    logger.info(f"[*] data to write: {data}")
+    with file_object.open(mode="w") as csv_out_file:
         writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(write_list)
@@ -145,37 +230,44 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
 
 def get_mail(config, data_path):
     try:
-        datacollector.send_mail(config['mail'], data_path)
-        logger.info('[*] mail send')
+        datacollector.send_mail(config["mail"], data_path)
+        logger.info("[*] mail sent successfully")
+        return True
     except KeyError as error:
-        logger.error(f'[-] no mail configured: {error}')
-        sys.exit(1)
+        logger.error(f"[-] no mail configured: {error}")
+        # Continue execution instead of exiting
+        return False
     except ValueError as error:
-        logger.error(f'[-] wrong configuration: {error}')
-        sys.exit(1)
+        logger.error(f"[-] mail sending failed: {error}")
+        # Continue execution instead of exiting
+        return False
+    except Exception as error:
+        logger.error(f"[-] unexpected error during mail sending: {error}")
+        # Continue execution instead of exiting
+        return False
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
 
     # parse commandline arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--config-file', '-c',
-        help='set config file',
+        "--config-file",
+        "-c",
+        help="set config file",
         required=False,
-        default='./src/config.json'
+        default="./src/config.json",
     )
     parser.add_argument(
-        '--log-console', '-l',
-        help='activate console logging',
-        action='store_true'
+        "--log-console", "-l", help="activate console logging", action="store_true"
     )
     parser.add_argument(
-        '--log-error', '-e',
-        help='error logging to file',
+        "--log-error",
+        "-e",
+        help="error logging to file",
         required=False,
-        default='./log/gruenbeck_error.log'
+        default="./log/gruenbeck_error.log",
     )
     args = parser.parse_args()
 
@@ -191,9 +283,7 @@ if __name__ == '__main__':
         logger.addHandler(sh)
 
     log_rotate_file = logging.handlers.RotatingFileHandler(
-        f'{args.log_error}',
-        maxBytes=8000000,
-        backupCount=5
+        f"{args.log_error}", maxBytes=8000000, backupCount=5
     )
     log_rotate_file.setLevel(logging.ERROR)
     log_rotate_file.setFormatter(formatter)
