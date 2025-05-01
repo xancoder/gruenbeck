@@ -1,0 +1,14 @@
+[Unit]
+Description=Gruenbeck Water Consumption Data Collector
+After=network.target
+
+[Service]
+Type=oneshot
+User=resux
+WorkingDirectory=/home/resux/PycharmProjects/gruenbeck
+ExecStart=/home/resux/PycharmProjects/gruenbeck/venv/bin/python3 /home/resux/PycharmProjects/gruenbeck/src/data-collector.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
