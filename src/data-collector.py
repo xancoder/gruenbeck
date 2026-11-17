@@ -4,7 +4,9 @@
 import csv
 import datetime
 import logging.handlers
+import os
 import pathlib
+import shutil
 import sys
 import time
 import typing
@@ -56,7 +58,7 @@ def main(config_file):
             f"{data_path}/{config['dataFile']['prefix']}_{year}.csv"
         )
         if file_obj.exists():
-            with file_obj.open(mode="r") as csv_file:
+            with file_obj.open(mode="r", newline="", encoding="utf-8") as csv_file:
                 csv_reader = csv.DictReader(csv_file)
                 for row in csv_reader:
                     tmp_date = row[config["dataFile"]["fieldnames"]["date"]]
@@ -233,12 +235,23 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     for item in sorted(data):
         write_list.append({fieldnames["date"]: item, fieldnames["value"]: data[item]})
 
-    # write file
+    # write into a temporary file next to the target and replace the target
+    # afterwards, so an interruption never leaves a truncated data file
     logger.info(f"[*] data to write: {data}")
-    with file_object.open(mode="w") as csv_out_file:
-        writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(write_list)
+    tmp_file = file_object.with_name(f".{file_object.name}.tmp")
+    try:
+        with tmp_file.open(mode="w", newline="", encoding="utf-8") as csv_out_file:
+            writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(write_list)
+            csv_out_file.flush()
+            os.fsync(csv_out_file.fileno())
+        if file_object.exists():
+            shutil.copymode(file_object, tmp_file)
+        os.replace(tmp_file, file_object)
+    except BaseException:
+        tmp_file.unlink(missing_ok=True)
+        raise
 
 
 def get_mail(config, data_path):
