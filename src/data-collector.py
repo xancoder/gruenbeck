@@ -7,6 +7,7 @@ import logging.handlers
 import pathlib
 import sys
 import time
+import typing
 
 import requests
 
@@ -95,11 +96,9 @@ def get_data_folder(config):
     try:
         data_path = datacollector.check_data_folder(config["dataPath"])
     except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
+        handle_error(config, f"[-] no config parameter: {err}")
     except PermissionError as err:
-        handle_error(
-            config, f"[-] creation data folder failed: {err}", exit_on_error=True
-        )
+        handle_error(config, f"[-] creation data folder failed: {err}")
     return data_path
 
 
@@ -108,9 +107,9 @@ def get_device_parameter(config):
     try:
         parameter = gruenbeck.Parameter(config["parameterFile"])
     except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
+        handle_error(config, f"[-] no config parameter: {err}")
     except FileNotFoundError as err:
-        handle_error(config, f"{err}", exit_on_error=True)
+        handle_error(config, f"{err}")
     return parameter
 
 
@@ -140,7 +139,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
 
         except KeyError as err:
             # Configuration errors should not be retried
-            handle_error(config, f"[-] no config parameter: {err}", exit_on_error=True)
+            handle_error(config, f"[-] no config parameter: {err}")
 
         except ValueError as err:
             # XML parsing errors
@@ -168,7 +167,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
         # If we've reached max retries, handle the error
         if attempts > max_retries:
             error_msg = f"[-] failed to get device data after {max_retries+1} attempts: {last_error}"
-            handle_error(config, error_msg, exit_on_error=True)
+            handle_error(config, error_msg)
 
         # Wait before retrying
 
@@ -177,24 +176,20 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     return result
 
 
-def handle_error(config, error_text: str, exit_on_error=True) -> None:
+def handle_error(config, error_text: str) -> typing.NoReturn:
     logger.error(error_text)
 
     # Try to send an email notification about the error
     try:
         datacollector.send_mail_text(
-            config, "gruenbeck data collector failure", error_text
+            config["mail"], "gruenbeck data collector failure", error_text
         )
         logger.info("[*] Error notification email sent")
     except Exception as mail_error:
         logger.error(f"[-] Failed to send error notification email: {mail_error}")
 
-    # Exit the program if requested
-    if exit_on_error:
-        logger.info("[*] Exiting program due to error")
-        sys.exit(1)
-    else:
-        logger.warning("[!] Continuing execution despite error")
+    logger.info("[*] Exiting program due to error")
+    sys.exit(1)
 
 
 def add_timestamp_as_key_device_data(device_data):
