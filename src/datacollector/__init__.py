@@ -141,6 +141,54 @@ def send_mail_text(param: dict, subject: str, text: str) -> None:
         raise ValueError(f"Error preparing email: {error}")
 
 
+# Errors that may disappear on a later attempt (connection problems, timeouts)
+TRANSIENT_SMTP_ERRORS = (
+    smtplib.SMTPServerDisconnected,
+    smtplib.SMTPConnectError,
+    socket.timeout,
+    socket.gaierror,
+    ConnectionError,
+    TimeoutError,
+)
+
+# Errors that will not change by retrying (rejected mail, missing server feature)
+PERMANENT_SMTP_ERRORS = (
+    smtplib.SMTPSenderRefused,
+    smtplib.SMTPRecipientsRefused,
+    smtplib.SMTPDataError,
+    smtplib.SMTPHeloError,
+    smtplib.SMTPNotSupportedError,
+)
+
+
+def get_smtp_connection_settings(param: dict, smtp_port) -> tuple:
+    """
+    Determine port and connection security of the smtp server
+
+    The optional key "smtpSecurity" of the mail configuration is "ssl" (SMTP_SSL)
+    or "starttls" (SMTP + STARTTLS). Without it, port 465 means "ssl", every
+    other port means "starttls".
+
+    :param param: Dictionary containing mail configuration
+    :param smtp_port: port as int or numeric string
+    :return: tuple of port (int) and security ("ssl" or "starttls")
+    :raises ValueError: If port or smtpSecurity is invalid
+    """
+    try:
+        port = int(smtp_port)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid smtpPort: {smtp_port!r}")
+
+    security = param.get("smtpSecurity")
+    if security is None:
+        return port, "ssl" if port == 465 else "starttls"
+    if isinstance(security, str) and security.strip().lower() in ("ssl", "starttls"):
+        return port, security.strip().lower()
+    raise ValueError(
+        f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')"
+    )
+
+
 def mail_sending(
     message,
     param,
@@ -151,15 +199,22 @@ def mail_sending(
     max_retries=3,
     retry_delay=5,
 ):
-    retries = 0
-    last_error = None
+    port, security = get_smtp_connection_settings(param, smtp_port)
 
-    while retries <= max_retries:
+    attempts = 0
+    while True:
+        attempts += 1
         try:
             context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(
-                smtp_server, smtp_port, context=context, timeout=30
-            ) as server:
+            if security == "ssl":
+                server = smtplib.SMTP_SSL(
+                    smtp_server, port, context=context, timeout=30
+                )
+            else:
+                server = smtplib.SMTP(smtp_server, port, timeout=30)
+            with server:
+                if security == "starttls":
+                    server.starttls(context=context)
                 server.login(sender_email, sender_password)
                 server.sendmail(sender_email, param["recipients"], message.as_string())
                 server.quit()
@@ -167,30 +222,15 @@ def mail_sending(
         except smtplib.SMTPAuthenticationError as error:
             # Authentication errors are not retryable
             raise ValueError(f"Authentication failed: {error}")
-        except (
-            smtplib.SMTPServerDisconnected,
-            smtplib.SMTPSenderRefused,
-            smtplib.SMTPRecipientsRefused,
-            smtplib.SMTPDataError,
-            smtplib.SMTPConnectError,
-            smtplib.SMTPHeloError,
-            smtplib.SMTPNotSupportedError,
-            socket.timeout,
-            socket.gaierror,
-            ConnectionRefusedError,
-            ConnectionResetError,
-            TimeoutError,
-        ) as error:
-            # These are potentially transient errors, so we can retry
-            last_error = error
-            retries += 1
-            if retries <= max_retries:
-                time.sleep(retry_delay)  # Wait before retrying
-            else:
-                # Max retries reached, raise the error
+        except TRANSIENT_SMTP_ERRORS as error:
+            if attempts > max_retries:
                 raise ValueError(
-                    f"Failed to send email after {max_retries} attempts: {error}"
-                )
+                    f"Failed to send email after {attempts} attempts: {error}"
+                ) from error
+            time.sleep(retry_delay)  # Wait before retrying
+        except PERMANENT_SMTP_ERRORS as error:
+            # Permanent errors, retrying does not help
+            raise ValueError(f"Email rejected: {error}")
         except Exception as error:
             # Unexpected errors
             raise ValueError(f"Unexpected error while sending email: {error}")

@@ -21,6 +21,21 @@ bash init_venv.sh
 
 The configuration file `./src/config.json` should be modified to your own needs and settings.
 
+#### mail settings
+
+The section `mail` configures the SMTP server used for the data mail and the error notifications:
+
+| key | meaning |
+|-----|---------|
+| `smtpServer` | host name of the SMTP server |
+| `smtpPort` | port of the SMTP server (number; a string like `"587"` is still accepted) |
+| `smtpSecurity` | optional, `"ssl"` (implicit TLS, usually port 465) or `"starttls"` (usually port 587). If omitted, port 465 uses `ssl` and every other port uses `starttls` |
+| `senderEmail`, `senderPassword` | login and sender address |
+| `recipients` | list of recipient addresses |
+| `subject` | subject of the data mail |
+
+Temporary errors (connection lost, timeout, connection failed) are retried up to 3 times with a 5 seconds delay; permanent errors (wrong login, rejected sender or recipient) fail immediately.
+
 ### manually running
 
 ```shell script

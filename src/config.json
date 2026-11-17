@@ -14,7 +14,8 @@
     ],
     "senderEmail": "example@gmail.com",
     "senderPassword": "strongPassword",
-    "smtpPort": "587",
+    "smtpPort": 587,
+    "smtpSecurity": "starttls",
     "smtpServer": "smtp.gmail.com",
     "subject": "[data collector] - gruenbeck"
   },
