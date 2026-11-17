@@ -113,10 +113,27 @@ def get_device_parameter(config):
     return parameter
 
 
+def get_device_timeout(config):
+    try:
+        timeout = float(
+            config["softWaterSystem"].get("timeout", gruenbeck.DEFAULT_TIMEOUT)
+        )
+        if not timeout > 0:
+            raise ValueError("must be greater than 0")
+    except KeyError as err:
+        handle_error(config, f"[-] no config parameter: {err}")
+    except (TypeError, ValueError) as err:
+        handle_error(
+            config, f"[-] invalid config parameter softWaterSystem.timeout: {err}"
+        )
+    return timeout
+
+
 def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
     attempts = 0
     last_error = None
+    timeout = get_device_timeout(config)
 
     while attempts <= max_retries:
         try:
@@ -128,6 +145,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
             result = gruenbeck.get_data_from_mux_http(
                 config["softWaterSystem"]["host"],
                 parameter.get_parameter_by_note("Wasserverbrauch"),
+                timeout=timeout,
             )
 
             # If we got here, the request was successful
@@ -142,10 +160,10 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
             handle_error(config, f"[-] no config parameter: {err}")
 
         except ValueError as err:
-            # XML parsing errors
+            # invalid xml or response without values
             last_error = err
             logger.warning(
-                f"[-] failed to parse xml: {err}. Attempt {attempts+1}/{max_retries+1}"
+                f"[-] invalid device response: {err}. Attempt {attempts+1}/{max_retries+1}"
             )
 
         except requests.exceptions.RequestException as err:

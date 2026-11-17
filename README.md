@@ -36,6 +36,17 @@ The section `mail` configures the SMTP server used for the data mail and the err
 
 Temporary errors (connection lost, timeout, connection failed) are retried up to 3 times with a 5 seconds delay; permanent errors (wrong login, rejected sender or recipient) fail immediately.
 
+#### device settings
+
+The section `softWaterSystem` configures the connection to the soft water system:
+
+| key | meaning |
+|-----|---------|
+| `host` | host name (or IP address) of the soft water system |
+| `timeout` | optional, seconds to wait for the connection and for the response of the device (number greater than 0, default `30`) |
+
+If the device does not answer in time, answers with an HTTP error or returns no consumption values, the request is repeated up to 3 times with a 5 seconds delay. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1.
+
 ### manually running
 
 ```shell script
