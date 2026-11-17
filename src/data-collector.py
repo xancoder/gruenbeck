@@ -70,15 +70,15 @@ def main(config_file):
         write_data(file_obj, config["dataFile"]["fieldnames"], data_existing)
         data_processed = True
 
-    # Only attempt to send email if data was processed
-    if data_processed:
-        mail_result = get_mail(config, data_path)
-        if not mail_result:
-            logger.warning(
-                "[!] Data was collected successfully, but email sending failed"
-            )
-    else:
-        logger.warning("[!] No data was processed, skipping email sending")
+    # nothing stored is a failure, not a successful run
+    if not data_processed:
+        handle_error(config, "[-] no data was processed")
+
+    # the data is stored at this point; a failed mail still has to be visible
+    # as a failed run (exit code 1) for cron and systemd
+    if not get_mail(config, data_path):
+        logger.error("[-] data was collected and stored, but email sending failed")
+        sys.exit(1)
 
     logger.info("[*] Data collection completed")
 

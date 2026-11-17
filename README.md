@@ -47,6 +47,15 @@ The section `softWaterSystem` configures the connection to the soft water system
 
 If the device does not answer in time, answers with an HTTP error or returns no consumption values, the request is repeated up to 3 times with a 5 seconds delay. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1.
 
+#### exit codes
+
+| exit code | meaning |
+|-----------|---------|
+| `0` | data collected, stored and sent by mail |
+| `1` | any failure: configuration or data folder invalid, device not reachable or without values, error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
+
+Cron and systemd can therefore detect a failed run by its exit code.
+
 ### manually running
 
 ```shell script
