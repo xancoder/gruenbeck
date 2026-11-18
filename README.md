@@ -21,26 +21,91 @@ bash init_venv.sh
 
 The configuration file `./src/config.json` should be modified to your own needs and settings.
 
+#### mail settings
+
+The section `mail` configures the SMTP server used for the data mail and the error notifications:
+
+| key | meaning |
+|-----|---------|
+| `smtpServer` | host name of the SMTP server |
+| `smtpPort` | port of the SMTP server (number; a string like `"587"` is still accepted) |
+| `smtpSecurity` | optional, `"ssl"` (implicit TLS, usually port 465) or `"starttls"` (usually port 587). If omitted, port 465 uses `ssl` and every other port uses `starttls` |
+| `senderEmail`, `senderPassword` | login and sender address |
+| `recipients` | list of recipient addresses |
+| `subject` | subject of the data mail |
+
+Temporary errors (connection lost, timeout, connection failed) are retried up to 3 times with a 5 seconds delay; permanent errors (wrong login, rejected sender or recipient) fail immediately.
+
+#### device settings
+
+The section `softWaterSystem` configures the connection to the soft water system:
+
+| key | meaning |
+|-----|---------|
+| `host` | host name (or IP address) of the soft water system |
+| `timeout` | optional, seconds to wait for the connection and for the response of the device (number greater than 0, default `30`) |
+
+If the device does not answer in time, answers with an HTTP error or returns no consumption values, the request is repeated up to 3 times with a 5 seconds delay. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1.
+
+#### exit codes
+
+| exit code | meaning |
+|-----------|---------|
+| `0` | data collected, stored and sent by mail |
+| `1` | any failure: configuration or data folder invalid, device not reachable or without values, error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
+
+Cron and systemd can therefore detect a failed run by its exit code.
+
 ### manually running
 
 ```shell script
 ./venv/bin/python3 ./src/data-collector.py -l
 ```
 
-## crontab
+## Scheduling Options
 
-The Script should be added to a cron job due to store data automatically
+### Option 1: Systemd Service (Recommended)
+
+The script can be set up as a systemd service with a timer for better management, logging, and reliability.
+
+First, generate a customized service file for your environment:
+
+```shell script
+# Generate with default values (current user and directory)
+./setup_systemd.py
+
+# Or customize with your specific values
+./setup_systemd.py --user your_username --install-path /path/to/gruenbeck
+```
+
+Then install the service:
+
+```shell script
+# Install as a user service
+mkdir -p ~/.config/systemd/user/
+cp gruenbeck-collector.service ~/.config/systemd/user/
+cp gruenbeck-collector.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable gruenbeck-collector.timer
+systemctl --user start gruenbeck-collector.timer
+```
+
+For detailed setup instructions and system-wide installation options, see [SYSTEMD_SETUP.md](SYSTEMD_SETUP.md).
+
+### Option 2: Crontab (Legacy)
+
+Alternatively, the script can be added to a cron job to store data automatically:
 
 ```shell script
 crontab -e
 ```
 
-with the following line. Please 
+Add the following line:
 
 ```shell script
 0 16 * * MON cd /path/to/gruenbeck && ./venv/bin/python3 ./src/data-collector.py
 ```
 
-In this example the script starts every week on Monday 1600. The design decision on the weekly run is based on the 14-day memory of the soft water system. More frequent runs would cause more writes and less would leave less time in cause of failures.
+In this example, the script starts every week on Monday at 16:00. The design decision on the weekly run is based on the 14-day memory of the soft water system. More frequent runs would cause more writes and less would leave less time in cause of failures.
 
-NOTE: Imported is that the soft water system has write the measurement of the day before 1600. The default system start this process around 1200.  
+NOTE: It is important that the soft water system has written the measurement of the day before 16:00. The default system starts this process around 12:00.

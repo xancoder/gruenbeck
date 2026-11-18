@@ -1,0 +1,14 @@
+[Unit]
+Description=Gruenbeck Water Consumption Data Collector
+After=network.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{INSTALL_PATH}}
+ExecStart={{INSTALL_PATH}}/venv/bin/python3 {{INSTALL_PATH}}/src/data-collector.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

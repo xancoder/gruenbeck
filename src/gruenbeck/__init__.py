@@ -5,6 +5,9 @@ import xml.etree.ElementTree
 
 import requests
 
+# seconds to wait for connect and for the response of the device
+DEFAULT_TIMEOUT = 30
+
 
 class Parameter:
     count = 0
@@ -51,7 +54,16 @@ class Parameter:
         return self.parameters[name]
 
 
-def get_data_from_mux_http(host, parameters):
+def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT):
+    """
+    request values from the web server of the device
+    :param host: host name (optionally with port) of the device
+    :param parameters: parameter codes to request
+    :param timeout: seconds to wait for connect and for the response
+    :return: dictionary of parameter code and value
+    :raises requests.exceptions.RequestException: no connection, timeout or HTTP error
+    :raises ValueError: response is not valid xml or contains no values
+    """
     result_data = {}
 
     url = f'http://{host}/mux_http'
@@ -63,7 +75,8 @@ def get_data_from_mux_http(host, parameters):
 
     headers = {'Content-Type': 'application/x-www-form-urlencoded'}
 
-    response_data = requests.post(url, data=payload, headers=headers)
+    response_data = requests.post(url, data=payload, headers=headers, timeout=timeout)
+    response_data.raise_for_status()
 
     try:
         root = xml.etree.ElementTree.fromstring(response_data.text)
@@ -76,6 +89,9 @@ def get_data_from_mux_http(host, parameters):
         result_data.update({
             child.tag: child.text
         })
+
+    if not result_data:
+        raise ValueError('[-] device response contains no values')
 
     return result_data
 

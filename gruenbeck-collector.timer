@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Gruenbeck Water Consumption Data Collector weekly
+Requires=gruenbeck-collector.service
+
+[Timer]
+OnCalendar=Mon *-*-* 16:00:00
+Persistent=true
+Unit=gruenbeck-collector.service
+
+[Install]
+WantedBy=timers.target
