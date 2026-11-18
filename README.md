@@ -87,6 +87,14 @@ uv run python src/data-collector.py -l
 
 Scheduled runs call the interpreter of the virtual environment directly (`./.venv/bin/python3 ./src/data-collector.py`), so uv is not needed at run time.
 
+### analysis
+
+`src/data-analyse.py` prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
+
+```shell script
+uv run --extra analysis python src/data-analyse.py
+```
+
 ### tests
 
 ```shell script
