@@ -12,14 +12,37 @@ git clone https://github.com/xancoder/gruenbeck.git
 
 ### install dependencies into a virtual environment
 
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock`:
+
 ```shell script
 cd gruenbeck
-bash init_venv.sh
+uv sync --no-dev           # data collector only (production)
+uv sync                    # plus the test tools (pytest, pytest-cov)
+uv sync --extra analysis   # plus pandas and matplotlib for src/data-analyse.py
 ```
 
-### modify the config.json
+### create the config.json
 
-The configuration file `./src/config.json` should be modified to your own needs and settings.
+The configuration file `./src/config.json` is not versioned because it contains the SMTP password. Create it from the example and modify it to your own needs and settings:
+
+```shell script
+cp src/config.example.json src/config.json
+chmod 600 src/config.json
+```
+
+The file is read only by the service user, so restrict its permissions (`600`) and let that user own it.
+
+#### existing installation with a versioned config.json
+
+Older versions of the repository contained `src/config.json`. It is no longer versioned, so a `git pull` that brings this change removes the file (or aborts if the file was modified locally). Save the file before the next pull and put it back afterwards:
+
+```shell script
+cp src/config.json ~/gruenbeck-config.json.bak
+git checkout -- src/config.json
+git pull
+cp ~/gruenbeck-config.json.bak src/config.json
+chmod 600 src/config.json
+```
 
 #### mail settings
 
@@ -59,8 +82,26 @@ Cron and systemd can therefore detect a failed run by its exit code.
 ### manually running
 
 ```shell script
-./venv/bin/python3 ./src/data-collector.py -l
+uv run python src/data-collector.py -l
 ```
+
+Scheduled runs call the interpreter of the virtual environment directly (`./.venv/bin/python3 ./src/data-collector.py`), so uv is not needed at run time.
+
+### analysis
+
+`src/data-analyse.py` prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
+
+```shell script
+uv run --extra analysis python src/data-analyse.py
+```
+
+### tests
+
+```shell script
+uv run pytest
+```
+
+The tests run from any directory and write nothing into the repository.
 
 ## Scheduling
 

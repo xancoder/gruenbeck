@@ -23,7 +23,7 @@ def test_generate_units_replaces_placeholders(tmp_path):
     assert "User=collector\n" in service
     assert "WorkingDirectory=/opt/gruenbeck\n" in service
     assert (
-        "ExecStart=/opt/gruenbeck/venv/bin/python3 /opt/gruenbeck/src/data-collector.py\n"
+        "ExecStart=/opt/gruenbeck/.venv/bin/python3 /opt/gruenbeck/src/data-collector.py\n"
         in service
     )
     assert "{{" not in service

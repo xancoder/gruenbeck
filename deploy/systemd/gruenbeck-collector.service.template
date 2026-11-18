@@ -7,4 +7,4 @@ After=network-online.target
 Type=oneshot
 User={{USER}}
 WorkingDirectory={{INSTALL_PATH}}
-ExecStart={{INSTALL_PATH}}/venv/bin/python3 {{INSTALL_PATH}}/src/data-collector.py
+ExecStart={{INSTALL_PATH}}/.venv/bin/python3 {{INSTALL_PATH}}/src/data-collector.py
