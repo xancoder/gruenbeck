@@ -1,0 +1,23 @@
+# collected data and logs (log/README.md stays versioned)
+/data/
+/log/*
+!/log/README.md
+
+# local configuration with credentials: copy src/config.example.json
+/src/config.json
+
+# python
+__pycache__/
+*.py[cod]
+
+# virtual environments
+.venv/
+venv/
+
+# tests and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ide
+.idea/

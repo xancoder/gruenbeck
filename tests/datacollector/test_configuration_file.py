@@ -2,7 +2,7 @@ import pytest
 
 import datacollector
 
-CONFIGURATION_FILE = '../src/config.json'
+CONFIGURATION_FILE = '../src/config.example.json'
 
 
 def test_check_configuration_file_not_exists():

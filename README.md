@@ -17,9 +17,28 @@ cd gruenbeck
 bash init_venv.sh
 ```
 
-### modify the config.json
+### create the config.json
 
-The configuration file `./src/config.json` should be modified to your own needs and settings.
+The configuration file `./src/config.json` is not versioned because it contains the SMTP password. Create it from the example and modify it to your own needs and settings:
+
+```shell script
+cp src/config.example.json src/config.json
+chmod 600 src/config.json
+```
+
+The file is read only by the service user, so restrict its permissions (`600`) and let that user own it.
+
+#### existing installation with a versioned config.json
+
+Older versions of the repository contained `src/config.json`. It is no longer versioned, so a `git pull` that brings this change removes the file (or aborts if the file was modified locally). Save the file before the next pull and put it back afterwards:
+
+```shell script
+cp src/config.json ~/gruenbeck-config.json.bak
+git checkout -- src/config.json
+git pull
+cp ~/gruenbeck-config.json.bak src/config.json
+chmod 600 src/config.json
+```
 
 #### mail settings
 

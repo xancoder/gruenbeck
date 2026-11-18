@@ -1,0 +1,26 @@
+{
+  "dataFile": {
+    "datePattern": "%Y-%m-%d",
+    "fieldnames": {
+      "date": "date",
+      "value": "value"
+    },
+    "prefix": "gruenbeck_water_consumption"
+  },
+  "dataPath": "./data",
+  "mail": {
+    "recipients": [
+      "receiver@example.com"
+    ],
+    "senderEmail": "sender@example.com",
+    "senderPassword": "change-me",
+    "smtpPort": 587,
+    "smtpSecurity": "starttls",
+    "smtpServer": "smtp.example.com",
+    "subject": "[data collector] - gruenbeck"
+  },
+  "parameterFile": "./assets/Gruenbeck_Webserver_Dokumentation.csv",
+  "softWaterSystem": {
+    "host": "softliq-sc.example.lan"
+  }
+}
