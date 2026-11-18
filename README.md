@@ -12,9 +12,13 @@ git clone https://github.com/xancoder/gruenbeck.git
 
 ### install dependencies into a virtual environment
 
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock`:
+
 ```shell script
 cd gruenbeck
-bash init_venv.sh
+uv sync --no-dev           # data collector only (production)
+uv sync                    # plus the test tools (pytest, pytest-cov)
+uv sync --extra analysis   # plus pandas and matplotlib for src/data-analyse.py
 ```
 
 ### create the config.json
@@ -78,7 +82,16 @@ Cron and systemd can therefore detect a failed run by its exit code.
 ### manually running
 
 ```shell script
-./venv/bin/python3 ./src/data-collector.py -l
+uv run python src/data-collector.py -l
+```
+
+Scheduled runs call the interpreter of the virtual environment directly (`./.venv/bin/python3 ./src/data-collector.py`), so uv is not needed at run time.
+
+### tests
+
+```shell script
+cd tests
+uv run pytest
 ```
 
 ## Scheduling

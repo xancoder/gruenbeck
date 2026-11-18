@@ -18,8 +18,9 @@ The collector reports a failed run by its exit code (see the exit codes in the
 ## Prerequisites
 
 - The repository is cloned on the machine that runs the collector.
-- The virtual environment exists in `./venv` (`bash init_venv.sh`); the unit calls
-  `venv/bin/python3`.
+- The virtual environment exists in `./.venv` (`uv sync --no-dev`, see the
+  [main README](../../README.md)); the unit calls `.venv/bin/python3`, so uv is not needed
+  at run time. Create it as the user that runs the service, or make it readable for that user.
 - `src/config.json` is configured. The collector reads it, writes `data/` and `log/` relative
   to the repository, so the user running the service needs read access to the repository and
   write access to `data/` and `log/`. The file contains the SMTP password: let the service user own it and
@@ -109,7 +110,7 @@ crontab -e
 ```
 
 ```text
-0 16 * * MON cd /path/to/gruenbeck && ./venv/bin/python3 ./src/data-collector.py
+0 16 * * MON cd /path/to/gruenbeck && ./.venv/bin/python3 ./src/data-collector.py
 ```
 
 Cron does not make up a run that was missed while the machine was off.

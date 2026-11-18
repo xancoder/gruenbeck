@@ -1,0 +1,27 @@
+[project]
+name = "gruenbeck"
+version = "0.1.0"
+description = "Collects water consumption data from a Grünbeck soft water system and stores it as CSV"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.32",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "pandas>=2.2",
+    "matplotlib>=3.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-cov>=6",
+]
+
+[tool.pytest]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["--import-mode=importlib"]
+strict = true
