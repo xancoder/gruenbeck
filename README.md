@@ -90,9 +90,10 @@ Scheduled runs call the interpreter of the virtual environment directly (`./.ven
 ### tests
 
 ```shell script
-cd tests
 uv run pytest
 ```
+
+The tests run from any directory and write nothing into the repository.
 
 ## Scheduling
 

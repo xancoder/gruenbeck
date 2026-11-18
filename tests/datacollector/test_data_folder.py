@@ -2,17 +2,15 @@ import pathlib
 
 import datacollector
 
-DATA_FOLDER = '../data'
 
-
-def test_check_data_folder_not_exists():
-    data_folder_nonsense = './folderName'
-    data_path = datacollector.check_data_folder(data_folder_nonsense)
+def test_check_data_folder_not_exists(tmp_path):
+    data_folder = tmp_path / 'folderName'
+    data_path = datacollector.check_data_folder(str(data_folder))
     assert data_path.exists()
-    # clean up
-    data_path.rmdir()
+    assert data_path == data_folder
 
 
-def test_check_data_folder_exists():
-    data_path = datacollector.check_data_folder(DATA_FOLDER)
+def test_check_data_folder_exists(tmp_path):
+    data_path = datacollector.check_data_folder(str(tmp_path))
     assert isinstance(data_path, pathlib.Path)
+    assert data_path.exists()
