@@ -112,3 +112,31 @@ The script should run once a week. Three ways are described in [deploy/systemd/R
 - **cron**: for machines without systemd; when switching to systemd, remove the cron entry, otherwise the data is collected twice
 
 NOTE: It is important that the soft water system has written the measurement of the day before the run. The default system starts this process around 12:00. The weekly run (Monday 16:00) is based on the 14-day memory of the soft water system.
+
+## One-time migration: values stored one day late (2026)
+
+Up to this version the data collector stored every consumption value one day late: the value of `D_Y_2_1` ("yesterday") ended up under today's date. `scripts/fix_date_offset.py` corrects the existing yearly files `<prefix>_<year>.csv` once. Every value moves one day back (the value of 1 January moves into the file of the previous year, which is created if needed), and `--set DATE=VALUE` (litres, repeatable) fills in the days the old data collector did not store. Values are copied unchanged.
+
+- Without `--apply` the script only does a dry run: it lists every change per file and writes nothing.
+- It aborts without changes if the youngest stored date is 2026-11-19 or later. The device clock was set on that day, so the old data collector must not have run since then.
+- `--set` on a date that already has a different value after the move is an error. The same value is accepted, so the values still in the device memory can double-check the move. Days without a value up to 2026-11-19 are reported. `--set` after 2026-11-19 is an error, because from 2026-11-20 on the data collector stores the values.
+- `--apply` first copies every changed file to `<file>.<timestamp>.bak` in the data folder, then writes the files atomically and creates the marker file `fix_date_offset.done.json` there. While the marker exists, the script refuses to run again.
+
+The script needs only the Python standard library (Python 3.11 or newer, no uv). It reads the data folder, prefix, column names and date pattern from `--config-file` / `-c` (default `./src/config.json`), so run it from the repository root.
+
+Order on the machine running the data collector:
+
+1. Pause the old scheduled data collector (cron entry or timer). It must not run after the device clock was set on 2026-11-19; otherwise the migration aborts.
+2. Note the values of the missing days from the 14-day memory of the device (`D_Y_2_n` is the value of n days ago). Setting the clock caused an extra rollover, so 2026-11-19 takes two places in the memory. The first part is `D_Y_2_1` right after the clock change; the second part is `D_Y_2_1` after the next rollover, shortly after midnight (`scripts/log_device_rollover.py` logs it). Pass the sum of both parts as the value for 2026-11-19.
+3. Prepare a fresh clone in a new directory (`uv sync --no-dev`, copy `src/config.json` from the old checkout). Do not schedule the data collector there yet.
+4. Update the clone to a version that contains this script and the corrected data collector. Copy `data/` from the old checkout into the clone, run the dry run, check its output, and run the script again with `--apply`. Then set `dataFile.firstDate` to `2026-11-20` in `src/config.json`.
+5. Run the data collector once by hand. Then set up the schedule (systemd timer, see [deploy/systemd/README.md](deploy/systemd/README.md), or cron with the new path) and delete the old cron entry. The first run has to take place by 2026-12-04 at the latest; after that, 2026-11-20 is no longer in the 14-day memory.
+
+Dry run and migration, from the root of the new clone (replace `VALUE` with the litres of each day):
+
+```shell script
+python3 scripts/fix_date_offset.py --set 2026-11-16=VALUE --set 2026-11-17=VALUE --set 2026-11-18=VALUE --set 2026-11-19=VALUE
+python3 scripts/fix_date_offset.py --set 2026-11-16=VALUE --set 2026-11-17=VALUE --set 2026-11-18=VALUE --set 2026-11-19=VALUE --apply
+```
+
+The backups and the marker stay in the data folder. They are not attached to the data mail, and the analysis ignores them.
