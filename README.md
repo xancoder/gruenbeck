@@ -70,6 +70,14 @@ The section `softWaterSystem` configures the connection to the soft water system
 
 If the device does not answer in time, answers with an HTTP error or returns no consumption values, the request is repeated up to 3 times with a 5 seconds delay. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1.
 
+#### data file settings
+
+The section `dataFile` sets the name and format of the yearly files `<prefix>_<year>.csv` in `dataPath`. Each run stores the 14-day memory of the device: the value of `D_Y_2_n` (consumption of n days ago) goes under the date of today minus n days, independent of the order of the device response.
+
+| key | meaning |
+|-----|---------|
+| `firstDate` | optional, date `YYYY-MM-DD`, e.g. `"2026-11-20"`. Values of earlier days are not written (the log names their number), values already stored stay unchanged. Without the key every value is written. Use it while the device memory still holds values that would be stored under a wrong date, e.g. after setting the device clock (see the one-time migration below). The key may stay afterwards. If all values of a run are before `firstDate`, the run fails |
+
 #### exit codes
 
 | exit code | meaning |
@@ -129,7 +137,7 @@ Order on the machine running the data collector:
 1. Pause the old scheduled data collector (cron entry or timer). It must not run after the device clock was set on 2026-11-19; otherwise the migration aborts.
 2. Note the values of the missing days from the 14-day memory of the device (`D_Y_2_n` is the value of n days ago). Setting the clock caused an extra rollover, so 2026-11-19 takes two places in the memory. The first part is `D_Y_2_1` right after the clock change; the second part is `D_Y_2_1` after the next rollover, shortly after midnight (`scripts/log_device_rollover.py` logs it). Pass the sum of both parts as the value for 2026-11-19.
 3. Prepare a fresh clone in a new directory (`uv sync --no-dev`, copy `src/config.json` from the old checkout). Do not schedule the data collector there yet.
-4. Update the clone to a version that contains this script and the corrected data collector. Copy `data/` from the old checkout into the clone, run the dry run, check its output, and run the script again with `--apply`. Then set `dataFile.firstDate` to `2026-11-20` in `src/config.json`.
+4. Update the clone to a version that contains this script and the corrected data collector. Copy `data/` from the old checkout into the clone, run the dry run, check its output, and run the script again with `--apply`. Then set `dataFile.firstDate` to `2026-11-20` in `src/config.json` (see [data file settings](#data-file-settings)). Until about 2026-12-04 the double place of 2026-11-19 shifts the older places of the memory by one day; with `firstDate` they are not written, and the values from the migration stay.
 5. Run the data collector once by hand. Then set up the schedule (systemd timer, see [deploy/systemd/README.md](deploy/systemd/README.md), or cron with the new path) and delete the old cron entry. The first run has to take place by 2026-12-04 at the latest; after that, 2026-11-20 is no longer in the 14-day memory.
 
 Dry run and migration, from the root of the new clone (replace `VALUE` with the litres of each day):

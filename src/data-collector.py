@@ -6,6 +6,7 @@ import datetime
 import logging.handlers
 import os
 import pathlib
+import re
 import shutil
 import sys
 import time
@@ -25,15 +26,24 @@ formatter = logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - %(message)s", "%Y-%m-%d %H:%M:%S"
 )
 
+# D_Y_2_<n> is the water consumption of n days ago (D_Y_2_1 = yesterday)
+DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
+FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
 
 def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
+    first_date = get_first_date(config)
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
-    device_data = add_timestamp_as_key_device_data(device_data)
+    try:
+        device_data = add_timestamp_as_key_device_data(device_data)
+    except ValueError as err:
+        handle_error(config, f"{err}")
+    device_data = filter_first_date(config, device_data, first_date)
 
     # Track if any data was processed
     data_processed = False
@@ -102,6 +112,29 @@ def get_data_folder(config):
     except PermissionError as err:
         handle_error(config, f"[-] creation data folder failed: {err}")
     return data_path
+
+
+def get_first_date(config):
+    """
+    optional dataFile.firstDate (YYYY-MM-DD): values of earlier days are not written
+    :return: datetime.date, or None if the key is missing
+    """
+    try:
+        data_file = config["dataFile"]
+    except KeyError as err:
+        handle_error(config, f"[-] no config parameter: {err}")
+    if "firstDate" not in data_file:
+        return None
+    first_date = data_file["firstDate"]
+    try:
+        if not isinstance(first_date, str) or not FIRST_DATE_FORMAT.fullmatch(first_date):
+            raise ValueError("expected a date YYYY-MM-DD")
+        return datetime.date.fromisoformat(first_date)
+    except ValueError as err:
+        handle_error(
+            config,
+            f"[-] invalid config parameter dataFile.firstDate {first_date!r}: {err}",
+        )
 
 
 def get_device_parameter(config):
@@ -212,15 +245,54 @@ def handle_error(config, error_text: str) -> typing.NoReturn:
     sys.exit(1)
 
 
-def add_timestamp_as_key_device_data(device_data):
-    # get current timestamp to be able to calculate 14 days backward
-    now = datetime.datetime.now()
-    # replace parameter code with dates for last 14 days backward
-    device_data = {
-        now - datetime.timedelta(days=idx): device_data[param]
-        for idx, param in enumerate(device_data)
-    }
-    return device_data
+def add_timestamp_as_key_device_data(device_data, today=None):
+    """
+    replace the parameter codes with the day each value belongs to
+
+    D_Y_2_<n> is the consumption of n days ago, so its value is stored under
+    today - n days (a calendar date without time). The day comes from the
+    parameter name, so the order of the device response does not matter.
+    :param device_data: dictionary of parameter code and value
+    :param today: date of the run (default: the current local date)
+    :return: dictionary of datetime.date and value
+    :raises ValueError: a parameter code is not D_Y_2_<n>
+    """
+    today = today or datetime.date.today()
+    result = {}
+    for param, value in device_data.items():
+        match = DAY_PARAMETER.fullmatch(param)
+        if not match:
+            raise ValueError(
+                f"[-] unknown consumption parameter {param!r}:"
+                " expected D_Y_2_<n> (consumption of n days ago)"
+            )
+        result[today - datetime.timedelta(days=int(match.group(1)))] = value
+    return result
+
+
+def filter_first_date(config, device_data, first_date):
+    """
+    drop the values of days before dataFile.firstDate
+    :param device_data: dictionary of datetime.date and value
+    :param first_date: datetime.date, or None for no limit
+    :return: dictionary of the remaining datetime.date and value
+    """
+    if first_date is None:
+        return device_data
+    result = {day: value for day, value in device_data.items() if day >= first_date}
+    skipped = len(device_data) - len(result)
+    if skipped:
+        logger.info(
+            f"[*] {skipped} values before dataFile.firstDate {first_date}"
+            " are not written"
+        )
+    if device_data and not result:
+        handle_error(
+            config,
+            f"[-] no data was processed: all {skipped} values are before"
+            f" dataFile.firstDate {first_date}",
+        )
+    return result
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
