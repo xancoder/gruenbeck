@@ -16,8 +16,11 @@ stores anything, the collector reads the device clock (`D_C_4_2`): if the device
 the local day yet (or already on the next one) or its clock is before 00:30, the run stores
 nothing and fails with an error mail. This also covers a missed run that `Persistent=true`
 makes up in that time; the next weekly run collects the days again. A device clock that is
-more than 15 minutes off is logged as a warning. It is unknown whether the device switches
-to daylight saving time by itself, so check the clock after each change.
+off by more than 15 minutes but at most 2 hours is logged as a warning in
+`log/gruenbeck_error.log`; more than 2 hours is an error, because the device clock has no
+date and a clock that is late by many hours cannot be told from one that is early. It is
+unknown whether the device switches to daylight saving time by itself, so check the clock
+after each change.
 
 The collector reports a failed run by its exit code (see the exit codes in the
 [main README](../../README.md)), which systemd shows as failed unit state.
@@ -108,7 +111,9 @@ The `--output-dir` must be outside of the repository. Use `systemctl --user` and
 | Stop the schedule | `sudo systemctl disable --now gruenbeck-collector.timer` |
 | Remove the units | `sudo rm /etc/systemd/system/gruenbeck-collector.service /etc/systemd/system/gruenbeck-collector.timer && sudo systemctl daemon-reload` |
 
-The collector also writes errors to `log/gruenbeck_error.log` (relative to the repository).
+The collector also writes warnings and errors to `log/gruenbeck_error.log` (relative to the
+repository). The unit starts it without `-l`, so its log messages are in that file, not in
+the journal.
 
 ## Cron (alternative)
 

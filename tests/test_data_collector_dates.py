@@ -363,9 +363,10 @@ def test_run_with_device_past_its_rollover_is_stored_without_warning(
     [
         ("16:00", "15:40", "-0:20"),
         ("16:00", "15:44", "-0:16"),
-        ("12:00", "02:15", "-9:45"),  # the device clock before 2026-11-19
         ("06:00", "05:00", "-1:00"),  # no switch to daylight saving time
         ("16:00", "17:00", "+1:00"),
+        ("06:00", "04:00", "-2:00"),  # limit of CLOCK_ERROR_MINUTES (P004-S9)
+        ("06:00", "08:00", "+2:00"),
     ],
 )
 def test_run_with_device_clock_off_is_stored_with_warning(
@@ -386,9 +387,9 @@ def test_run_with_device_clock_off_is_stored_with_warning(
     [
         ("00:10", "00:10", "the device may not have written the day before yet"),
         ("00:29", "00:29", "the device may not have written the day before yet"),
-        ("10:00", "00:15", "the device may not have written the day before yet"),
+        ("01:00", "00:15", "the device may not have written the day before yet"),
         ("00:40", "23:40", "the device is still on the day before"),
-        ("09:00", "23:15", "the device is still on the day before"),
+        ("01:30", "23:45", "the device is still on the day before"),
         ("23:50", "00:30", "the device is already on the next day"),
     ],
 )
@@ -444,9 +445,9 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
     [
         ("10:00", "10:00", 0),
         ("01:00", "02:00", -60),
-        ("02:15", "12:00", -585),
-        ("23:59", "12:00", 719),
-        ("12:00", "00:00", 720),  # upper end of (-12 h, +12 h]
+        ("14:00", "12:00", 120),
+        ("10:00", "12:00", -120),
+        ("00:45", "23:00", None),  # +1:45 over midnight: next day, see below
     ],
 )
 def test_deviation_is_device_minus_local_time_within_half_a_day(
@@ -454,4 +455,77 @@ def test_deviation_is_device_minus_local_time_within_half_a_day(
 ):
     now = datetime.datetime.combine(TODAY, datetime.time.fromisoformat(local_time))
 
-    assert data_collector.check_device_clock({}, device_clock, now) == deviation
+    if deviation is None:
+        with pytest.raises(SystemExit):
+            data_collector.check_device_clock({}, device_clock, now)
+    else:
+        assert data_collector.check_device_clock({}, device_clock, now) == deviation
+
+
+# --- limit of the clock deviation and visible warnings (P004-S9) -------------------
+
+
+@pytest.mark.parametrize(
+    "local_time, device_clock, deviation",
+    [
+        ("06:00", "03:59", "-2:01"),
+        ("06:00", "08:01", "+2:01"),
+        ("12:00", "02:15", "-9:45"),  # the device clock before 2026-11-19
+        ("10:00", "00:15", "-9:45"),
+        ("06:00", "17:00", "+11:00"),  # 13 h late, looks 11 h early: was stored before
+        ("06:00", "12:30", "+6:30"),  # 17 h 30 min late
+        ("00:00", "12:00", "+12:00"),
+    ],
+)
+def test_run_with_device_clock_off_by_more_than_two_hours_fails_without_writing(
+    run, tmp_path, mails, local_time, device_clock, deviation
+):
+    with pytest.raises(SystemExit) as exit_info:
+        run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+
+    assert exit_info.value.code == 1
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == [
+        ("error", f"[-] the device clock is off by more than 2:00 (device clock"
+                  f" {device_clock}, local time {local_time}, deviation {deviation}):"
+                  " the day of the values is uncertain; set the device clock")
+    ]
+
+
+@pytest.fixture
+def logging_handlers(data_collector):
+    """removes and closes the handlers that setup_logging() adds"""
+    added = []
+    yield added
+    for handler in added:
+        data_collector.logger.removeHandler(handler)
+        handler.close()
+
+
+def test_log_file_takes_warnings_and_errors_but_no_infos(
+    data_collector, logging_handlers, tmp_path, capsys
+):
+    log_file = tmp_path / "collector.log"
+    logging_handlers += data_collector.setup_logging(False, log_file)
+
+    data_collector.logger.info("[*] an info")
+    data_collector.logger.warning("[-] the device clock is off")
+    data_collector.logger.error("[-] an error")
+
+    lines = log_file.read_text().splitlines()
+    assert [line.split(" - ", 3)[2:] for line in lines] == [
+        ["WARNING", "[-] the device clock is off"],
+        ["ERROR", "[-] an error"],
+    ]
+    assert capsys.readouterr().err == ""
+
+
+def test_console_logging_with_option_l_starts_at_info(
+    data_collector, logging_handlers, tmp_path, capsys
+):
+    logging_handlers += data_collector.setup_logging(True, tmp_path / "collector.log")
+
+    data_collector.logger.info("[*] an info")
+
+    assert "INFO - [*] an info" in capsys.readouterr().err
+    assert (tmp_path / "collector.log").read_text() == ""

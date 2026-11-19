@@ -38,7 +38,35 @@ DEVICE_CLOCK_PARAMETER = "D_C_4_2"
 DEVICE_CLOCK_FORMAT = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 ROLLOVER_DONE = datetime.time(0, 30)
 CLOCK_TOLERANCE_MINUTES = 15
+# HH:MM has no date: +x and -(24 h - x) look the same, so a larger deviation is an error
+CLOCK_ERROR_MINUTES = 2 * 60
 MINUTES_PER_DAY = 24 * 60
+
+
+def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
+    """
+    attach the handlers to the logger of this script
+
+    The rotating file takes warnings as well as errors: scheduled runs (systemd timer,
+    cron) have no console, so a warning would be lost otherwise.
+    :param log_console: also log INFO and above to the console (stderr)
+    :param log_file: path of the rotating log file
+    :return: list of the added handlers
+    """
+    handlers = []
+    if log_console:
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        handlers.append(console)
+    log_rotate_file = logging.handlers.RotatingFileHandler(
+        f"{log_file}", maxBytes=8000000, backupCount=5
+    )
+    log_rotate_file.setLevel(logging.WARNING)
+    handlers.append(log_rotate_file)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return handlers
 
 
 def main(config_file):
@@ -299,10 +327,12 @@ def check_device_clock(config, device_clock, now):
     """
     make sure that "today - n" is the right day for D_Y_2_<n> at the local time now
 
-    The device has to be on the local calendar day and past its daily rollover
+    The device clock must not be off by more than CLOCK_ERROR_MINUTES (without a
+    date, a clock that is late by many hours looks like one that is early), and the
+    device has to be on the local calendar day and past its daily rollover
     (ROLLOVER_DONE device time); otherwise the run ends via handle_error before
-    anything is written. A deviation of the device clock above
-    CLOCK_TOLERANCE_MINUTES is only logged as a warning.
+    anything is written. A deviation above CLOCK_TOLERANCE_MINUTES is logged as a
+    warning.
     :param device_clock: value of D_C_4_2 (HH:MM), None if missing in the response
     :param now: local time of the run (datetime.datetime)
     :return: deviation device clock - local time in minutes, within (-12 h, +12 h]
@@ -328,6 +358,13 @@ def check_device_clock(config, device_clock, now):
         f" deviation {format_minutes(deviation)}"
     )
 
+    if abs(deviation) > CLOCK_ERROR_MINUTES:
+        handle_error(
+            config,
+            f"[-] the device clock is off by more than"
+            f" {format_minutes(CLOCK_ERROR_MINUTES)[1:]} ({clocks}): the day of the"
+            " values is uncertain; set the device clock",
+        )
     device_since_local_midnight = local_minutes + deviation
     if device_since_local_midnight < 0:
         handle_error(
@@ -471,7 +508,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--log-error",
         "-e",
-        help="error logging to file",
+        help="log warnings and errors to file",
         required=False,
         default="./log/gruenbeck_error.log",
     )
@@ -479,20 +516,6 @@ if __name__ == "__main__":
 
     CONFIG_file = args.config_file
 
-    if args.log_console:
-        # create console handler
-        sh = logging.StreamHandler()
-        sh.setLevel(logging.INFO)
-        # add formatter to the handlers
-        sh.setFormatter(formatter)
-        # add the handlers to the logger
-        logger.addHandler(sh)
-
-    log_rotate_file = logging.handlers.RotatingFileHandler(
-        f"{args.log_error}", maxBytes=8000000, backupCount=5
-    )
-    log_rotate_file.setLevel(logging.ERROR)
-    log_rotate_file.setFormatter(formatter)
-    logger.addHandler(log_rotate_file)
+    setup_logging(args.log_console, args.log_error)
 
     main(CONFIG_file)

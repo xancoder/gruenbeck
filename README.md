@@ -95,6 +95,8 @@ uv run python src/data-collector.py -l
 
 Scheduled runs call the interpreter of the virtual environment directly (`./.venv/bin/python3 ./src/data-collector.py`), so uv is not needed at run time.
 
+Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
+
 ### analysis
 
 `src/data-analyse.py` prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
@@ -119,7 +121,7 @@ The script should run once a week. Three ways are described in [deploy/systemd/R
 - **systemd user service**: the alternative without root access
 - **cron**: for machines without systemd; when switching to systemd, remove the cron entry, otherwise the data is collected twice
 
-NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the soft water system must have written the consumption of the day before when the run starts. It does so shortly after midnight of its own clock (measured about 15 to 20 minutes after midnight). Before it stores anything, the data collector therefore reads the device clock (`D_C_4_2`) along with the values: if the device is not on the local day yet (or already on the next one) or its clock is before 00:30, the run stores nothing and fails with an error mail and exit code 1, for example a missed run that the systemd timer makes up (`Persistent=true`) after a restart in that time. A device clock that is more than 15 minutes off is logged as a warning, and the run goes on. It is unknown whether the device switches to daylight saving time by itself, so check the clock after each change. The weekly run (Monday 06:00) is based on the 14-day memory of the soft water system.
+NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the soft water system must have written the consumption of the day before when the run starts. It does so shortly after midnight of its own clock (measured about 15 to 20 minutes after midnight). Before it stores anything, the data collector therefore reads the device clock (`D_C_4_2`) along with the values: if the device is not on the local day yet (or already on the next one) or its clock is before 00:30, the run stores nothing and fails with an error mail and exit code 1, for example a missed run that the systemd timer makes up (`Persistent=true`) after a restart in that time. A device clock that is off by more than 15 minutes but at most 2 hours (e.g. without the switch to daylight saving time) is logged as a warning in `log/gruenbeck_error.log`, and the run goes on. More than 2 hours is an error as well: the device clock has no date, so a clock that is late by many hours cannot be told from one that is early. It is unknown whether the device switches to daylight saving time by itself, so check the clock after each change. The weekly run (Monday 06:00) is based on the 14-day memory of the soft water system.
 
 ## One-time migration: values stored one day late (2026)
 
