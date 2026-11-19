@@ -28,6 +28,8 @@ formatter = logging.Formatter(
 
 # D_Y_2_<n> is the water consumption of n days ago (D_Y_2_1 = yesterday)
 DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
+# the device keeps the consumption of 14 days (D_Y_2_15 ... D_Y_2_27 return "-")
+DEVICE_MEMORY_DAYS = 14
 FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
@@ -164,11 +166,33 @@ def get_device_timeout(config):
     return timeout
 
 
+def get_consumption_parameters(config, parameter):
+    """
+    parameter codes of the 14-day memory: D_Y_2_1 ... D_Y_2_14 in this order
+
+    Other rows of the parameter file about the water consumption (D_Y_1, D_Y_2_27)
+    are not requested.
+    :param parameter: gruenbeck.Parameter of the parameter file
+    :return: list of parameter codes
+    """
+    names = [f"D_Y_2_{n}" for n in range(1, DEVICE_MEMORY_DAYS + 1)]
+    known = parameter.get_parameter_list()
+    missing = [name for name in names if name not in known]
+    if missing:
+        handle_error(
+            config,
+            f"[-] parameter file {parameter.path_file} lacks the consumption"
+            f" parameters: {', '.join(missing)}",
+        )
+    return names
+
+
 def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
     attempts = 0
     last_error = None
     timeout = get_device_timeout(config)
+    consumption_parameters = get_consumption_parameters(config, parameter)
 
     while attempts <= max_retries:
         try:
@@ -179,7 +203,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
 
             result = gruenbeck.get_data_from_mux_http(
                 config["softWaterSystem"]["host"],
-                parameter.get_parameter_by_note("Wasserverbrauch"),
+                consumption_parameters,
                 timeout=timeout,
             )
 

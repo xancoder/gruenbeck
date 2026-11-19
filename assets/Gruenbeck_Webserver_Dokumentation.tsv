@@ -95,7 +95,7 @@ D_C_3_6_5	read		Int			Status (1=verbunden)
 D_C_3_7_1	read		String			Netzwerkstatus (Access Point) IP-Adresse
 D_C_3_7_2	read		String			Netzwerkstatus (Access Point) SSID: (softliQ:SC???? bzw. softliQ:MC????)
 D_C_3_7_3	read		Status			Netzwerkstatus (Access Point) Status (1=verbunden)
-#D_Y_1	read		Int	[l]		Wasserverbrauch gestern
+D_Y_1	read		Int	[l]		Wasserverbrauch gestern
 D_Y_2_1	read		Int	[l]		Wasserverbrauch gestern
 D_Y_2_2	read		Int	[l]		Wasserverbrauch vor 2 Tagen
 D_Y_2_3	read		Int	[l]		Wasserverbrauch vor 3 Tagen
@@ -110,7 +110,7 @@ D_Y_2_11	read		Int	[l]		Wasserverbrauch vor 11 Tagen
 D_Y_2_12	read		Int	[l]		Wasserverbrauch vor 12 Tagen
 D_Y_2_13	read		Int	[l]		Wasserverbrauch vor 13 Tagen
 D_Y_2_14	read		Int	[l]		Wasserverbrauch vor 14 Tagen
-#D_Y_2_27	read		Int	[l]		Wasserverbrauch vor 27 Tagen
+D_Y_2_27	read		Int	[l]		Wasserverbrauch vor 27 Tagen
 D_Y_3	read		Int	[kg]		Salzverbrauch pro Jahr
 D_Y_3_1	read		Double	[kg]		Salzverbrauch gestern
 D_Y_3_2	read		Double	[kg]		Salzverbrauch vor 2 Tagen
