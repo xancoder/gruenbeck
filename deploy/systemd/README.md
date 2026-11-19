@@ -10,7 +10,12 @@ The collector (`src/data-collector.py`) should run once a week. This guide descr
 
 The weekly run (Monday 16:00) follows the 14 day memory of the soft water system: more frequent
 runs cause more writes, rarer runs leave less time to react to a failure. The soft water
-system writes the measurement of the day before around 12:00, so the run must not be earlier.
+system writes the consumption of the day before shortly after midnight of its own clock
+(measured about 15 to 20 minutes after midnight). A run between midnight and about 00:30
+would store every value one day late, because the device has not moved its values on yet.
+This also applies to a missed run that `Persistent=true` makes up after the machine starts
+in that time. The device clock has to be correct; it is unknown whether the device switches
+to daylight saving time by itself, so check the clock after each change.
 
 The collector reports a failed run by its exit code (see the exit codes in the
 [main README](../../README.md)), which systemd shows as failed unit state.

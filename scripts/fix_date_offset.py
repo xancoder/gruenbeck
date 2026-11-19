@@ -12,8 +12,9 @@ unchanged, also values that are not a number.
 Safeguards:
 - By default it is a dry run that prints every change per file. Only --apply writes.
 - It aborts without changes if the youngest stored date is on or after CLOCK_CHANGE_DATE:
-  then the old data collector ran after the device clock was set, and the values of that
-  run do not have the offset of one day.
+  then a data collector (the old or the corrected one) ran after the device clock was set,
+  and the values of that run do not have the offset of one day. Restore the data files
+  from before that run (e.g. copy them again from the old checkout) and start over.
 - --set on a date that already has a different value after the move is an error, and so
   is --set after CLOCK_CHANGE_DATE (from the next day on the data collector stores the
   values). Days without a value from the youngest moved date up to CLOCK_CHANGE_DATE are
@@ -232,8 +233,9 @@ def plan_migration(files: DataFiles, old_files: dict, set_values: list) -> Migra
     if youngest >= CLOCK_CHANGE_DATE:
         raise MigrationError(
             f"the youngest stored date is {youngest}, on or after {CLOCK_CHANGE_DATE}"
-            " (device clock set): the old data collector ran after the clock change,"
-            " so the values of that run do not have the offset of one day"
+            " (device clock set): a data collector ran after the clock change, so the"
+            " values of that run do not have the offset of one day; restore the data"
+            " files from before that run (e.g. copy them again from the old checkout)"
         )
     new = {day - ONE_DAY: Entry(value, f"from {day}") for day, value in stored.items()}
 

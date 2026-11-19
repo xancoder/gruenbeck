@@ -113,6 +113,17 @@ def test_first_date_is_optional(data_collector):
     assert data_collector.get_first_date({"dataFile": {"prefix": PREFIX}}) is None
 
 
+def test_first_date_without_data_file_section_is_an_error(
+    data_collector, mails, caplog
+):
+    with pytest.raises(SystemExit) as exit_info:
+        data_collector.get_first_date({"mail": {}})
+
+    assert exit_info.value.code == 1
+    assert "[-] no config parameter: 'dataFile'" in caplog.text
+    assert mails == [("error", "[-] no config parameter: 'dataFile'")]
+
+
 def test_first_date_is_read_as_date(data_collector):
     config = {"dataFile": {"firstDate": "2026-11-20"}}
 

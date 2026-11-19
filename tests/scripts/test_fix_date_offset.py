@@ -203,6 +203,17 @@ def test_days_up_to_the_clock_change_without_value_are_reported(tmp_path, capsys
     ]
 
 
+def test_a_single_missing_day_is_reported(tmp_path, capsys):
+    write_year(tmp_path, 2026, STORED_2026)
+
+    assert migrate(tmp_path, *SET_GAP[:6]) == 0  # 2026-11-19 forgotten
+
+    out = capsys.readouterr().out.splitlines()
+    assert [line for line in out if line.startswith("[!]")] == [
+        "[!] no value for 2026-11-19"
+    ]
+
+
 def test_without_set_the_days_after_the_last_run_are_reported(tmp_path, capsys):
     write_year(tmp_path, 2026, STORED_2026)
 
@@ -240,7 +251,7 @@ def test_set_equal_to_the_moved_value_is_accepted(tmp_path, capsys):
 @pytest.mark.parametrize(
     "youngest", ["2026-11-19", "2026-11-23", "2027-01-04"]
 )
-def test_aborts_if_the_old_collector_wrote_after_the_clock_change(
+def test_aborts_if_a_collector_wrote_after_the_clock_change(
     tmp_path, capsys, youngest
 ):
     write_year(tmp_path, 2026, STORED_2026)
@@ -255,6 +266,10 @@ def test_aborts_if_the_old_collector_wrote_after_the_clock_change(
     assert snapshot(tmp_path) == before
     err = capsys.readouterr().err
     assert f"the youngest stored date is {youngest}, on or after 2026-11-19" in err
+    # the corrected data collector may have run, too: no blame on the old one
+    assert "a data collector ran after the clock change" in err
+    assert "old data collector" not in err
+    assert "restore the data files from before that run" in err
 
 
 def test_second_apply_is_refused(tmp_path, capsys):
@@ -271,6 +286,20 @@ def test_second_apply_is_refused(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "the migration was already applied and must run only once" in err
     assert f"(status done, started {NOW.isoformat()})" in err
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]", ""], ids=repr)
+def test_unreadable_marker_is_refused_as_well(tmp_path, capsys, content):
+    write_year(tmp_path, 2026, STORED_2026)
+    (tmp_path / "data" / fix.MARKER_NAME).write_text(content)
+    before = snapshot(tmp_path)
+
+    assert migrate(tmp_path, "--apply") == 1
+
+    assert snapshot(tmp_path) == before
+    err = capsys.readouterr().err
+    assert "(status unreadable, started unknown)" in err
+    assert "[-] nothing changed" in err
 
 
 def test_apply_backs_up_every_changed_file_with_timestamp(tmp_path, capsys):
