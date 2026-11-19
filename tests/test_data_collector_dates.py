@@ -198,14 +198,16 @@ def test_all_values_before_first_date_fail_the_run(data_collector, mails, caplog
 @pytest.fixture
 def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
     """
-    run main() on `today` with a fake device response
-    :return: function(response, today, **data_file); its attribute `requests` lists
-        the parameters of every device request
+    run main() on `today` at `local_time` with a fake device response
+    :return: function(response, today, local_time, device_clock, **data_file); the
+        device adds D_C_4_2 = device_clock to the response (None: no device clock).
+        Its attribute `requests` lists the parameters of every device request.
     """
-    add_dates = data_collector.add_timestamp_as_key_device_data
     requests = []
 
-    def run_main(response, today=TODAY, **data_file):
+    def run_main(
+        response, today=TODAY, local_time="06:00", device_clock="06:00", **data_file
+    ):
         config = {
             "dataFile": {
                 "datePattern": "%Y-%m-%d",
@@ -223,13 +225,14 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
 
         def fetch(host, parameters, timeout):
             requests.append(list(parameters))
-            return dict(response)
+            clock = {} if device_clock is None else {"D_C_4_2": device_clock}
+            return {**clock, **response}
 
-        monkeypatch.setattr(data_collector.gruenbeck, "get_data_from_mux_http", fetch)
-        monkeypatch.setattr(
-            data_collector, "add_timestamp_as_key_device_data",
-            lambda device_data: add_dates(device_data, today=today),
+        now = datetime.datetime.combine(
+            today, datetime.time.fromisoformat(local_time)
         )
+        monkeypatch.setattr(data_collector.gruenbeck, "get_data_from_mux_http", fetch)
+        monkeypatch.setattr(data_collector, "local_now", lambda: now)
         data_collector.main(str(config_file))
 
     run_main.requests = requests
@@ -272,7 +275,7 @@ def test_run_stores_today_minus_n_in_any_response_order(run, tmp_path, mails):
 
     run(response)
 
-    assert run.requests == [PARAMETERS]
+    assert run.requests == [["D_C_4_2", *PARAMETERS]]
     stored = read_year(tmp_path, 2026)
     assert stored["2026-11-22"] == "101"
     assert stored["2026-11-09"] == "93"
@@ -331,3 +334,124 @@ def test_run_with_invalid_first_date_fails_before_asking_the_device(run, mails):
     assert run.requests == []
     assert mails[0][0] == "error"
     assert "dataFile.firstDate '2026-11-31'" in mails[0][1]
+
+
+# --- device clock and time of the run (P004-S8) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "local_time, device_clock",
+    [
+        ("06:00", "06:00"),  # weekly run, Monday 06:00
+        ("16:00", "16:00"),
+        ("00:30", "00:30"),  # first minute after the rollover margin
+        ("16:00", "15:45"),  # deviation within the tolerance of 15 minutes
+        ("16:00", "16:15"),
+    ],
+)
+def test_run_with_device_past_its_rollover_is_stored_without_warning(
+    run, tmp_path, caplog, local_time, device_clock
+):
+    run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+
+    assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
+    assert "device clock is off" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "local_time, device_clock, deviation",
+    [
+        ("16:00", "15:40", "-0:20"),
+        ("16:00", "15:44", "-0:16"),
+        ("12:00", "02:15", "-9:45"),  # the device clock before 2026-11-19
+        ("06:00", "05:00", "-1:00"),  # no switch to daylight saving time
+        ("16:00", "17:00", "+1:00"),
+    ],
+)
+def test_run_with_device_clock_off_is_stored_with_warning(
+    run, tmp_path, caplog, local_time, device_clock, deviation
+):
+    run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+
+    assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert [r.getMessage() for r in warnings] == [
+        f"[-] the device clock is off (device clock {device_clock}, local time"
+        f" {local_time}, deviation {deviation}): set the device clock"
+    ]
+
+
+@pytest.mark.parametrize(
+    "local_time, device_clock, message",
+    [
+        ("00:10", "00:10", "the device may not have written the day before yet"),
+        ("00:29", "00:29", "the device may not have written the day before yet"),
+        ("10:00", "00:15", "the device may not have written the day before yet"),
+        ("00:40", "23:40", "the device is still on the day before"),
+        ("09:00", "23:15", "the device is still on the day before"),
+        ("23:50", "00:30", "the device is already on the next day"),
+    ],
+)
+def test_run_before_the_device_rollover_fails_without_writing(
+    run, tmp_path, mails, local_time, device_clock, message
+):
+    with pytest.raises(SystemExit) as exit_info:
+        run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+
+    assert exit_info.value.code == 1
+    assert not list((tmp_path / "data").glob("*.csv"))
+    (kind, text), = mails
+    assert kind == "error"
+    assert text.startswith(f"[-] {message} (device clock {device_clock},"
+                           f" local time {local_time}, deviation ")
+    assert "run again" in text
+
+
+def test_run_without_device_clock_fails_without_writing(run, tmp_path, mails):
+    with pytest.raises(SystemExit) as exit_info:
+        run(DEVICE_2026_11_23, device_clock=None)
+
+    assert exit_info.value.code == 1
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == [("error", "[-] the device response has no device clock D_C_4_2")]
+
+
+@pytest.mark.parametrize("device_clock", ["24:00", "7:05", "02:60", "-", "", "02:00:00"])
+def test_run_with_invalid_device_clock_fails_without_writing(
+    run, tmp_path, mails, device_clock
+):
+    with pytest.raises(SystemExit):
+        run(DEVICE_2026_11_23, device_clock=device_clock)
+
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == [
+        ("error", f"[-] invalid device clock D_C_4_2 {device_clock!r} (expected HH:MM)")
+    ]
+
+
+def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
+    # 2026-11-24 00:45 with the device on the same day: yesterday is 2026-11-23
+    run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="00:45",
+        device_clock="00:45")
+
+    stored = read_year(tmp_path, 2026)
+    assert stored["2026-11-23"] == "101"
+    assert "2026-11-24" not in stored
+
+
+@pytest.mark.parametrize(
+    "device_clock, local_time, deviation",
+    [
+        ("10:00", "10:00", 0),
+        ("01:00", "02:00", -60),
+        ("02:15", "12:00", -585),
+        ("23:59", "12:00", 719),
+        ("12:00", "00:00", 720),  # upper end of (-12 h, +12 h]
+    ],
+)
+def test_deviation_is_device_minus_local_time_within_half_a_day(
+    data_collector, device_clock, local_time, deviation
+):
+    now = datetime.datetime.combine(TODAY, datetime.time.fromisoformat(local_time))
+
+    assert data_collector.check_device_clock({}, device_clock, now) == deviation

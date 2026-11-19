@@ -50,8 +50,9 @@ def test_only_the_14_day_memory_is_requested(data_collector, device, parameter_f
 
     result = data_collector.get_device_data(CONFIG, parameter)
 
-    assert device == [MEMORY]
-    assert list(result) == MEMORY
+    # plus the device clock for check_device_clock() (P004-S8)
+    assert device == [["D_C_4_2", *MEMORY]]
+    assert list(result) == ["D_C_4_2", *MEMORY]
 
 
 def test_missing_memory_parameter_fails_before_asking_the_device(

@@ -32,6 +32,14 @@ DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
 DEVICE_MEMORY_DAYS = 14
 FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
+# device clock (HH:MM); the device writes the day before about 15 to 20 minutes after
+# its midnight, so values requested before ROLLOVER_DONE may still be one day old
+DEVICE_CLOCK_PARAMETER = "D_C_4_2"
+DEVICE_CLOCK_FORMAT = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
+ROLLOVER_DONE = datetime.time(0, 30)
+CLOCK_TOLERANCE_MINUTES = 15
+MINUTES_PER_DAY = 24 * 60
+
 
 def main(config_file):
     logger.info(f"[*] run script: {sys.argv[0]}")
@@ -41,8 +49,10 @@ def main(config_file):
     first_date = get_first_date(config)
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
+    now = local_now()
+    check_device_clock(config, device_data.pop(DEVICE_CLOCK_PARAMETER, None), now)
     try:
-        device_data = add_timestamp_as_key_device_data(device_data)
+        device_data = add_timestamp_as_key_device_data(device_data, today=now.date())
     except ValueError as err:
         handle_error(config, f"{err}")
     device_data = filter_first_date(config, device_data, first_date)
@@ -192,7 +202,11 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     attempts = 0
     last_error = None
     timeout = get_device_timeout(config)
-    consumption_parameters = get_consumption_parameters(config, parameter)
+    # the device clock comes with the values, see check_device_clock()
+    request_parameters = [
+        DEVICE_CLOCK_PARAMETER,
+        *get_consumption_parameters(config, parameter),
+    ]
 
     while attempts <= max_retries:
         try:
@@ -203,7 +217,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
 
             result = gruenbeck.get_data_from_mux_http(
                 config["softWaterSystem"]["host"],
-                consumption_parameters,
+                request_parameters,
                 timeout=timeout,
             )
 
@@ -267,6 +281,76 @@ def handle_error(config, error_text: str) -> typing.NoReturn:
 
     logger.info("[*] Exiting program due to error")
     sys.exit(1)
+
+
+def local_now():
+    """current local time of the run"""
+    return datetime.datetime.now()
+
+
+def format_minutes(minutes):
+    """signed duration in minutes as +H:MM / -H:MM"""
+    sign = "-" if minutes < 0 else "+"
+    hours, rest = divmod(abs(minutes), 60)
+    return f"{sign}{hours}:{rest:02d}"
+
+
+def check_device_clock(config, device_clock, now):
+    """
+    make sure that "today - n" is the right day for D_Y_2_<n> at the local time now
+
+    The device has to be on the local calendar day and past its daily rollover
+    (ROLLOVER_DONE device time); otherwise the run ends via handle_error before
+    anything is written. A deviation of the device clock above
+    CLOCK_TOLERANCE_MINUTES is only logged as a warning.
+    :param device_clock: value of D_C_4_2 (HH:MM), None if missing in the response
+    :param now: local time of the run (datetime.datetime)
+    :return: deviation device clock - local time in minutes, within (-12 h, +12 h]
+    """
+    if device_clock is None:
+        handle_error(
+            config, f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}"
+        )
+    match = DEVICE_CLOCK_FORMAT.fullmatch(str(device_clock).strip())
+    if not match:
+        handle_error(
+            config,
+            f"[-] invalid device clock {DEVICE_CLOCK_PARAMETER} {device_clock!r}"
+            " (expected HH:MM)",
+        )
+    device_minutes = int(match.group(1)) * 60 + int(match.group(2))
+    local_minutes = now.hour * 60 + now.minute
+    deviation = (device_minutes - local_minutes) % MINUTES_PER_DAY
+    if deviation > MINUTES_PER_DAY // 2:
+        deviation -= MINUTES_PER_DAY
+    clocks = (
+        f"device clock {match.group(0)}, local time {now:%H:%M},"
+        f" deviation {format_minutes(deviation)}"
+    )
+
+    device_since_local_midnight = local_minutes + deviation
+    if device_since_local_midnight < 0:
+        handle_error(
+            config,
+            f"[-] the device is still on the day before ({clocks}): the values cannot"
+            " be assigned to dates; set the device clock or run again later",
+        )
+    if device_since_local_midnight >= MINUTES_PER_DAY:
+        handle_error(
+            config,
+            f"[-] the device is already on the next day ({clocks}): the values cannot"
+            " be assigned to dates; set the device clock or run again later",
+        )
+    rollover_minutes = ROLLOVER_DONE.hour * 60 + ROLLOVER_DONE.minute
+    if device_minutes < rollover_minutes:
+        handle_error(
+            config,
+            f"[-] the device may not have written the day before yet ({clocks}): run"
+            f" again after {ROLLOVER_DONE:%H:%M} device time",
+        )
+    if abs(deviation) > CLOCK_TOLERANCE_MINUTES:
+        logger.warning(f"[-] the device clock is off ({clocks}): set the device clock")
+    return deviation
 
 
 def add_timestamp_as_key_device_data(device_data, today=None):

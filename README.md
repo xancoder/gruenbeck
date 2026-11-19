@@ -83,7 +83,7 @@ The section `dataFile` sets the name and format of the yearly files `<prefix>_<y
 | exit code | meaning |
 |-----------|---------|
 | `0` | data collected, stored and sent by mail |
-| `1` | any failure: configuration or data folder invalid, device not reachable or without values, error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
+| `1` | any failure: configuration or data folder invalid, device not reachable or without values, device clock missing or not past its daily rollover (see the note under [Scheduling](#scheduling)), error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
 
 Cron and systemd can therefore detect a failed run by its exit code.
 
@@ -119,7 +119,7 @@ The script should run once a week. Three ways are described in [deploy/systemd/R
 - **systemd user service**: the alternative without root access
 - **cron**: for machines without systemd; when switching to systemd, remove the cron entry, otherwise the data is collected twice
 
-NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the soft water system must have written the consumption of the day before when the run starts. It does so shortly after midnight of its own clock (measured about 15 to 20 minutes after midnight). A run between midnight and about 00:30 would store every value one day late; this also applies to a missed run that the systemd timer makes up (`Persistent=true`) after a restart in that time. The device clock has to be correct; it is unknown whether the device switches to daylight saving time by itself, so check the clock after each change. The weekly run (Monday 16:00) is based on the 14-day memory of the soft water system.
+NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the soft water system must have written the consumption of the day before when the run starts. It does so shortly after midnight of its own clock (measured about 15 to 20 minutes after midnight). Before it stores anything, the data collector therefore reads the device clock (`D_C_4_2`) along with the values: if the device is not on the local day yet (or already on the next one) or its clock is before 00:30, the run stores nothing and fails with an error mail and exit code 1, for example a missed run that the systemd timer makes up (`Persistent=true`) after a restart in that time. A device clock that is more than 15 minutes off is logged as a warning, and the run goes on. It is unknown whether the device switches to daylight saving time by itself, so check the clock after each change. The weekly run (Monday 06:00) is based on the 14-day memory of the soft water system.
 
 ## One-time migration: values stored one day late (2026)
 
