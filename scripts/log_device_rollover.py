@@ -4,7 +4,9 @@ Log the daily rollover of the 14 day consumption values of the soft water system
 
 Read-only diagnostic tool: it polls the device clock (D_C_4_2) and the consumption values
 D_Y_2_1 ... D_Y_2_3 and appends one CSV row per poll. A row gets the status "rollover"
-when the values moved on compared to the last complete response. Errors and incomplete
+when the values moved on compared to the last complete response. When appending to an
+existing file, the comparison starts from its last complete row, so a rollover between
+two runs is marked as well ("since" names the time of that row). Errors and incomplete
 responses are logged and do not stop the script (the device drops requests while its
 web interface is open). Every row is written immediately, so stopping the script at any
 time loses nothing.
@@ -68,10 +70,17 @@ def missing_values(values: dict) -> list:
     ]
 
 
-def poll(host: str, timeout: float, previous: tuple | None, fetch: Fetch):
+def poll(
+    host: str,
+    timeout: float,
+    previous: tuple | None,
+    fetch: Fetch,
+    since: str | None = None,
+):
     """
     request the device once and classify the response
     :param previous: rollover values of the last complete response, None at the start
+    :param since: time of the row previous comes from, if it is from an earlier run
     :return: (row without time, rollover values of this response or previous)
     """
     try:
@@ -97,10 +106,33 @@ def poll(host: str, timeout: float, previous: tuple | None, fetch: Fetch):
             f"{name} {old} -> {new}"
             for name, old, new in zip(ROLLOVER_PARAMETERS, previous, current)
         )
+        if since:
+            message += f" (since {since})"
         row.update(status=STATUS_ROLLOVER, message=message)
     else:
         row.update(status=STATUS_OK, message="")
     return row, current
+
+
+def last_complete_row(output: pathlib.Path) -> dict | None:
+    """
+    last row of an earlier run with status ok or rollover and all values
+    :return: the row, or None if the file is missing, empty or has no complete row
+    :raises ValueError: the file has a different header, so it is not a log of this script
+    """
+    if not output.exists() or output.stat().st_size == 0:
+        return None
+    last = None
+    with output.open(newline="", encoding="utf-8") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if tuple(reader.fieldnames or ()) != FIELDNAMES:
+            raise ValueError(
+                f"{output} has a different header: {','.join(reader.fieldnames or ())}"
+            )
+        for row in reader:
+            if row["status"] in (STATUS_OK, STATUS_ROLLOVER) and not missing_values(row):
+                last = row
+    return last
 
 
 def append_row(output: pathlib.Path, row: dict) -> None:
@@ -123,19 +155,28 @@ def run(
     fetch: Fetch = gruenbeck.get_data_from_mux_http,
     now: typing.Callable[[], datetime.datetime] = local_now,
     sleep: typing.Callable[[float], None] = time.sleep,
+    previous_row: dict | None = None,
 ) -> int:
     """
     poll the device every interval seconds until hours have passed
+    :param previous_row: last complete row of an earlier run (see last_complete_row)
     :return: number of written rows
     """
     start = now()
     deadline = start + datetime.timedelta(hours=hours)
     next_poll = start
     previous = None
+    since = None
+    if previous_row:
+        previous = tuple(previous_row[name].strip() for name in ROLLOVER_PARAMETERS)
+        since = previous_row["time"]
     rows = 0
 
     while True:
-        row, previous = poll(host, timeout, previous, fetch)
+        row, previous = poll(host, timeout, previous, fetch, since)
+        if row["status"] != STATUS_ERROR:
+            # only the first complete response compares with the earlier run
+            since = None
         row["time"] = now().isoformat(timespec="seconds")
         append_row(output, row)
         rows += 1
@@ -212,13 +253,31 @@ def main(argv=None) -> int:
         print(f"[-] invalid configuration: {err}", file=sys.stderr)
         return 1
 
+    try:
+        previous_row = last_complete_row(args.output)
+    except ValueError as err:
+        print(f"[-] not appending: {err}", file=sys.stderr)
+        return 1
+
     print(
         f"[*] logging {host} every {args.interval:g} s for {args.hours:g} h"
         f" into {args.output}",
         flush=True,
     )
+    if previous_row:
+        print(
+            f"[*] comparing with the last complete row of {previous_row['time']}",
+            flush=True,
+        )
     try:
-        rows = run(host, timeout, args.output, args.interval, args.hours)
+        rows = run(
+            host,
+            timeout,
+            args.output,
+            args.interval,
+            args.hours,
+            previous_row=previous_row,
+        )
     except KeyboardInterrupt:
         print("[*] stopped", flush=True)
         return 0

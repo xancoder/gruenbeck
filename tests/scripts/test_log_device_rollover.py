@@ -61,9 +61,11 @@ def run(tmp_path, responses, interval=300, hours=None, clock=None):
         hours = (len(responses) - 1) * interval / 3600
     fetch = device(clock, responses)
     output = tmp_path / "log" / "device_rollover.csv"
+    # like main(): continue the comparison of an earlier run in the same file
     count = rollover.run(
         "device.lan", 12.5, output, interval, hours,
         fetch=fetch, now=clock.now, sleep=clock.sleep,
+        previous_row=rollover.last_complete_row(output),
     )
     return count, read_rows(output), fetch, clock
 
@@ -189,9 +191,9 @@ def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
     )
     seen = {}
 
-    def fake_run(host, timeout, output, interval, hours):
+    def fake_run(host, timeout, output, interval, hours, previous_row):
         seen.update(host=host, timeout=timeout, output=output,
-                    interval=interval, hours=hours)
+                    interval=interval, hours=hours, previous_row=previous_row)
         return 0
 
     monkeypatch.setattr(rollover, "run", fake_run)
@@ -201,7 +203,84 @@ def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
 
     assert rollover.main(argv) == 0
     assert seen == {"host": "device.lan", "timeout": 7.0, "output": output,
-                    "interval": 60.0, "hours": 2.0}
+                    "interval": 60.0, "hours": 2.0, "previous_row": None}
+
+
+def test_main_continues_from_last_complete_row(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
+    output = tmp_path / "out.csv"
+    run(tmp_path, [values("105", "93")])
+    (tmp_path / "log" / "device_rollover.csv").rename(output)
+    seen = {}
+    monkeypatch.setattr(
+        rollover, "run", lambda *args, previous_row: seen.update(row=previous_row) or 0
+    )
+
+    assert rollover.main(["-c", str(config), "--output", str(output)]) == 0
+    assert seen["row"]["D_Y_2_1"] == "105"
+    assert "comparing with the last complete row of 2026-11-18T09:30:00+01:00" in (
+        capsys.readouterr().out
+    )
+
+
+def test_rollover_between_two_runs_is_detected(tmp_path):
+    run(tmp_path, [values("105", "93")])
+    _, rows, _, _ = run(tmp_path, [values("9", "105", "93"), values("9", "105", "93")])
+
+    assert [row["status"] for row in rows] == ["ok", "rollover", "ok"]
+    assert rows[1]["message"] == (
+        "D_Y_2_1 105 -> 9, D_Y_2_2 93 -> 105 (since 2026-11-18T09:30:00+01:00)"
+    )
+
+
+def test_no_rollover_between_two_runs_with_same_values(tmp_path):
+    run(tmp_path, [values("105", "93")])
+    _, rows, _, _ = run(tmp_path, [values("105", "93")])
+
+    assert [row["status"] for row in rows] == ["ok", "ok"]
+
+
+def test_errors_at_the_end_of_the_earlier_run_are_skipped(tmp_path):
+    run(tmp_path, [values("105", "93"), requests.exceptions.ConnectionError("refused")])
+    responses = [
+        ValueError("[-] device response contains no values"),
+        values("9", "105", "93"),
+        values("41", "9", "105"),
+    ]
+    _, rows, _, _ = run(tmp_path, responses)
+
+    statuses = [row["status"] for row in rows]
+    assert statuses == ["ok", "error", "error", "rollover", "rollover"]
+    assert rows[3]["message"].endswith("(since 2026-11-18T09:30:00+01:00)")
+    # later rollovers in the same run compare with the previous poll only
+    assert "since" not in rows[4]["message"]
+
+
+def test_empty_file_gets_a_header(tmp_path):
+    output = tmp_path / "log" / "device_rollover.csv"
+    output.parent.mkdir()
+    output.touch()
+
+    assert rollover.last_complete_row(output) is None
+    _, rows, _, _ = run(tmp_path, [values("93", "33")])
+    assert [row["status"] for row in rows] == ["ok"]
+
+
+def test_foreign_file_is_not_appended_to(tmp_path, monkeypatch, capsys):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
+    output = tmp_path / "gruenbeck_water_consumption_2026.csv"
+    output.write_text("date,value\n2026-11-16,170\n")
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("run must not start")
+
+    monkeypatch.setattr(rollover, "run", unexpected)
+
+    assert rollover.main(["-c", str(config), "--output", str(output)]) == 1
+    assert "[-] not appending:" in capsys.readouterr().err
+    assert output.read_text() == "date,value\n2026-11-16,170\n"
 
 
 def test_default_timeout_comes_from_gruenbeck(tmp_path):
