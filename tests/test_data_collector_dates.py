@@ -206,7 +206,7 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
     requests = []
 
     def run_main(
-        response, today=TODAY, local_time="06:00", device_clock="06:00", **data_file
+        response, today=TODAY, local_time="16:00", device_clock="16:00", **data_file
     ):
         config = {
             "dataFile": {
@@ -336,104 +336,77 @@ def test_run_with_invalid_first_date_fails_before_asking_the_device(run, mails):
     assert "dataFile.firstDate '2026-11-31'" in mails[0][1]
 
 
-# --- device clock and time of the run (P004-S8) -------------------------------------
+# --- device clock: only a warning (P004-S8, S9, S10) --------------------------------
+
+
+def clock_warnings(caplog):
+    return [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
 
 
 @pytest.mark.parametrize(
     "local_time, device_clock",
     [
-        ("06:00", "06:00"),  # weekly run, Monday 06:00
-        ("16:00", "16:00"),
-        ("00:30", "00:30"),  # first minute after the rollover margin
+        ("16:00", "16:00"),  # weekly run, Monday 16:00
+        ("00:10", "00:10"),  # the clock does not tell whether the device rolled over
         ("16:00", "15:45"),  # deviation within the tolerance of 15 minutes
         ("16:00", "16:15"),
     ],
 )
-def test_run_with_device_past_its_rollover_is_stored_without_warning(
+def test_device_clock_within_tolerance_gives_no_warning(
     run, tmp_path, caplog, local_time, device_clock
 ):
     run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
-    assert "device clock is off" not in caplog.text
+    assert clock_warnings(caplog) == []
 
 
 @pytest.mark.parametrize(
     "local_time, device_clock, deviation",
     [
-        ("16:00", "15:40", "-0:20"),
         ("16:00", "15:44", "-0:16"),
-        ("06:00", "05:00", "-1:00"),  # no switch to daylight saving time
-        ("16:00", "17:00", "+1:00"),
-        ("06:00", "04:00", "-2:00"),  # limit of CLOCK_ERROR_MINUTES (P004-S9)
-        ("06:00", "08:00", "+2:00"),
+        ("16:00", "17:00", "+1:00"),  # no switch to daylight saving time
+        ("16:00", "06:15", "-9:45"),  # the device clock before 2026-11-19
+        ("06:00", "17:00", "+11:00"),  # 13 h late, looks 11 h early
+        ("00:40", "23:40", "-1:00"),
     ],
 )
-def test_run_with_device_clock_off_is_stored_with_warning(
+def test_device_clock_off_is_only_a_warning(
     run, tmp_path, caplog, local_time, device_clock, deviation
 ):
     run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
-    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert [r.getMessage() for r in warnings] == [
+    assert clock_warnings(caplog) == [
         f"[-] the device clock is off (device clock {device_clock}, local time"
         f" {local_time}, deviation {deviation}): set the device clock"
     ]
 
 
 @pytest.mark.parametrize(
-    "local_time, device_clock, message",
+    "device_clock, warning",
     [
-        ("00:10", "00:10", "the device may not have written the day before yet"),
-        ("00:29", "00:29", "the device may not have written the day before yet"),
-        ("01:00", "00:15", "the device may not have written the day before yet"),
-        ("00:40", "23:40", "the device is still on the day before"),
-        ("01:30", "23:45", "the device is still on the day before"),
-        ("23:50", "00:30", "the device is already on the next day"),
+        (None, "[-] the device response has no device clock D_C_4_2"),
+        ("24:00", "[-] invalid device clock D_C_4_2 '24:00' (expected HH:MM)"),
+        ("7:05", "[-] invalid device clock D_C_4_2 '7:05' (expected HH:MM)"),
+        ("-", "[-] invalid device clock D_C_4_2 '-' (expected HH:MM)"),
+        ("", "[-] invalid device clock D_C_4_2 '' (expected HH:MM)"),
     ],
 )
-def test_run_before_the_device_rollover_fails_without_writing(
-    run, tmp_path, mails, local_time, device_clock, message
+def test_missing_or_invalid_device_clock_is_only_a_warning(
+    run, tmp_path, caplog, mails, device_clock, warning
 ):
-    with pytest.raises(SystemExit) as exit_info:
-        run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+    run(DEVICE_2026_11_23, device_clock=device_clock)
 
-    assert exit_info.value.code == 1
-    assert not list((tmp_path / "data").glob("*.csv"))
-    (kind, text), = mails
-    assert kind == "error"
-    assert text.startswith(f"[-] {message} (device clock {device_clock},"
-                           f" local time {local_time}, deviation ")
-    assert "run again" in text
-
-
-def test_run_without_device_clock_fails_without_writing(run, tmp_path, mails):
-    with pytest.raises(SystemExit) as exit_info:
-        run(DEVICE_2026_11_23, device_clock=None)
-
-    assert exit_info.value.code == 1
-    assert not list((tmp_path / "data").glob("*.csv"))
-    assert mails == [("error", "[-] the device response has no device clock D_C_4_2")]
-
-
-@pytest.mark.parametrize("device_clock", ["24:00", "7:05", "02:60", "-", "", "02:00:00"])
-def test_run_with_invalid_device_clock_fails_without_writing(
-    run, tmp_path, mails, device_clock
-):
-    with pytest.raises(SystemExit):
-        run(DEVICE_2026_11_23, device_clock=device_clock)
-
-    assert not list((tmp_path / "data").glob("*.csv"))
-    assert mails == [
-        ("error", f"[-] invalid device clock D_C_4_2 {device_clock!r} (expected HH:MM)")
-    ]
+    assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
+    assert clock_warnings(caplog) == [warning]
+    assert [kind for kind, _ in mails] == ["data"]
 
 
 def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
-    # 2026-11-24 00:45 with the device on the same day: yesterday is 2026-11-23
-    run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="00:45",
-        device_clock="00:45")
+    # 2026-11-24 16:30: yesterday is 2026-11-23
+    run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="16:30",
+        device_clock="16:30")
 
     stored = read_year(tmp_path, 2026)
     assert stored["2026-11-23"] == "101"
@@ -445,9 +418,10 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
     [
         ("10:00", "10:00", 0),
         ("01:00", "02:00", -60),
-        ("14:00", "12:00", 120),
-        ("10:00", "12:00", -120),
-        ("00:45", "23:00", None),  # +1:45 over midnight: next day, see below
+        ("02:15", "12:00", -585),
+        ("23:59", "12:00", 719),
+        ("12:00", "00:00", 720),  # upper end of (-12 h, +12 h]
+        ("00:30", "23:50", 40),
     ],
 )
 def test_deviation_is_device_minus_local_time_within_half_a_day(
@@ -455,41 +429,123 @@ def test_deviation_is_device_minus_local_time_within_half_a_day(
 ):
     now = datetime.datetime.combine(TODAY, datetime.time.fromisoformat(local_time))
 
-    if deviation is None:
-        with pytest.raises(SystemExit):
-            data_collector.check_device_clock({}, device_clock, now)
-    else:
-        assert data_collector.check_device_clock({}, device_clock, now) == deviation
+    assert data_collector.check_device_clock(device_clock, now) == deviation
 
 
-# --- limit of the clock deviation and visible warnings (P004-S9) -------------------
+# --- comparison with the stored values (P004-S10) -----------------------------------
 
 
-@pytest.mark.parametrize(
-    "local_time, device_clock, deviation",
-    [
-        ("06:00", "03:59", "-2:01"),
-        ("06:00", "08:01", "+2:01"),
-        ("12:00", "02:15", "-9:45"),  # the device clock before 2026-11-19
-        ("10:00", "00:15", "-9:45"),
-        ("06:00", "17:00", "+11:00"),  # 13 h late, looks 11 h early: was stored before
-        ("06:00", "12:30", "+6:30"),  # 17 h 30 min late
-        ("00:00", "12:00", "+12:00"),
-    ],
-)
-def test_run_with_device_clock_off_by_more_than_two_hours_fails_without_writing(
-    run, tmp_path, mails, local_time, device_clock, deviation
+def memory(value_of, today=TODAY, shift=0):
+    """
+    device memory D_Y_2_1 ... 14 for `today` from the true values of the days
+    :param value_of: function(datetime.date) -> consumption of that day
+    :param shift: 1 = the run is before the daily rollover (values one day older)
+    """
+    return {
+        f"D_Y_2_{n}": str(value_of(today - datetime.timedelta(days=n + shift)))
+        for n in range(1, 15)
+    }
+
+
+def true_value(day_):
+    """consumption of a day, different for every day"""
+    return 50 + day_.toordinal() % 97
+
+
+def stored_rows(first, last):
+    rows, current = [], first
+    while current <= last:
+        rows.append((current.isoformat(), str(true_value(current))))
+        current += datetime.timedelta(days=1)
+    return rows
+
+
+def test_overlap_with_the_same_values_is_written(run, tmp_path, mails):
+    # the run a week ago stored 2026-11-02 ... 2026-11-15
+    write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
+
+    run(memory(true_value))
+
+    stored = read_year(tmp_path, 2026)
+    assert stored["2026-11-22"] == str(true_value(day("2026-11-22")))
+    assert len(stored) == 21
+    assert [kind for kind, _ in mails] == ["data"]
+
+
+def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(
+    run, tmp_path, mails
 ):
+    write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
+    before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
+
     with pytest.raises(SystemExit) as exit_info:
-        run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
+        run(memory(true_value, shift=1), local_time="06:00", device_clock="06:00")
 
     assert exit_info.value.code == 1
-    assert not list((tmp_path / "data").glob("*.csv"))
+    assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
     assert mails == [
-        ("error", f"[-] the device clock is off by more than 2:00 (device clock"
-                  f" {device_clock}, local time {local_time}, deviation {deviation}):"
-                  " the day of the values is uncertain; set the device clock")
+        ("error", "[-] one day late: the run was probably before the daily rollover of"
+                  " the device; run again later (the new values of 2026-11-09 ..."
+                  " 2026-11-15 equal the stored values of the day before; nothing"
+                  " written)")
     ]
+
+
+def test_run_before_the_rollover_over_the_year_change_writes_no_file(
+    run, tmp_path, mails
+):
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-20"), day("2025-12-31")))
+    write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-03")))
+    files = sorted((tmp_path / "data").glob("*.csv"))
+    before = [path.read_bytes() for path in files]
+
+    with pytest.raises(SystemExit):
+        run(memory(true_value, today=day("2026-01-11"), shift=1),
+            today=day("2026-01-11"), local_time="07:00", device_clock="07:00")
+
+    assert [path.read_bytes() for path in files] == before
+    assert mails[0][1].startswith("[-] one day late:")
+
+
+def test_overlap_with_other_values_writes_nothing_and_names_the_days(
+    run, tmp_path, mails
+):
+    rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
+    rows[-1] = ("2026-11-15", "999")
+    rows[-3] = ("2026-11-13", "0")
+    write_year(tmp_path, 2026, rows)
+    new_13 = true_value(day("2026-11-13"))
+    new_15 = true_value(day("2026-11-15"))
+
+    with pytest.raises(SystemExit):
+        run(memory(true_value))
+
+    assert mails == [
+        ("error", f"[-] the new values differ from the stored ones (2026-11-13: stored"
+                  f" 0, new {new_13}, 2026-11-15: stored 999, new {new_15}): nothing"
+                  " written; check the data files and the device")
+    ]
+
+
+def test_overlap_over_the_year_change_is_checked_and_written(run, tmp_path):
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-25"), day("2025-12-31")))
+    write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-02")))
+
+    run(memory(true_value, today=day("2026-01-08")), today=day("2026-01-08"))
+
+    assert read_year(tmp_path, 2026)["2026-01-07"] == str(true_value(day("2026-01-07")))
+    assert read_year(tmp_path, 2025)["2025-12-25"] == str(true_value(day("2025-12-25")))
+
+
+def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
+    # migrated values up to 2026-11-19; the device memory on 2026-11-23 maps other
+    # values to these days (double place of 2026-11-19), but firstDate drops them
+    write_year(tmp_path, 2026, MIGRATED_2026)
+
+    run(DEVICE_2026_11_23, firstDate="2026-11-20")
+
+    assert read_year(tmp_path, 2026)["2026-11-19"] == "21"
+    assert [kind for kind, _ in mails] == ["data"]
 
 
 @pytest.fixture

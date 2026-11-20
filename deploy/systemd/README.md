@@ -8,19 +8,16 @@ The collector (`src/data-collector.py`) should run once a week. This guide descr
 | [User service with timer](#user-service-alternative) | no root access, and the user stays logged in or lingering is enabled |
 | [Cron](#cron-alternative) | systemd is not available |
 
-The weekly run (Monday 06:00) follows the 14 day memory of the soft water system: more frequent
-runs cause more writes, rarer runs leave less time to react to a failure. The soft water
-system writes the consumption of the day before shortly after midnight of its own clock
-(measured about 15 to 20 minutes after midnight), so 06:00 is well after it. Before it
-stores anything, the collector reads the device clock (`D_C_4_2`): if the device is not on
-the local day yet (or already on the next one) or its clock is before 00:30, the run stores
-nothing and fails with an error mail. This also covers a missed run that `Persistent=true`
-makes up in that time; the next weekly run collects the days again. A device clock that is
-off by more than 15 minutes but at most 2 hours is logged as a warning in
-`log/gruenbeck_error.log`; more than 2 hours is an error, because the device clock has no
-date and a clock that is late by many hours cannot be told from one that is early. It is
-unknown whether the device switches to daylight saving time by itself, so check the clock
-after each change.
+The weekly run (Monday 16:00) follows the 14 day memory of the soft water system: more frequent
+runs cause more writes, rarer runs leave less time to react to a failure. The run has to be
+after the daily rollover of the soft water system. The rollover does not follow the device
+clock: this device moves its values on every day at about 10:05 (measured with
+`scripts/log_device_rollover.py`), so 16:00 is well after it. Before it writes anything,
+the collector compares the new values with the days that are stored already. If they
+differ, for example because a missed run that `Persistent=true` makes up in the morning
+comes before the rollover, the run writes nothing and fails with an error mail; the next
+weekly run collects the days again. The device clock (`D_C_4_2`) is only checked for a
+warning in `log/gruenbeck_error.log` (missing, invalid or more than 15 minutes off).
 
 The collector reports a failed run by its exit code (see the exit codes in the
 [main README](../../README.md)), which systemd shows as failed unit state.
@@ -122,7 +119,7 @@ crontab -e
 ```
 
 ```text
-0 6 * * MON cd /path/to/gruenbeck && ./.venv/bin/python3 ./src/data-collector.py
+0 16 * * MON cd /path/to/gruenbeck && ./.venv/bin/python3 ./src/data-collector.py
 ```
 
 Cron does not make up a run that was missed while the machine was off.

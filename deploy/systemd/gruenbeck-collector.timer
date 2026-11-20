@@ -2,7 +2,7 @@
 Description=Run Gruenbeck Water Consumption Data Collector weekly
 
 [Timer]
-OnCalendar=Mon *-*-* 06:00:00
+OnCalendar=Mon *-*-* 16:00:00
 Persistent=true
 
 [Install]

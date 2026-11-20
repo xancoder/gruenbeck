@@ -32,15 +32,13 @@ DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
 DEVICE_MEMORY_DAYS = 14
 FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
-# device clock (HH:MM); the device writes the day before about 15 to 20 minutes after
-# its midnight, so values requested before ROLLOVER_DONE may still be one day old
+# device clock (HH:MM), only checked for a warning: the daily rollover of the device
+# does not follow it (about 10:05 CET before and after the clock was set, 2026-11-19/20)
 DEVICE_CLOCK_PARAMETER = "D_C_4_2"
 DEVICE_CLOCK_FORMAT = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
-ROLLOVER_DONE = datetime.time(0, 30)
 CLOCK_TOLERANCE_MINUTES = 15
-# HH:MM has no date: +x and -(24 h - x) look the same, so a larger deviation is an error
-CLOCK_ERROR_MINUTES = 2 * 60
 MINUTES_PER_DAY = 24 * 60
+ONE_DAY = datetime.timedelta(days=1)
 
 
 def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
@@ -78,46 +76,48 @@ def main(config_file):
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
     now = local_now()
-    check_device_clock(config, device_data.pop(DEVICE_CLOCK_PARAMETER, None), now)
+    check_device_clock(device_data.pop(DEVICE_CLOCK_PARAMETER, None), now)
     try:
         device_data = add_timestamp_as_key_device_data(device_data, today=now.date())
     except ValueError as err:
         handle_error(config, f"{err}")
     device_data = filter_first_date(config, device_data, first_date)
+    new_values = {day: int(value) for day, value in device_data.items()}
+
+    # read every yearly file involved (also the one of the day before the oldest new
+    # value, see check_stored_overlap) before anything is written
+    data_file = config["dataFile"]
+    years = sorted({day.year for day in new_values})
+    years_to_read = set(years)
+    if new_values:
+        years_to_read.add((min(new_values) - ONE_DAY).year)
+    stored_by_year = {
+        year: read_data_file(get_data_file(config, data_path, year), data_file["fieldnames"])
+        for year in sorted(years_to_read)
+    }
+    check_stored_overlap(
+        config,
+        new_values,
+        {day: value for values in stored_by_year.values() for day, value in values.items()},
+        data_file["datePattern"],
+    )
 
     # Track if any data was processed
     data_processed = False
 
     # provides files per year and handle year change
-    years = set([x.year for x in device_data])
     for year in years:
-        # format date
-        data_new = {}
-        for timestamp in sorted(device_data):
-            if timestamp.year == year:
-                data_new.update(
-                    {
-                        timestamp.strftime(config["dataFile"]["datePattern"]): int(
-                            device_data[timestamp]
-                        )
-                    }
-                )
-        # get stored data
-        data_existing = {}
-        file_obj = pathlib.Path(
-            f"{data_path}/{config['dataFile']['prefix']}_{year}.csv"
+        data_existing = dict(stored_by_year[year])
+        data_existing.update(
+            {
+                day.strftime(data_file["datePattern"]): value
+                for day, value in sorted(new_values.items())
+                if day.year == year
+            }
         )
-        if file_obj.exists():
-            with file_obj.open(mode="r", newline="", encoding="utf-8") as csv_file:
-                csv_reader = csv.DictReader(csv_file)
-                for row in csv_reader:
-                    tmp_date = row[config["dataFile"]["fieldnames"]["date"]]
-                    tmp_value = row[config["dataFile"]["fieldnames"]["value"]]
-                    tmp_value = int(tmp_value) if tmp_value.isnumeric() else tmp_value
-                    data_existing.update({tmp_date: tmp_value})
-        # merge values
-        data_existing.update(data_new)
-        write_data(file_obj, config["dataFile"]["fieldnames"], data_existing)
+        write_data(
+            get_data_file(config, data_path, year), data_file["fieldnames"], data_existing
+        )
         data_processed = True
 
     # nothing stored is a failure, not a successful run
@@ -323,70 +323,40 @@ def format_minutes(minutes):
     return f"{sign}{hours}:{rest:02d}"
 
 
-def check_device_clock(config, device_clock, now):
+def check_device_clock(device_clock, now):
     """
-    make sure that "today - n" is the right day for D_Y_2_<n> at the local time now
+    log a warning if the device clock is off; it does not decide on the run
 
-    The device clock must not be off by more than CLOCK_ERROR_MINUTES (without a
-    date, a clock that is late by many hours looks like one that is early), and the
-    device has to be on the local calendar day and past its daily rollover
-    (ROLLOVER_DONE device time); otherwise the run ends via handle_error before
-    anything is written. A deviation above CLOCK_TOLERANCE_MINUTES is logged as a
-    warning.
+    The daily rollover of the device does not follow its clock (about 10:05 CET before
+    and after the clock was set on 2026-11-19), so the clock is only checked to tell
+    the user to set it. check_stored_overlap() detects a run before the rollover.
     :param device_clock: value of D_C_4_2 (HH:MM), None if missing in the response
     :param now: local time of the run (datetime.datetime)
-    :return: deviation device clock - local time in minutes, within (-12 h, +12 h]
+    :return: deviation device clock - local time in minutes, within (-12 h, +12 h],
+        or None without a valid device clock
     """
     if device_clock is None:
-        handle_error(
-            config, f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}"
+        logger.warning(
+            f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}"
         )
+        return None
     match = DEVICE_CLOCK_FORMAT.fullmatch(str(device_clock).strip())
     if not match:
-        handle_error(
-            config,
+        logger.warning(
             f"[-] invalid device clock {DEVICE_CLOCK_PARAMETER} {device_clock!r}"
-            " (expected HH:MM)",
+            " (expected HH:MM)"
         )
+        return None
     device_minutes = int(match.group(1)) * 60 + int(match.group(2))
     local_minutes = now.hour * 60 + now.minute
     deviation = (device_minutes - local_minutes) % MINUTES_PER_DAY
     if deviation > MINUTES_PER_DAY // 2:
         deviation -= MINUTES_PER_DAY
-    clocks = (
-        f"device clock {match.group(0)}, local time {now:%H:%M},"
-        f" deviation {format_minutes(deviation)}"
-    )
-
-    if abs(deviation) > CLOCK_ERROR_MINUTES:
-        handle_error(
-            config,
-            f"[-] the device clock is off by more than"
-            f" {format_minutes(CLOCK_ERROR_MINUTES)[1:]} ({clocks}): the day of the"
-            " values is uncertain; set the device clock",
-        )
-    device_since_local_midnight = local_minutes + deviation
-    if device_since_local_midnight < 0:
-        handle_error(
-            config,
-            f"[-] the device is still on the day before ({clocks}): the values cannot"
-            " be assigned to dates; set the device clock or run again later",
-        )
-    if device_since_local_midnight >= MINUTES_PER_DAY:
-        handle_error(
-            config,
-            f"[-] the device is already on the next day ({clocks}): the values cannot"
-            " be assigned to dates; set the device clock or run again later",
-        )
-    rollover_minutes = ROLLOVER_DONE.hour * 60 + ROLLOVER_DONE.minute
-    if device_minutes < rollover_minutes:
-        handle_error(
-            config,
-            f"[-] the device may not have written the day before yet ({clocks}): run"
-            f" again after {ROLLOVER_DONE:%H:%M} device time",
-        )
     if abs(deviation) > CLOCK_TOLERANCE_MINUTES:
-        logger.warning(f"[-] the device clock is off ({clocks}): set the device clock")
+        logger.warning(
+            f"[-] the device clock is off (device clock {match.group(0)}, local time"
+            f" {now:%H:%M}, deviation {format_minutes(deviation)}): set the device clock"
+        )
     return deviation
 
 
@@ -438,6 +408,68 @@ def filter_first_date(config, device_data, first_date):
             f" dataFile.firstDate {first_date}",
         )
     return result
+
+
+def get_data_file(config, data_path, year):
+    """path of the yearly data file"""
+    return pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+
+
+def read_data_file(file_obj, fieldnames):
+    """
+    stored values of one yearly file
+    :return: dictionary of date text and value (int if numeric), empty without file
+    """
+    data = {}
+    if file_obj.exists():
+        with file_obj.open(mode="r", newline="", encoding="utf-8") as csv_file:
+            for row in csv.DictReader(csv_file):
+                value = row[fieldnames["value"]]
+                data[row[fieldnames["date"]]] = int(value) if value.isnumeric() else value
+    return data
+
+
+def check_stored_overlap(config, new_values, stored, date_pattern):
+    """
+    compare the new values with the days that are stored already
+
+    Values of past days do not change on the device. If a stored day gets another
+    value, the run writes nothing: either the run was before the daily rollover of the
+    device (every new value equals the stored value of the day before) or the data
+    files and the device disagree.
+    :param new_values: dictionary of datetime.date and value (int)
+    :param stored: dictionary of date text and stored value of all files involved
+    :param date_pattern: dataFile.datePattern, the format of the date texts
+    """
+    overlap = [day for day in sorted(new_values) if day.strftime(date_pattern) in stored]
+    differing = [
+        day for day in overlap if stored[day.strftime(date_pattern)] != new_values[day]
+    ]
+    if not differing:
+        return
+    with_day_before = [
+        day for day in overlap if (day - ONE_DAY).strftime(date_pattern) in stored
+    ]
+    if with_day_before and all(
+        stored[(day - ONE_DAY).strftime(date_pattern)] == new_values[day]
+        for day in with_day_before
+    ):
+        handle_error(
+            config,
+            "[-] one day late: the run was probably before the daily rollover of the"
+            " device; run again later (the new values of"
+            f" {with_day_before[0]} ... {with_day_before[-1]} equal the stored values"
+            " of the day before; nothing written)",
+        )
+    details = ", ".join(
+        f"{day}: stored {stored[day.strftime(date_pattern)]}, new {new_values[day]}"
+        for day in differing
+    )
+    handle_error(
+        config,
+        f"[-] the new values differ from the stored ones ({details}): nothing written;"
+        " check the data files and the device",
+    )
 
 
 def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
