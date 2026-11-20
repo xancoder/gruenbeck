@@ -9,8 +9,15 @@ The collector (`src/data-collector.py`) should run once a week. This guide descr
 | [Cron](#cron-alternative) | systemd is not available |
 
 The weekly run (Monday 16:00) follows the 14 day memory of the soft water system: more frequent
-runs cause more writes, rarer runs leave less time to react to a failure. The soft water
-system writes the measurement of the day before around 12:00, so the run must not be earlier.
+runs cause more writes, rarer runs leave less time to react to a failure. The run has to be
+after the daily rollover of the soft water system. The rollover does not follow the device
+clock: this device moves its values on every day at about 10:05 (measured with
+`scripts/log_device_rollover.py`), so 16:00 is well after it. Before it writes anything,
+the collector compares the new values with the days that are stored already. If they
+differ, for example because a missed run that `Persistent=true` makes up in the morning
+comes before the rollover, the run writes nothing and fails with an error mail; the next
+weekly run collects the days again. The device clock (`D_C_4_2`) is only checked for a
+warning in `log/gruenbeck_error.log` (missing, invalid or more than 15 minutes off).
 
 The collector reports a failed run by its exit code (see the exit codes in the
 [main README](../../README.md)), which systemd shows as failed unit state.
@@ -101,7 +108,9 @@ The `--output-dir` must be outside of the repository. Use `systemctl --user` and
 | Stop the schedule | `sudo systemctl disable --now gruenbeck-collector.timer` |
 | Remove the units | `sudo rm /etc/systemd/system/gruenbeck-collector.service /etc/systemd/system/gruenbeck-collector.timer && sudo systemctl daemon-reload` |
 
-The collector also writes errors to `log/gruenbeck_error.log` (relative to the repository).
+The collector also writes warnings and errors to `log/gruenbeck_error.log` (relative to the
+repository). The unit starts it without `-l`, so its log messages are in that file, not in
+the journal.
 
 ## Cron (alternative)
 

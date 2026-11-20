@@ -5,6 +5,7 @@
       "date": "date",
       "value": "value"
     },
+    "firstDate": "2026-11-20",
     "prefix": "gruenbeck_water_consumption"
   },
   "dataPath": "./data",
