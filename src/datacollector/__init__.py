@@ -56,7 +56,7 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
 
         # Turn these into plain/html MIMEText objects
         # text email
-        text = f"your stored data"
+        text = "your stored data"
         part_text = email.mime.text.MIMEText(text, "plain")
         message.attach(part_text)
 
@@ -78,7 +78,7 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
                     # After the file is closed
                     part_file["Content-Disposition"] = f'attachment; filename="{f.name}"'
                     message.attach(part_file)
-                except (IOError, PermissionError) as error:
+                except OSError as error:
                     # Log the error but continue with other files
                     part_text = email.mime.text.MIMEText(
                         f"Error attaching file {f.name}: {error}", "plain"
@@ -88,10 +88,10 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
         mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
-        raise ValueError(f"Invalid mail configuration: {error}")
+        raise ValueError(f"Invalid mail configuration: {error}") from error
     except Exception as error:
         # Re-raise any other exceptions as ValueError for consistent error handling
-        raise ValueError(f"Error preparing email: {error}")
+        raise ValueError(f"Error preparing email: {error}") from error
 
 
 def send_mail_text(param: dict, subject: str, text: str) -> None:
@@ -123,10 +123,10 @@ def send_mail_text(param: dict, subject: str, text: str) -> None:
         mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
-        raise ValueError(f"Invalid mail configuration: {error}")
+        raise ValueError(f"Invalid mail configuration: {error}") from error
     except Exception as error:
         # Re-raise any other exceptions as ValueError for consistent error handling
-        raise ValueError(f"Error preparing email: {error}")
+        raise ValueError(f"Error preparing email: {error}") from error
 
 
 # Errors that may disappear on a later attempt (connection problems, timeouts)
@@ -164,8 +164,8 @@ def get_smtp_connection_settings(param: dict, smtp_port) -> tuple:
     """
     try:
         port = int(smtp_port)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid smtpPort: {smtp_port!r}")
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid smtpPort: {smtp_port!r}") from error
 
     security = param.get("smtpSecurity")
     if security is None:
@@ -205,7 +205,7 @@ def mail_sending(
                 return  # Success, exit the function
         except smtplib.SMTPAuthenticationError as error:
             # Authentication errors are not retryable
-            raise ValueError(f"Authentication failed: {error}")
+            raise ValueError(f"Authentication failed: {error}") from error
         except TRANSIENT_SMTP_ERRORS as error:
             if attempts > max_retries:
                 raise ValueError(
@@ -214,7 +214,7 @@ def mail_sending(
             time.sleep(retry_delay)  # Wait before retrying
         except PERMANENT_SMTP_ERRORS as error:
             # Permanent errors, retrying does not help
-            raise ValueError(f"Email rejected: {error}")
+            raise ValueError(f"Email rejected: {error}") from error
         except Exception as error:
             # Unexpected errors
-            raise ValueError(f"Unexpected error while sending email: {error}")
+            raise ValueError(f"Unexpected error while sending email: {error}") from error

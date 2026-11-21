@@ -83,7 +83,7 @@ def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT):
     try:
         root = xml.etree.ElementTree.fromstring(response_data.text)
     except xml.etree.ElementTree.ParseError as err:
-        raise ValueError(f"[-] failed to parse xml: {err}")
+        raise ValueError(f"[-] failed to parse xml: {err}") from err
 
     for child in root:
         if child.tag == "code":

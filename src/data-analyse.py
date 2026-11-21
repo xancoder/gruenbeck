@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 import pathlib
 import re
@@ -53,7 +52,7 @@ def main(config_file):
         x = []
         y = []
 
-        for key, item in grouped_df:
+        for key, _group in grouped_df:
             x.append(key[1])
             y.append(grouped_df.get_group(key).value.mean())
 

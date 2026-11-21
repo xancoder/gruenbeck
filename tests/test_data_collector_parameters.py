@@ -1,5 +1,6 @@
-import gruenbeck
 import pytest
+
+import gruenbeck
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 CONFIG = {"softWaterSystem": {"host": "device.lan"}, "mail": {}}

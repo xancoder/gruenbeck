@@ -98,7 +98,7 @@ def poll(
     if previous is not None and current != previous:
         message = ", ".join(
             f"{name} {old} -> {new}"
-            for name, old, new in zip(ROLLOVER_PARAMETERS, previous, current)
+            for name, old, new in zip(ROLLOVER_PARAMETERS, previous, current, strict=True)
         )
         if since:
             message += f" (since {since})"

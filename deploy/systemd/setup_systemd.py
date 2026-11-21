@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Generate the systemd units of the Gruenbeck data collector from the templates
 next to this script and print the commands to install them as system service.
