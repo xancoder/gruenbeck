@@ -307,7 +307,7 @@ def test_default_timeout_comes_from_gruenbeck(tmp_path):
 
     assert rollover.read_device_config(str(config)) == (
         "device.lan",
-        float(rollover.gruenbeck.DEFAULT_TIMEOUT),
+        float(rollover.gruenbeck.device.DEFAULT_TIMEOUT),
     )
 
 

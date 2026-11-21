@@ -1,13 +1,10 @@
-#!/usr/bin/env python3
+"""monthly statistics of the collected water consumption (extra "analysis")"""
 
 import pathlib
 import re
 import sys
 
-import matplotlib.pyplot as plt
-import pandas
-
-import datacollector
+from gruenbeck import config as configuration
 
 print_pattern_headline = "{:<4} {:<5} {:<4} {:<3} {:<3} {:<3} {:<5}"
 print_pattern = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
@@ -27,8 +24,13 @@ def get_data_files(config):
 
 
 def main(config_file):
+    # pandas and matplotlib belong to the extra "analysis"; importing them here
+    # keeps the module and the help of gruenbeck-analyse usable without it
+    import matplotlib.pyplot as plt
+    import pandas
+
     try:
-        config = datacollector.check_configuration(config_file)
+        config = configuration.check_configuration(config_file)
         data_files = get_data_files(config)
     except FileNotFoundError as err:
         sys.exit(f"[-] no configuration: {err}")
@@ -89,21 +91,3 @@ def main(config_file):
     plt.grid(True)
     plt.legend()
     plt.show()
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="monthly statistics of the collected water consumption"
-    )
-    parser.add_argument(
-        "--config-file",
-        "-c",
-        help="set config file",
-        required=False,
-        default="./src/config.json",
-    )
-    args = parser.parse_args()
-
-    main(args.config_file)

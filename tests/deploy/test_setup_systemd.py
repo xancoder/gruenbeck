@@ -23,10 +23,7 @@ def test_generate_units_replaces_placeholders(tmp_path):
     service = (out / "gruenbeck-collector.service").read_text()
     assert "User=collector\n" in service
     assert "WorkingDirectory=/opt/gruenbeck\n" in service
-    assert (
-        "ExecStart=/opt/gruenbeck/.venv/bin/python3 /opt/gruenbeck/src/data-collector.py\n"
-        in service
-    )
+    assert "ExecStart=/opt/gruenbeck/.venv/bin/gruenbeck-collect\n" in service
     assert "{{" not in service
     assert service.endswith("\n")
 

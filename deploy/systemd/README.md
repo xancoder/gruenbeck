@@ -1,6 +1,7 @@
 # Scheduling the Gruenbeck data collector
 
-The collector (`src/data-collector.py`) should run once a week. This guide describes three ways:
+The collector (command `gruenbeck-collect`) should run once a week. This guide describes three
+ways:
 
 | Way | Use it when |
 |-----|-------------|
@@ -26,8 +27,9 @@ The collector reports a failed run by its exit code (see the exit codes in the
 
 - The repository is cloned on the machine that runs the collector.
 - The virtual environment exists in `./.venv` (`uv sync --no-dev`, see the
-  [main README](../../README.md)); the unit calls `.venv/bin/python3`, so uv is not needed
-  at run time. Create it as the user that runs the service, or make it readable for that user.
+  [main README](../../README.md)). `uv sync` installs the command `.venv/bin/gruenbeck-collect`
+  that the unit calls, so uv is not needed at run time. Create it as the user that runs the
+  service, or make it readable for that user.
 - `src/config.json` is configured. The collector reads it, writes `data/` and `log/` relative
   to the repository, so the user running the service needs read access to the repository and
   write access to `data/` and `log/`. The file contains the SMTP password: let the service user own it and
@@ -119,10 +121,23 @@ crontab -e
 ```
 
 ```text
-0 16 * * MON cd /path/to/gruenbeck && ./.venv/bin/python3 ./src/data-collector.py
+0 16 * * MON cd /path/to/gruenbeck && ./.venv/bin/gruenbeck-collect
 ```
 
 Cron does not make up a run that was missed while the machine was off.
+
+## Updating from `src/data-collector.py`
+
+Older versions ran the script `src/data-collector.py`, which no longer exists. After updating
+the repository:
+
+1. Run `uv sync --no-dev` again; it installs the command `.venv/bin/gruenbeck-collect`.
+2. Generate the units again with `setup_systemd.py` and install them with the printed commands
+   (system service), or copy the generated service again (user service). The new unit starts
+   `.venv/bin/gruenbeck-collect`; check it with `systemctl cat gruenbeck-collector.service`.
+3. With cron, replace the old line by the one under [Cron](#cron-alternative).
+
+The options (`-c`, `-l`, `-e`) and their defaults are the same as before.
 
 ## Switching from cron to systemd
 

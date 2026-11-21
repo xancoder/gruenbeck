@@ -1,13 +1,15 @@
 import pytest
 
-import gruenbeck
+# the fixture device is the fake device, so the module is used as gruenbeck.device
+import gruenbeck.device
+from gruenbeck import cli, mail
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 CONFIG = {"softWaterSystem": {"host": "device.lan"}, "mail": {}}
 
 
 @pytest.fixture
-def device(data_collector, monkeypatch):
+def device(monkeypatch):
     """fake device; records the parameters of every request"""
     requests = []
 
@@ -15,15 +17,15 @@ def device(data_collector, monkeypatch):
         requests.append(list(parameters))
         return {name: "1" for name in parameters}
 
-    monkeypatch.setattr(data_collector.gruenbeck, "get_data_from_mux_http", fetch)
+    monkeypatch.setattr(gruenbeck.device, "get_data_from_mux_http", fetch)
     return requests
 
 
 @pytest.fixture
-def error_mails(data_collector, monkeypatch):
+def error_mails(monkeypatch):
     sent = []
     monkeypatch.setattr(
-        data_collector.datacollector,
+        mail,
         "send_mail_text",
         lambda param, subject, text: sent.append(text),
     )
@@ -31,7 +33,7 @@ def error_mails(data_collector, monkeypatch):
 
 
 def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file):
-    parameter = gruenbeck.Parameter(str(parameter_file))
+    parameter = gruenbeck.device.Parameter(str(parameter_file))
 
     assert parameter.get_parameter_by_note("Wasserverbrauch") == [
         "D_Y_1",
@@ -49,10 +51,10 @@ def test_parameter_files_have_no_commented_rows(parameter_file, suffix, separato
     assert f"D_Y_2_27{separator}read" in "\n".join(lines)
 
 
-def test_only_the_14_day_memory_is_requested(data_collector, device, parameter_file):
-    parameter = gruenbeck.Parameter(str(parameter_file))
+def test_only_the_14_day_memory_is_requested(device, parameter_file):
+    parameter = gruenbeck.device.Parameter(str(parameter_file))
 
-    result = data_collector.get_device_data(CONFIG, parameter)
+    result = cli.get_device_data(CONFIG, parameter)
 
     # plus the device clock for check_device_clock() (P004-S8)
     assert device == [["D_C_4_2", *MEMORY]]
@@ -60,7 +62,7 @@ def test_only_the_14_day_memory_is_requested(data_collector, device, parameter_f
 
 
 def test_missing_memory_parameter_fails_before_asking_the_device(
-    data_collector, device, error_mails, parameter_file, tmp_path, caplog
+    device, error_mails, parameter_file, tmp_path, caplog
 ):
     rows = parameter_file.read_text(encoding="utf-8").splitlines(keepends=True)
     without = [row for row in rows if not row.startswith(("D_Y_2_5,", "D_Y_2_12,"))]
@@ -69,7 +71,7 @@ def test_missing_memory_parameter_fails_before_asking_the_device(
     reduced.write_text("".join(without), encoding="utf-8")
 
     with pytest.raises(SystemExit) as exit_info:
-        data_collector.get_device_data(CONFIG, gruenbeck.Parameter(str(reduced)))
+        cli.get_device_data(CONFIG, gruenbeck.device.Parameter(str(reduced)))
 
     assert exit_info.value.code == 1
     assert device == []

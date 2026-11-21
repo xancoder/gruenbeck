@@ -14,6 +14,14 @@ analysis = [
     "matplotlib>=3.9",
 ]
 
+[project.scripts]
+gruenbeck-collect = "gruenbeck.cli:collect"
+gruenbeck-analyse = "gruenbeck.cli:analyse"
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
     "mypy>=2.4.1",

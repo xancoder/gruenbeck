@@ -13,7 +13,7 @@ import ssl
 
 import pytest
 
-import datacollector
+from gruenbeck import mail
 
 MAIL = {
     "recipients": ["one@example.com", "two@example.com"],
@@ -50,7 +50,7 @@ def test_data_mail_attaches_the_csv_files_of_the_data_folder(smtp, sleeps, data_
     (data_folder / "sub").mkdir()
     (data_folder / "sub" / "deeper.csv").write_text("not attached")
 
-    datacollector.send_mail(MAIL, data_folder)
+    mail.send_mail(MAIL, data_folder)
 
     (message,) = smtp.messages()
     assert message["Subject"] == "[data collector] - gruenbeck"
@@ -71,7 +71,7 @@ def test_data_mail_attaches_the_csv_files_of_the_data_folder(smtp, sleeps, data_
 
 
 def test_data_mail_goes_to_every_recipient_after_login(smtp, data_folder):
-    datacollector.send_mail(MAIL, data_folder)
+    mail.send_mail(MAIL, data_folder)
 
     (connection,) = smtp.connections
     assert connection["kind"] == "SMTP"
@@ -91,7 +91,7 @@ def test_data_mail_goes_to_every_recipient_after_login(smtp, data_folder):
 def test_data_mail_without_csv_files_says_so(smtp, data_folder):
     (data_folder / "notes.txt").write_text("not attached")
 
-    datacollector.send_mail(MAIL, data_folder)
+    mail.send_mail(MAIL, data_folder)
 
     (message,) = smtp.messages()
     assert parts(message) == [
@@ -105,7 +105,7 @@ def test_unreadable_csv_file_becomes_a_text_part(smtp, data_folder):
     (data_folder / "b.csv").mkdir()  # matches *.csv, but cannot be read
     (data_folder / "c.csv").write_text("date,value\n")
 
-    datacollector.send_mail(MAIL, data_folder)
+    mail.send_mail(MAIL, data_folder)
 
     (message,) = smtp.messages()
     found = parts(message)
@@ -125,7 +125,7 @@ def test_data_mail_without_data_folder_is_an_error(smtp, tmp_path, kind):
         folder.write_text("")
 
     with pytest.raises(ValueError) as err:
-        datacollector.send_mail(MAIL, folder)
+        mail.send_mail(MAIL, folder)
 
     assert str(err.value) == (
         f"Error preparing email: Data folder does not exist or is not a directory: {folder}"
@@ -140,7 +140,7 @@ def test_data_mail_with_missing_configuration_is_an_error(smtp, data_folder, key
     config = {name: value for name, value in MAIL.items() if name != key}
 
     with pytest.raises(ValueError) as err:
-        datacollector.send_mail(config, data_folder)
+        mail.send_mail(config, data_folder)
 
     assert str(err.value) == f"Invalid mail configuration: '{key}'"
     assert isinstance(err.value.__cause__, KeyError)
@@ -151,7 +151,7 @@ def test_data_mail_wraps_the_send_errors_again(smtp, sleeps, data_folder):
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
     with pytest.raises(ValueError) as err:
-        datacollector.send_mail(MAIL, data_folder)
+        mail.send_mail(MAIL, data_folder)
 
     assert str(err.value) == (
         "Error preparing email: Authentication failed: (535, b'bad credentials')"
@@ -164,7 +164,7 @@ def test_data_mail_wraps_the_send_errors_again(smtp, sleeps, data_folder):
 
 
 def test_text_mail_has_the_given_subject_and_text(smtp, sleeps):
-    datacollector.send_mail_text(MAIL, "gruenbeck data collector failure", "[-] an error")
+    mail.send_mail_text(MAIL, "gruenbeck data collector failure", "[-] an error")
 
     (message,) = smtp.messages()
     assert message["Subject"] == "gruenbeck data collector failure"
@@ -187,7 +187,7 @@ def test_text_mail_has_the_given_subject_and_text(smtp, sleeps):
 def test_text_mail_needs_no_subject_in_the_configuration(smtp):
     config = {name: value for name, value in MAIL.items() if name != "subject"}
 
-    datacollector.send_mail_text(config, "subject", "text")
+    mail.send_mail_text(config, "subject", "text")
 
     (message,) = smtp.messages()
     assert message["Subject"] == "subject"
@@ -200,7 +200,7 @@ def test_text_mail_with_missing_configuration_is_an_error(smtp, key):
     config = {name: value for name, value in MAIL.items() if name != key}
 
     with pytest.raises(ValueError) as err:
-        datacollector.send_mail_text(config, "subject", "text")
+        mail.send_mail_text(config, "subject", "text")
 
     assert str(err.value) == f"Invalid mail configuration: '{key}'"
     assert smtp.connections == []
@@ -210,7 +210,7 @@ def test_text_mail_wraps_the_send_errors_again(smtp, sleeps):
     smtp.errors = [("connect", ConnectionRefusedError(111, "Connection refused"))] * 4
 
     with pytest.raises(ValueError) as err:
-        datacollector.send_mail_text(MAIL, "subject", "text")
+        mail.send_mail_text(MAIL, "subject", "text")
 
     assert str(err.value) == (
         "Error preparing email: Failed to send email after 4 attempts:"
@@ -238,13 +238,13 @@ def test_text_mail_wraps_the_send_errors_again(smtp, sleeps):
     ],
 )
 def test_connection_settings(param, port, expected):
-    assert datacollector.get_smtp_connection_settings(param, port) == expected
+    assert mail.get_smtp_connection_settings(param, port) == expected
 
 
 @pytest.mark.parametrize("port", ["abc", "", None, [587], "587.0"], ids=repr)
 def test_invalid_port_is_an_error(port):
     with pytest.raises(ValueError) as err:
-        datacollector.get_smtp_connection_settings({}, port)
+        mail.get_smtp_connection_settings({}, port)
 
     assert str(err.value) == f"Invalid smtpPort: {port!r}"
 
@@ -252,7 +252,7 @@ def test_invalid_port_is_an_error(port):
 @pytest.mark.parametrize("security", ["tls", "", "none", 1, ["ssl"]], ids=repr)
 def test_invalid_security_is_an_error(security):
     with pytest.raises(ValueError) as err:
-        datacollector.get_smtp_connection_settings({"smtpSecurity": security}, 587)
+        mail.get_smtp_connection_settings({"smtpSecurity": security}, 587)
 
     assert str(err.value) == f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')"
 
@@ -262,7 +262,7 @@ def test_invalid_security_is_an_error(security):
 
 def send(param=None, port=587, **kwargs):
     message = email.mime.text.MIMEText("text", "plain")
-    datacollector.mail_sending(
+    mail.mail_sending(
         message,
         MAIL if param is None else param,
         "sender@example.com",
@@ -428,9 +428,7 @@ def test_message_is_sent_as_string(smtp):
     message["Subject"] = "subject"
     message.set_content("body")
 
-    datacollector.mail_sending(
-        message, MAIL, "sender@example.com", "test-password", 587, "smtp.example.com"
-    )
+    mail.mail_sending(message, MAIL, "sender@example.com", "test-password", 587, "smtp.example.com")
 
     (connection,) = smtp.connections
     assert connection["calls"][2][3] == message.as_string()

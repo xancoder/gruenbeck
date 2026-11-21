@@ -5,6 +5,8 @@ import logging
 
 import pytest
 
+from gruenbeck import cli, device, mail
+
 PREFIX = "gruenbeck_water_consumption"
 TODAY = datetime.date(2026, 11, 23)
 PARAMETERS = [f"D_Y_2_{n}" for n in range(1, 15)]
@@ -15,16 +17,16 @@ def day(text):
 
 
 @pytest.fixture
-def mails(data_collector, monkeypatch):
+def mails(monkeypatch):
     """records data and error mails instead of sending them"""
     sent = []
     monkeypatch.setattr(
-        data_collector.datacollector,
+        mail,
         "send_mail",
         lambda param, data_folder: sent.append(("data", data_folder)),
     )
     monkeypatch.setattr(
-        data_collector.datacollector,
+        mail,
         "send_mail_text",
         lambda param, subject, text: sent.append(("error", text)),
     )
@@ -34,30 +36,30 @@ def mails(data_collector, monkeypatch):
 # --- mapping of the parameter name to the day ---------------------------------------
 
 
-def test_parameter_name_gives_the_day(data_collector):
+def test_parameter_name_gives_the_day():
     response = {name: str(100 + n) for n, name in enumerate(PARAMETERS, start=1)}
 
-    result = data_collector.add_timestamp_as_key_device_data(response, today=TODAY)
+    result = device.add_timestamp_as_key_device_data(response, today=TODAY)
 
     assert result == {TODAY - datetime.timedelta(days=n): str(100 + n) for n in range(1, 15)}
     assert result[day("2026-11-22")] == "101"  # D_Y_2_1: yesterday
     assert result[day("2026-11-09")] == "114"  # D_Y_2_14: 14 days ago
 
 
-def test_order_of_the_response_does_not_matter(data_collector):
+def test_order_of_the_response_does_not_matter():
     in_order = {name: str(n) for n, name in enumerate(PARAMETERS, start=1)}
     shuffled = {name: in_order[name] for name in [*PARAMETERS[7:], *PARAMETERS[:7]]}
     reversed_order = dict(reversed(list(in_order.items())))
 
-    expected = data_collector.add_timestamp_as_key_device_data(in_order, today=TODAY)
+    expected = device.add_timestamp_as_key_device_data(in_order, today=TODAY)
 
     for response in (shuffled, reversed_order):
-        assert data_collector.add_timestamp_as_key_device_data(response, today=TODAY) == expected
+        assert device.add_timestamp_as_key_device_data(response, today=TODAY) == expected
 
 
-def test_days_are_calendar_dates_of_the_current_day(data_collector):
+def test_days_are_calendar_dates_of_the_current_day():
     before = datetime.date.today()
-    result = data_collector.add_timestamp_as_key_device_data({"D_Y_2_1": "93"})
+    result = device.add_timestamp_as_key_device_data({"D_Y_2_1": "93"})
     after = datetime.date.today()
 
     (key,) = result
@@ -65,9 +67,9 @@ def test_days_are_calendar_dates_of_the_current_day(data_collector):
     assert key in {before - datetime.timedelta(days=1), after - datetime.timedelta(days=1)}
 
 
-def test_run_time_is_the_local_time_without_time_zone(data_collector):
+def test_run_time_is_the_local_time_without_time_zone():
     before = datetime.datetime.now()
-    now = data_collector.local_now()
+    now = cli.local_now()
     after = datetime.datetime.now()
 
     assert type(now) is datetime.datetime
@@ -75,10 +77,10 @@ def test_run_time_is_the_local_time_without_time_zone(data_collector):
     assert before <= now <= after
 
 
-def test_year_change(data_collector):
+def test_year_change():
     response = {"D_Y_2_1": "1", "D_Y_2_2": "2", "D_Y_2_3": "3", "D_Y_2_14": "14"}
 
-    result = data_collector.add_timestamp_as_key_device_data(response, today=day("2026-01-02"))
+    result = device.add_timestamp_as_key_device_data(response, today=day("2026-01-02"))
 
     assert result == {
         day("2026-01-01"): "1",
@@ -88,8 +90,8 @@ def test_year_change(data_collector):
     }
 
 
-def test_more_than_14_days_ago(data_collector):
-    result = data_collector.add_timestamp_as_key_device_data({"D_Y_2_27": "80"}, today=TODAY)
+def test_more_than_14_days_ago():
+    result = device.add_timestamp_as_key_device_data({"D_Y_2_27": "80"}, today=TODAY)
 
     assert result == {day("2026-10-27"): "80"}
 
@@ -97,11 +99,11 @@ def test_more_than_14_days_ago(data_collector):
 @pytest.mark.parametrize(
     "name", ["D_Y_1", "D_Y_2_0", "D_Y_2_01", "D_Y_2_x", "D_Y_2_1x", "d_y_2_1", "code"]
 )
-def test_unknown_parameter_is_an_error(data_collector, name):
+def test_unknown_parameter_is_an_error(name):
     response = {"D_Y_2_1": "93", name: "33"}
 
     with pytest.raises(ValueError) as err:
-        data_collector.add_timestamp_as_key_device_data(response, today=TODAY)
+        device.add_timestamp_as_key_device_data(response, today=TODAY)
 
     assert str(err.value) == (
         f"[-] unknown consumption parameter {name!r}:"
@@ -112,23 +114,23 @@ def test_unknown_parameter_is_an_error(data_collector, name):
 # --- dataFile.firstDate ------------------------------------------------------------
 
 
-def test_first_date_is_optional(data_collector):
-    assert data_collector.get_first_date({"dataFile": {"prefix": PREFIX}}) is None
+def test_first_date_is_optional():
+    assert cli.get_first_date({"dataFile": {"prefix": PREFIX}}) is None
 
 
-def test_first_date_without_data_file_section_is_an_error(data_collector, mails, caplog):
+def test_first_date_without_data_file_section_is_an_error(mails, caplog):
     with pytest.raises(SystemExit) as exit_info:
-        data_collector.get_first_date({"mail": {}})
+        cli.get_first_date({"mail": {}})
 
     assert exit_info.value.code == 1
     assert "[-] no config parameter: 'dataFile'" in caplog.text
     assert mails == [("error", "[-] no config parameter: 'dataFile'")]
 
 
-def test_first_date_is_read_as_date(data_collector):
+def test_first_date_is_read_as_date():
     config = {"dataFile": {"firstDate": "2026-11-20"}}
 
-    assert data_collector.get_first_date(config) == day("2026-11-20")
+    assert cli.get_first_date(config) == day("2026-11-20")
 
 
 @pytest.mark.parametrize(
@@ -136,11 +138,11 @@ def test_first_date_is_read_as_date(data_collector):
     ["20.11.2026", "2026-11-31", "2026-1-5", "20261120", "2026-11-20T00:00", "", 20261120, None],
     ids=repr,
 )
-def test_invalid_first_date_is_a_configuration_error(data_collector, mails, caplog, value):
+def test_invalid_first_date_is_a_configuration_error(mails, caplog, value):
     config = {"dataFile": {"firstDate": value}, "mail": {}}
 
     with pytest.raises(SystemExit) as exit_info:
-        data_collector.get_first_date(config)
+        cli.get_first_date(config)
 
     assert exit_info.value.code == 1
     message = f"[-] invalid config parameter dataFile.firstDate {value!r}"
@@ -149,8 +151,8 @@ def test_invalid_first_date_is_a_configuration_error(data_collector, mails, capl
     assert mails[0][1].startswith(message)
 
 
-def test_first_date_filters_earlier_days(data_collector, caplog):
-    caplog.set_level(logging.INFO, logger=data_collector.logger.name)
+def test_first_date_filters_earlier_days(caplog):
+    caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {
         day("2026-11-22"): "101",
         day("2026-11-20"): "103",
@@ -158,26 +160,26 @@ def test_first_date_filters_earlier_days(data_collector, caplog):
         day("2026-11-18"): "9",
     }
 
-    result = data_collector.filter_first_date({}, device_data, day("2026-11-20"))
+    result = cli.filter_first_date({}, device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
     assert "[*] 2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
-def test_without_first_date_nothing_is_filtered(data_collector, caplog):
-    caplog.set_level(logging.INFO, logger=data_collector.logger.name)
+def test_without_first_date_nothing_is_filtered(caplog):
+    caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
-    assert data_collector.filter_first_date({}, device_data, None) == device_data
-    assert data_collector.filter_first_date({}, device_data, day("2025-01-01")) == device_data
+    assert cli.filter_first_date({}, device_data, None) == device_data
+    assert cli.filter_first_date({}, device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
-def test_all_values_before_first_date_fail_the_run(data_collector, mails, caplog):
+def test_all_values_before_first_date_fail_the_run(mails, caplog):
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
     with pytest.raises(SystemExit) as exit_info:
-        data_collector.filter_first_date({"mail": {}}, device_data, day("2026-11-20"))
+        cli.filter_first_date({"mail": {}}, device_data, day("2026-11-20"))
 
     assert exit_info.value.code == 1
     assert (
@@ -189,7 +191,7 @@ def test_all_values_before_first_date_fail_the_run(data_collector, mails, caplog
 
 
 @pytest.fixture
-def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
+def run(mails, monkeypatch, tmp_path, parameter_file):
     """
     run main() on `today` at `local_time` with a fake device response
     :return: function(response, today, local_time, device_clock, **data_file); the
@@ -220,9 +222,9 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
             return {**clock, **response}
 
         now = datetime.datetime.combine(today, datetime.time.fromisoformat(local_time))
-        monkeypatch.setattr(data_collector.gruenbeck, "get_data_from_mux_http", fetch)
-        monkeypatch.setattr(data_collector, "local_now", lambda: now)
-        data_collector.main(str(config_file))
+        monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
+        monkeypatch.setattr(cli, "local_now", lambda: now)
+        cli.main(str(config_file))
 
     run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
     return run_main
@@ -287,7 +289,7 @@ def test_run_stores_today_minus_n_in_any_response_order(run, tmp_path, mails):
 
 
 def test_run_with_first_date_keeps_the_migrated_values(run, tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="data_collector")
+    caplog.set_level(logging.INFO, logger="gruenbeck")
     write_year(tmp_path, 2026, MIGRATED_2026)
 
     run(DEVICE_2026_11_23, firstDate="2026-11-20")
@@ -428,11 +430,11 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
     ],
 )
 def test_deviation_is_device_minus_local_time_within_half_a_day(
-    data_collector, device_clock, local_time, deviation
+    device_clock, local_time, deviation
 ):
     now = datetime.datetime.combine(TODAY, datetime.time.fromisoformat(local_time))
 
-    assert data_collector.check_device_clock(device_clock, now) == deviation
+    assert device.check_device_clock(device_clock, now) == deviation
 
 
 # --- comparison with the stored values (P004-S10) -----------------------------------
@@ -556,24 +558,22 @@ def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
 
 
 @pytest.fixture
-def logging_handlers(data_collector):
+def logging_handlers():
     """removes and closes the handlers that setup_logging() adds"""
     added: list[logging.Handler] = []
     yield added
     for handler in added:
-        data_collector.logger.removeHandler(handler)
+        cli.package_logger.removeHandler(handler)
         handler.close()
 
 
-def test_log_file_takes_warnings_and_errors_but_no_infos(
-    data_collector, logging_handlers, tmp_path, capsys
-):
+def test_log_file_takes_warnings_and_errors_but_no_infos(logging_handlers, tmp_path, capsys):
     log_file = tmp_path / "collector.log"
-    logging_handlers += data_collector.setup_logging(False, log_file)
+    logging_handlers += cli.setup_logging(False, log_file)
 
-    data_collector.logger.info("[*] an info")
-    data_collector.logger.warning("[-] the device clock is off")
-    data_collector.logger.error("[-] an error")
+    cli.logger.info("[*] an info")
+    cli.logger.warning("[-] the device clock is off")
+    cli.logger.error("[-] an error")
 
     lines = log_file.read_text().splitlines()
     assert [line.split(" - ", 3)[2:] for line in lines] == [
@@ -583,12 +583,10 @@ def test_log_file_takes_warnings_and_errors_but_no_infos(
     assert capsys.readouterr().err == ""
 
 
-def test_console_logging_with_option_l_starts_at_info(
-    data_collector, logging_handlers, tmp_path, capsys
-):
-    logging_handlers += data_collector.setup_logging(True, tmp_path / "collector.log")
+def test_console_logging_with_option_l_starts_at_info(logging_handlers, tmp_path, capsys):
+    logging_handlers += cli.setup_logging(True, tmp_path / "collector.log")
 
-    data_collector.logger.info("[*] an info")
+    cli.logger.info("[*] an info")
 
     assert "INFO - [*] an info" in capsys.readouterr().err
     assert (tmp_path / "collector.log").read_text() == ""

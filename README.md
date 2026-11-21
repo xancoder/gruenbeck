@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/xancoder/gruenbeck/actions/workflows/ci.yml/badge.svg)](https://github.com/xancoder/gruenbeck/actions/workflows/ci.yml)
 
-> This python script collects water consumption data from a "Grünbeck" soft water system and stores into csv file
+> This python package collects water consumption data from a "Grünbeck" soft water system and stores into csv file
 
 ## Getting Started
 
@@ -14,13 +14,13 @@ git clone https://github.com/xancoder/gruenbeck.git
 
 ### install dependencies into a virtual environment
 
-The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock`:
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock` and installs the package `gruenbeck` (from `src/gruenbeck/`) with the commands `gruenbeck-collect` and `gruenbeck-analyse` into `./.venv/bin`:
 
 ```shell script
 cd gruenbeck
 uv sync --no-dev           # data collector only (production)
 uv sync                    # plus the dev tools (pytest, pytest-cov, ruff, mypy, pre-commit)
-uv sync --extra analysis   # plus pandas and matplotlib for src/data-analyse.py
+uv sync --extra analysis   # plus pandas and matplotlib for gruenbeck-analyse
 ```
 
 ### create the config.json
@@ -78,7 +78,7 @@ The section `dataFile` sets the name and format of the yearly files `<prefix>_<y
 
 | key | meaning |
 |-----|---------|
-| `firstDate` | optional, date `YYYY-MM-DD`, e.g. `"2026-11-20"`. Values of earlier days are not written (the log names their number), values already stored stay unchanged. Without the key every value is written. Use it while the device memory still holds values that would be stored under a wrong date, e.g. after setting the device clock (see the one-time migration below). The key may stay afterwards. If all values of a run are before `firstDate`, the run fails |
+| `firstDate` | optional, date `YYYY-MM-DD`, e.g. `"2026-11-20"`. Values of earlier days are not written (the log names their number), values already stored stay unchanged. Without the key every value is written. Use it while the device memory still holds values that would be stored under a wrong date, e.g. after setting the device clock. The key may stay afterwards. If all values of a run are before `firstDate`, the run fails |
 
 #### exit codes
 
@@ -92,20 +92,33 @@ Cron and systemd can therefore detect a failed run by its exit code.
 ### manually running
 
 ```shell script
-uv run python src/data-collector.py -l
+uv run gruenbeck-collect -l
 ```
 
-Scheduled runs call the interpreter of the virtual environment directly (`./.venv/bin/python3 ./src/data-collector.py`), so uv is not needed at run time.
+Scheduled runs call the command of the virtual environment directly (`./.venv/bin/gruenbeck-collect`), so uv is not needed at run time. The command replaces the former script `src/data-collector.py` with the same options and defaults; an installation that still runs the script needs the steps in [deploy/systemd/README.md](deploy/systemd/README.md#updating-from-srcdata-collectorpy).
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
 ### analysis
 
-`src/data-analyse.py` prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
+`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
 
 ```shell script
-uv run --extra analysis python src/data-analyse.py
+uv run --extra analysis gruenbeck-analyse
 ```
+
+### project layout
+
+| path | content |
+|------|---------|
+| `src/gruenbeck/cli.py` | the commands `gruenbeck-collect` and `gruenbeck-analyse` and the run of the data collector |
+| `src/gruenbeck/config.py` | reading the configuration file |
+| `src/gruenbeck/device.py` | web server of the soft water system: parameter file, request, meaning of the values |
+| `src/gruenbeck/storage.py` | data folder and yearly data files |
+| `src/gruenbeck/mail.py` | data mail and error mail |
+| `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
+| `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
+| `deploy/systemd/` | systemd units and their setup |
 
 ### tests
 
@@ -171,31 +184,3 @@ The script should run once a week. Three ways are described in [deploy/systemd/R
 NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the run has to take place after the daily rollover of the soft water system, when `D_Y_2_1` is the consumption of the day before. The rollover does not follow the device clock: this device moves its values on every day at about 10:05, before and after its clock was set on 2026-11-19 (measured with `scripts/log_device_rollover.py`). A value therefore covers the 24 hours from one rollover to the next and is stored under the day it starts. The weekly run (Monday 16:00) is well after the rollover and is based on the 14-day memory of the soft water system.
 
 Before it writes anything, the data collector compares the new values with the days that are stored already (7 days for weekly runs); values of past days do not change on the device. If they differ, it writes nothing and fails with an error mail and exit code 1. If every new value equals the stored value of the day before, the run was probably before the rollover, for example a missed run that the systemd timer makes up (`Persistent=true`) in the morning; run it again later. A run before the rollover is not detected when there is no stored day to compare with (the first run, or after a pause of more than 14 days). The data collector also reads the device clock (`D_C_4_2`) and logs a warning in `log/gruenbeck_error.log` if it is missing, invalid or more than 15 minutes off; it is unknown whether the device switches to daylight saving time by itself.
-
-## One-time migration: values stored one day late (2026)
-
-Up to this version the data collector stored every consumption value one day late: the value of `D_Y_2_1` ("yesterday") ended up under today's date. `scripts/fix_date_offset.py` corrects the existing yearly files `<prefix>_<year>.csv` once. Every value moves one day back (the value of 1 January moves into the file of the previous year, which is created if needed), and `--set DATE=VALUE` (litres, repeatable) fills in the days the old data collector did not store. Values are copied unchanged.
-
-- Without `--apply` the script only does a dry run: it lists every change per file and writes nothing.
-- It aborts without changes if the youngest stored date is 2026-11-19 or later. The device clock was set on that day, so no data collector (neither the old one nor the corrected one) may have stored values since then. If one did, copy the data files from before that run again (e.g. from the old checkout) and start over.
-- `--set` on a date that already has a different value after the move is an error. The same value is accepted, so the values still in the device memory can double-check the move. Days without a value up to 2026-11-19 are reported. `--set` after 2026-11-19 is an error, because from 2026-11-20 on the data collector stores the values.
-- `--apply` first copies every changed file to `<file>.<timestamp>.bak` in the data folder, then writes the files atomically and creates the marker file `fix_date_offset.done.json` there. While the marker exists, the script refuses to run again.
-
-The script needs only the Python standard library (Python 3.11 or newer, no uv). It reads the data folder, prefix, column names and date pattern from `--config-file` / `-c` (default `./src/config.json`), so run it from the repository root.
-
-Order on the machine running the data collector:
-
-1. Pause the old scheduled data collector (cron entry or timer). It must not run after the device clock was set on 2026-11-19; otherwise the migration aborts.
-2. Note the values of the missing days from the 14-day memory of the device (`D_Y_2_n` is the value of n days ago). Setting the clock caused an extra rollover, so 2026-11-19 takes two places in the memory. The first part is `D_Y_2_1` right after the clock change; the second part is `D_Y_2_1` after the next daily rollover, at about 10:05 on the following day (`scripts/log_device_rollover.py` logs it). Pass the sum of both parts as the value for 2026-11-19.
-3. Prepare a fresh clone in a new directory (`uv sync --no-dev`, copy `src/config.json` from the old checkout). Do not schedule the data collector there yet.
-4. Update the clone to a version that contains this script and the corrected data collector. Copy `data/` from the old checkout into the clone, run the dry run, check its output, and run the script again with `--apply`. Do this before the data collector runs in the clone for the first time. Then set `dataFile.firstDate` to `2026-11-20` in `src/config.json` (see [data file settings](#data-file-settings)). Until about 2026-12-04 the double place of 2026-11-19 shifts the older places of the memory by one day; with `firstDate` they are not written, and the values from the migration stay.
-5. Run the data collector once by hand, on 2026-11-21 or later and after the daily rollover of the device (about 10:30 or later): on 2026-11-20 every value of the device memory is before `firstDate`, so the run ends with an error mail and writes nothing, and a run before the rollover would store the values one day late without anything stored to compare with. Then set up the schedule (systemd timer, see [deploy/systemd/README.md](deploy/systemd/README.md), or cron with the new path) and delete the old cron entry. The first run has to take place by 2026-12-04 at the latest; after that, 2026-11-20 is no longer in the 14-day memory.
-
-Dry run and migration, from the root of the new clone (replace `VALUE` with the litres of each day):
-
-```shell script
-python3 scripts/fix_date_offset.py --set 2026-11-16=VALUE --set 2026-11-17=VALUE --set 2026-11-18=VALUE --set 2026-11-19=VALUE
-python3 scripts/fix_date_offset.py --set 2026-11-16=VALUE --set 2026-11-17=VALUE --set 2026-11-18=VALUE --set 2026-11-19=VALUE --apply
-```
-
-The backups and the marker stay in the data folder. They are not attached to the data mail, and the analysis ignores them.

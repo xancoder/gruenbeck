@@ -1,6 +1,5 @@
 import email
 import email.policy
-import importlib.util
 import pathlib
 import smtplib
 import time
@@ -24,19 +23,6 @@ def config_example_file(repo_root) -> pathlib.Path:
 @pytest.fixture(scope="session")
 def parameter_file(repo_root) -> pathlib.Path:
     return repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
-
-
-@pytest.fixture
-def data_collector():
-    """
-    src/data-collector.py as a module (the file name is not importable with 'import')
-    """
-    path = REPO_ROOT / "src" / "data-collector.py"
-    spec = importlib.util.spec_from_file_location("data_collector", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 class FakeSMTP:

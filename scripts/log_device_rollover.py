@@ -36,11 +36,9 @@ import sys
 import time
 import typing
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
-
-import datacollector  # noqa: E402
-import gruenbeck  # noqa: E402
+# the package is installed into the virtual environment (uv sync)
+import gruenbeck.config
+import gruenbeck.device
 
 CLOCK_PARAMETER = "D_C_4_2"
 VALUE_PARAMETERS = ("D_Y_2_1", "D_Y_2_2", "D_Y_2_3")
@@ -146,7 +144,7 @@ def run(
     output: pathlib.Path,
     interval: float,
     hours: float,
-    fetch: Fetch = gruenbeck.get_data_from_mux_http,
+    fetch: Fetch = gruenbeck.device.get_data_from_mux_http,
     now: typing.Callable[[], datetime.datetime] = local_now,
     sleep: typing.Callable[[float], None] = time.sleep,
     previous_row: dict | None = None,
@@ -223,9 +221,9 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def read_device_config(config_file: str) -> tuple[str, float]:
     """host and timeout of the device from the configuration"""
-    config = datacollector.check_configuration(config_file)
+    config = gruenbeck.config.check_configuration(config_file)
     device = config["softWaterSystem"]
-    timeout = float(device.get("timeout", gruenbeck.DEFAULT_TIMEOUT))
+    timeout = float(device.get("timeout", gruenbeck.device.DEFAULT_TIMEOUT))
     if not timeout > 0:
         raise ValueError("softWaterSystem.timeout must be greater than 0")
     return device["host"], timeout
