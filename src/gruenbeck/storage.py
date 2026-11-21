@@ -1,12 +1,30 @@
 """yearly data files <prefix>_<year>.csv in the data folder"""
 
 import csv
+import datetime
 import logging
 import os
 import pathlib
 import shutil
 
+from gruenbeck import config
+
 logger = logging.getLogger(__name__)
+
+
+class DataFileError(ValueError):
+    """a yearly data file does not fit dataFile of the configuration (columns, dates)"""
+
+
+def date_of(text: str, date_pattern: str) -> datetime.date:
+    """
+    the day of a date text of the yearly files
+    :raises ValueError: the text is not exactly what date_pattern gives for a day
+    """
+    day = datetime.datetime.strptime(text, date_pattern).date()
+    if day.strftime(date_pattern) != text:
+        raise ValueError(f"{text!r} is not written as {date_pattern!r}")
+    return day
 
 
 def check_data_folder(data_folder: str) -> pathlib.Path:
@@ -21,36 +39,69 @@ def check_data_folder(data_folder: str) -> pathlib.Path:
     return path_object
 
 
-def get_data_file(config, data_path, year):
+def get_data_file(data_path, prefix: str, year) -> pathlib.Path:
     """path of the yearly data file"""
-    return pathlib.Path(f"{data_path}/{config['dataFile']['prefix']}_{year}.csv")
+    return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
 
 
-def read_data_file(file_obj, fieldnames):
+def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -> dict:
     """
     stored values of one yearly file
+    :param fieldnames: column names of date and value (dataFile.fieldnames)
+    :param date_pattern: format of the dates (dataFile.datePattern)
     :return: dictionary of date text and value (int if numeric), empty without file
+    :raises DataFileError: a column is missing, or a date does not match date_pattern
     """
     data = {}
     if file_obj.exists():
         with file_obj.open(mode="r", newline="", encoding="utf-8") as csv_file:
-            for row in csv.DictReader(csv_file):
-                value = row[fieldnames["value"]]
-                data[row[fieldnames["date"]]] = int(value) if value.isnumeric() else value
+            reader = csv.DictReader(csv_file)
+            columns = reader.fieldnames or []
+            missing = [name for name in (fieldnames.date, fieldnames.value) if name not in columns]
+            # an empty file has no header and no values
+            if missing and columns:
+                raise DataFileError(
+                    f"{file_obj} has no column {', '.join(map(repr, missing))} of"
+                    f" dataFile.fieldnames (columns: {', '.join(columns)})"
+                )
+            for row in reader:
+                text = row[fieldnames.date]
+                try:
+                    date_of(text, date_pattern)
+                except (TypeError, ValueError):  # TypeError: short row without date
+                    raise DataFileError(
+                        f"{file_obj}, line {reader.line_num}: the date {text!r} does not match"
+                        f" dataFile.datePattern {date_pattern!r}"
+                    ) from None
+                value = row[fieldnames.value]
+                data[text] = int(value) if value.isnumeric() else value
     return data
 
 
-def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
+def write_data(
+    file_object: pathlib.Path, fieldnames: config.FieldNames, data: dict, date_pattern: str
+) -> None:
     """
-    write data to csv file
+    write data to csv file, sorted by date
     :param file_object: pathlib.Path of output file
-    :param fieldnames: fieldnames as column headers
-    :param data: dictionary data to write
+    :param fieldnames: column names of date and value (dataFile.fieldnames)
+    :param data: dictionary of date text and value
+    :param date_pattern: format of the date texts (dataFile.datePattern)
+    :raises DataFileError: a date text does not match date_pattern (nothing is written)
     """
+    days = {}
+    for text in data:
+        try:
+            days[text] = date_of(text, date_pattern)
+        except ValueError:
+            raise DataFileError(
+                f"the date {text!r} does not match dataFile.datePattern {date_pattern!r}"
+            ) from None
     # build data structure to write
-    write_list = []
-    for item in sorted(data):
-        write_list.append({fieldnames["date"]: item, fieldnames["value"]: data[item]})
+    write_list = [
+        {fieldnames.date: text, fieldnames.value: data[text]}
+        for text in sorted(data, key=days.__getitem__)
+    ]
 
     # write into a temporary file next to the target and replace the target
     # afterwards, so an interruption never leaves a truncated data file
@@ -58,7 +109,7 @@ def write_data(file_object: pathlib.Path, fieldnames: dict, data: dict) -> None:
     tmp_file = file_object.with_name(f".{file_object.name}.tmp")
     try:
         with tmp_file.open(mode="w", newline="", encoding="utf-8") as csv_out_file:
-            writer = csv.DictWriter(csv_out_file, fieldnames=fieldnames)
+            writer = csv.DictWriter(csv_out_file, fieldnames=[fieldnames.date, fieldnames.value])
             writer.writeheader()
             writer.writerows(write_list)
             csv_out_file.flush()

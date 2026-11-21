@@ -1,7 +1,8 @@
+import copy
 import csv
 import datetime
-import json
 import logging
+import pathlib
 
 import pytest
 
@@ -111,47 +112,10 @@ def test_unknown_parameter_is_an_error(name):
     )
 
 
-# --- dataFile.firstDate ------------------------------------------------------------
+# --- dataFile.firstDate (checked when loading the configuration: tests/test_config.py)
 
 
-def test_first_date_is_optional():
-    assert cli.get_first_date({"dataFile": {"prefix": PREFIX}}) is None
-
-
-def test_first_date_without_data_file_section_is_an_error(mails, caplog):
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_first_date({"mail": {}})
-
-    assert exit_info.value.code == 1
-    assert "[-] no config parameter: 'dataFile'" in caplog.text
-    assert mails == [("error", "[-] no config parameter: 'dataFile'")]
-
-
-def test_first_date_is_read_as_date():
-    config = {"dataFile": {"firstDate": "2026-11-20"}}
-
-    assert cli.get_first_date(config) == day("2026-11-20")
-
-
-@pytest.mark.parametrize(
-    "value",
-    ["20.11.2026", "2026-11-31", "2026-1-5", "20261120", "2026-11-20T00:00", "", 20261120, None],
-    ids=repr,
-)
-def test_invalid_first_date_is_a_configuration_error(mails, caplog, value):
-    config = {"dataFile": {"firstDate": value}, "mail": {}}
-
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_first_date(config)
-
-    assert exit_info.value.code == 1
-    message = f"[-] invalid config parameter dataFile.firstDate {value!r}"
-    assert message in caplog.text
-    assert mails[0][0] == "error"
-    assert mails[0][1].startswith(message)
-
-
-def test_first_date_filters_earlier_days(caplog):
+def test_first_date_filters_earlier_days(caplog, loaded_config):
     caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {
         day("2026-11-22"): "101",
@@ -160,26 +124,26 @@ def test_first_date_filters_earlier_days(caplog):
         day("2026-11-18"): "9",
     }
 
-    result = cli.filter_first_date({}, device_data, day("2026-11-20"))
+    result = cli.filter_first_date(loaded_config, device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
     assert "[*] 2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
-def test_without_first_date_nothing_is_filtered(caplog):
+def test_without_first_date_nothing_is_filtered(caplog, loaded_config):
     caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
-    assert cli.filter_first_date({}, device_data, None) == device_data
-    assert cli.filter_first_date({}, device_data, day("2025-01-01")) == device_data
+    assert cli.filter_first_date(loaded_config, device_data, None) == device_data
+    assert cli.filter_first_date(loaded_config, device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
-def test_all_values_before_first_date_fail_the_run(mails, caplog):
+def test_all_values_before_first_date_fail_the_run(mails, caplog, loaded_config):
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
     with pytest.raises(SystemExit) as exit_info:
-        cli.filter_first_date({"mail": {}}, device_data, day("2026-11-20"))
+        cli.filter_first_date(loaded_config, device_data, day("2026-11-20"))
 
     assert exit_info.value.code == 1
     assert (
@@ -191,30 +155,20 @@ def test_all_values_before_first_date_fail_the_run(mails, caplog):
 
 
 @pytest.fixture
-def run(mails, monkeypatch, tmp_path, parameter_file):
+def run(mails, monkeypatch, config_data, write_config):
     """
     run main() on `today` at `local_time` with a fake device response
     :return: function(response, today, local_time, device_clock, **data_file); the
-        device adds D_C_4_2 = device_clock to the response (None: no device clock).
-        Its attribute `requests` lists the parameters of every device request.
+        device adds D_C_4_2 = device_clock to the response (None: no device clock),
+        data_file replaces keys of dataFile. Its attribute `requests` lists the
+        parameters of every device request.
     """
     requests = []
 
     def run_main(response, today=TODAY, local_time="16:00", device_clock="16:00", **data_file):
-        config = {
-            "dataFile": {
-                "datePattern": "%Y-%m-%d",
-                "fieldnames": {"date": "date", "value": "value"},
-                "prefix": PREFIX,
-                **data_file,
-            },
-            "dataPath": str(tmp_path / "data"),
-            "mail": {},
-            "parameterFile": str(parameter_file),
-            "softWaterSystem": {"host": "device.lan"},
-        }
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps(config))
+        config = copy.deepcopy(config_data)
+        config["dataFile"].update(prefix=PREFIX, **data_file)
+        config_file = write_config(config)
 
         def fetch(host, parameters, timeout):
             requests.append(list(parameters))
@@ -230,12 +184,12 @@ def run(mails, monkeypatch, tmp_path, parameter_file):
     return run_main
 
 
-def write_year(tmp_path, year, rows):
+def write_year(tmp_path, year, rows, header=("date", "value")):
     path = tmp_path / "data" / f"{PREFIX}_{year}.csv"
     path.parent.mkdir(exist_ok=True)
     with path.open(mode="w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
-        writer.writerow(["date", "value"])
+        writer.writerow(header)
         writer.writerows(rows)
 
 
@@ -728,12 +682,8 @@ def test_run_with_another_date_pattern_writes_and_compares_in_that_format(run, t
 
     run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
 
-    # sorted as text: December before the end of November
+    # sorted by date (up to P006-S3 as text: December before the end of November)
     assert list(read_year(tmp_path, 2026)) == [
-        "01.12.2026",
-        "02.12.2026",
-        "03.12.2026",
-        "04.12.2026",
         "19.11.2026",
         "20.11.2026",
         "21.11.2026",
@@ -746,6 +696,10 @@ def test_run_with_another_date_pattern_writes_and_compares_in_that_format(run, t
         "28.11.2026",
         "29.11.2026",
         "30.11.2026",
+        "01.12.2026",
+        "02.12.2026",
+        "03.12.2026",
+        "04.12.2026",
     ]
     assert read_year(tmp_path, 2026)["04.12.2026"] == str(true_value(day("2026-12-04")))
 
@@ -761,3 +715,122 @@ def test_run_with_another_date_pattern_detects_differing_values(run, tmp_path, m
         f"[-] the new values differ from the stored ones (2026-11-21: stored 999,"
         f" new {true_value(day('2026-11-21'))})"
     )
+
+
+# --- configuration of the data files (P006-S3) ---------------------------------------
+
+
+def test_run_with_other_column_names_reads_and_writes_them(run, tmp_path, mails):
+    write_year(
+        tmp_path,
+        2026,
+        [("2026-11-01", "5"), *stored_rows(day("2026-11-09"), day("2026-11-10"))],
+        header=("day", "litres"),
+    )
+
+    run(memory(true_value), fieldnames={"date": "day", "value": "litres"})
+
+    lines = stored_lines(tmp_path, 2026)
+    assert lines[:2] == ["day,litres", "2026-11-01,5"]
+    assert lines[2:] == [
+        f"{day_},{value}" for day_, value in stored_rows(day("2026-11-09"), day("2026-11-22"))
+    ]
+    assert [kind for kind, _ in mails] == ["data"]
+
+
+def test_run_with_other_column_names_starts_a_new_file_with_them(run, tmp_path):
+    run(
+        memory(true_value, today=day("2026-01-03")),
+        today=day("2026-01-03"),
+        fieldnames={"date": "day", "value": "litres"},
+    )
+
+    assert stored_lines(tmp_path, 2025)[0] == "day,litres"
+    assert stored_lines(tmp_path, 2026) == [
+        "day,litres",
+        f"2026-01-01,{true_value(day('2026-01-01'))}",
+        f"2026-01-02,{true_value(day('2026-01-02'))}",
+    ]
+
+
+def test_stored_file_without_the_configured_columns_writes_nothing(run, tmp_path, mails):
+    write_year(tmp_path, 2026, stored_rows(day("2026-11-09"), day("2026-11-10")))
+    path = tmp_path / "data" / f"{PREFIX}_2026.csv"
+    before = path.read_bytes()
+
+    with pytest.raises(SystemExit) as exit_info:
+        run(memory(true_value), fieldnames={"date": "day", "value": "litres"})
+
+    assert exit_info.value.code == 1
+    assert path.read_bytes() == before
+    assert mails == [
+        (
+            "error",
+            f"[-] {path} has no column 'day', 'litres' of dataFile.fieldnames (columns: date,"
+            " value): nothing written",
+        )
+    ]
+
+
+def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(run, tmp_path, mails):
+    today = day("2026-12-05")
+    write_year(tmp_path, 2025, [("31.12.2025", "1")])
+    write_year(tmp_path, 2026, [("19.11.2026", "1"), ("2026-11-20", "2")])
+    files = sorted((tmp_path / "data").glob("*.csv"))
+    before = [path.read_bytes() for path in files]
+
+    with pytest.raises(SystemExit) as exit_info:
+        run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
+
+    assert exit_info.value.code == 1
+    assert [path.read_bytes() for path in files] == before
+    assert mails == [
+        (
+            "error",
+            f"[-] {tmp_path / 'data' / f'{PREFIX}_2026.csv'}, line 3: the date '2026-11-20'"
+            " does not match dataFile.datePattern '%d.%m.%Y': nothing written",
+        )
+    ]
+
+
+@pytest.mark.parametrize("text", ["1.12.2026", "01.12.26", "01.12.2026 ", "2026-12-01"])
+def test_date_text_has_to_be_exactly_what_the_pattern_writes(run, tmp_path, mails, text):
+    write_year(tmp_path, 2026, [(text, "1")])
+
+    with pytest.raises(SystemExit):
+        run(
+            memory(true_value, today=day("2026-12-05")),
+            today=day("2026-12-05"),
+            datePattern="%d.%m.%Y",
+        )
+
+    assert mails[0][1].endswith(
+        f"line 2: the date {text!r} does not match dataFile.datePattern '%d.%m.%Y': nothing written"
+    )
+
+
+def test_relative_paths_start_at_the_folder_of_the_configuration(
+    tmp_path, monkeypatch, mails, config_data, write_config
+):
+    (tmp_path / "repo" / "assets").mkdir(parents=True)
+    parameters = tmp_path / "repo" / "assets" / "parameters.csv"
+    parameters.write_bytes(pathlib.Path(config_data["parameterFile"]).read_bytes())
+    config_data.update(dataPath="../data", parameterFile="../assets/parameters.csv")
+    config_file = write_config(config_data, tmp_path / "repo" / "src" / "config.json")
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    response = memory(true_value)
+    monkeypatch.setattr(
+        device,
+        "get_data_from_mux_http",
+        lambda host, parameters, timeout: {"D_C_4_2": "16:00", **response},
+    )
+    monkeypatch.setattr(
+        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+    )
+
+    cli.main(str(config_file))
+
+    assert (tmp_path / "repo" / "data" / "gruenbeck_water_consumption_2026.csv").exists()
+    assert not (tmp_path / "elsewhere" / "data").exists()
+    assert mails == [("data", tmp_path / "repo" / "data")]

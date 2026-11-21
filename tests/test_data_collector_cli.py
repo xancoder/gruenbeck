@@ -6,7 +6,6 @@ The characterization of P006-S1 holds for the command: same options and defaults
 
 import datetime
 import importlib.metadata
-import json
 import pathlib
 import re
 import subprocess
@@ -94,21 +93,10 @@ def package_logger():
         handler.close()
 
 
-def test_run_with_options(tmp_path, monkeypatch, capsys, package_logger, parameter_file):
+def test_run_with_options(tmp_path, monkeypatch, capsys, package_logger, config_data, write_config):
     now = datetime.datetime.now()
-    config = {
-        "dataFile": {
-            "datePattern": "%Y-%m-%d",
-            "fieldnames": {"date": "date", "value": "value"},
-            "prefix": "p",
-        },
-        "dataPath": str(tmp_path / "data"),
-        "mail": {},
-        "parameterFile": str(parameter_file),
-        "softWaterSystem": {"host": "device.lan"},
-    }
-    config_file = tmp_path / "config.json"
-    config_file.write_text(json.dumps(config))
+    config_data["dataFile"]["prefix"] = "p"
+    config_file = write_config(config_data)
     log_file = tmp_path / "errors.log"
     sent = []
 

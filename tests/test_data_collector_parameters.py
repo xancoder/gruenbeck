@@ -5,7 +5,6 @@ import gruenbeck.device
 from gruenbeck import cli, mail
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
-CONFIG = {"softWaterSystem": {"host": "device.lan"}, "mail": {}}
 
 
 @pytest.fixture
@@ -51,10 +50,10 @@ def test_parameter_files_have_no_commented_rows(parameter_file, suffix, separato
     assert f"D_Y_2_27{separator}read" in "\n".join(lines)
 
 
-def test_only_the_14_day_memory_is_requested(device, parameter_file):
+def test_only_the_14_day_memory_is_requested(device, parameter_file, loaded_config):
     parameter = gruenbeck.device.Parameter(str(parameter_file))
 
-    result = cli.get_device_data(CONFIG, parameter)
+    result = cli.get_device_data(loaded_config, parameter)
 
     # plus the device clock for check_device_clock() (P004-S8)
     assert device == [["D_C_4_2", *MEMORY]]
@@ -62,7 +61,7 @@ def test_only_the_14_day_memory_is_requested(device, parameter_file):
 
 
 def test_missing_memory_parameter_fails_before_asking_the_device(
-    device, error_mails, parameter_file, tmp_path, caplog
+    device, error_mails, parameter_file, tmp_path, caplog, loaded_config
 ):
     rows = parameter_file.read_text(encoding="utf-8").splitlines(keepends=True)
     without = [row for row in rows if not row.startswith(("D_Y_2_5,", "D_Y_2_12,"))]
@@ -71,7 +70,7 @@ def test_missing_memory_parameter_fails_before_asking_the_device(
     reduced.write_text("".join(without), encoding="utf-8")
 
     with pytest.raises(SystemExit) as exit_info:
-        cli.get_device_data(CONFIG, gruenbeck.device.Parameter(str(reduced)))
+        cli.get_device_data(loaded_config, gruenbeck.device.Parameter(str(reduced)))
 
     assert exit_info.value.code == 1
     assert device == []

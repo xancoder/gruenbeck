@@ -136,6 +136,11 @@ the repository:
    (system service), or copy the generated service again (user service). The new unit starts
    `.venv/bin/gruenbeck-collect`; check it with `systemctl cat gruenbeck-collector.service`.
 3. With cron, replace the old line by the one under [Cron](#cron-alternative).
+4. Relative paths in `src/config.json` now start at `src/`: change `"./data"` and
+   `"./assets/…"` to `"../data"` and `"../assets/…"` (see
+   [the main README](../../README.md#existing-configuration-with-paths-relative-to-the-current-directory)).
+   Run the collector once by hand (`sudo systemctl start gruenbeck-collector.service`) and
+   check `systemctl status gruenbeck-collector.service`.
 
 The options (`-c`, `-l`, `-e`) and their defaults are the same as before.
 

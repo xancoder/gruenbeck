@@ -5,7 +5,6 @@ commands of the package: gruenbeck-collect (data collector) and gruenbeck-analys
 import argparse
 import datetime
 import logging.handlers
-import re
 import sys
 import time
 import typing
@@ -26,7 +25,6 @@ formatter = logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - %(message)s", "%Y-%m-%d %H:%M:%S"
 )
 
-FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 ONE_DAY = datetime.timedelta(days=1)
 
 
@@ -61,7 +59,7 @@ def main(config_file):
 
     config = get_configuration(config_file)
     data_path = get_data_folder(config)
-    first_date = get_first_date(config)
+    data_file = config.data_file
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
     now = local_now()
@@ -69,28 +67,32 @@ def main(config_file):
     try:
         device_data = device.add_timestamp_as_key_device_data(device_data, today=now.date())
     except ValueError as err:
-        handle_error(config, f"{err}")
-    device_data = filter_first_date(config, device_data, first_date)
+        handle_error(config.mail, f"{err}")
+    device_data = filter_first_date(config, device_data, data_file.first_date)
     new_values = {day: int(value) for day, value in device_data.items()}
 
     # read every yearly file involved (also the one of the day before the oldest new
     # value, see check_stored_overlap) before anything is written
-    data_file = config["dataFile"]
     years = sorted({day.year for day in new_values})
     years_to_read = set(years)
     if new_values:
         years_to_read.add((min(new_values) - ONE_DAY).year)
-    stored_by_year = {
-        year: storage.read_data_file(
-            storage.get_data_file(config, data_path, year), data_file["fieldnames"]
-        )
-        for year in sorted(years_to_read)
-    }
+    try:
+        stored_by_year = {
+            year: storage.read_data_file(
+                storage.get_data_file(data_path, data_file.prefix, year),
+                data_file.fieldnames,
+                data_file.date_pattern,
+            )
+            for year in sorted(years_to_read)
+        }
+    except storage.DataFileError as err:
+        handle_error(config.mail, f"[-] {err}: nothing written")
     check_stored_overlap(
         config,
         new_values,
         {day: value for values in stored_by_year.values() for day, value in values.items()},
-        data_file["datePattern"],
+        data_file.date_pattern,
     )
 
     # Track if any data was processed
@@ -101,19 +103,22 @@ def main(config_file):
         data_existing = dict(stored_by_year[year])
         data_existing.update(
             {
-                day.strftime(data_file["datePattern"]): value
+                day.strftime(data_file.date_pattern): value
                 for day, value in sorted(new_values.items())
                 if day.year == year
             }
         )
         storage.write_data(
-            storage.get_data_file(config, data_path, year), data_file["fieldnames"], data_existing
+            storage.get_data_file(data_path, data_file.prefix, year),
+            data_file.fieldnames,
+            data_existing,
+            data_file.date_pattern,
         )
         data_processed = True
 
     # nothing stored is a failure, not a successful run
     if not data_processed:
-        handle_error(config, "[-] no data was processed")
+        handle_error(config.mail, "[-] no data was processed")
 
     # the data is stored at this point; a failed mail still has to be visible
     # as a failed run (exit code 1) for cron and systemd
@@ -124,71 +129,33 @@ def main(config_file):
     logger.info("[*] Data collection completed")
 
 
-def get_configuration(config_file):
-    config = None
+def get_configuration(config_file) -> configuration.Configuration:
     try:
-        config = configuration.check_configuration(config_file)
+        return configuration.load_configuration(config_file)
     except FileNotFoundError as err:
         logger.error(f"[-] no configuration: {err}")
         sys.exit(1)
-    return config
+    except configuration.ConfigurationError as err:
+        # an error mail is only possible if the mail section is valid
+        handle_error(err.mail, f"[-] {err}")
 
 
 def get_data_folder(config):
     data_path = None
     try:
-        data_path = storage.check_data_folder(config["dataPath"])
-    except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}")
+        data_path = storage.check_data_folder(config.data_path)
     except PermissionError as err:
-        handle_error(config, f"[-] creation data folder failed: {err}")
+        handle_error(config.mail, f"[-] creation data folder failed: {err}")
     return data_path
-
-
-def get_first_date(config):
-    """
-    optional dataFile.firstDate (YYYY-MM-DD): values of earlier days are not written
-    :return: datetime.date, or None if the key is missing
-    """
-    try:
-        data_file = config["dataFile"]
-    except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}")
-    if "firstDate" not in data_file:
-        return None
-    first_date = data_file["firstDate"]
-    try:
-        if not isinstance(first_date, str) or not FIRST_DATE_FORMAT.fullmatch(first_date):
-            raise ValueError("expected a date YYYY-MM-DD")
-        return datetime.date.fromisoformat(first_date)
-    except ValueError as err:
-        handle_error(
-            config,
-            f"[-] invalid config parameter dataFile.firstDate {first_date!r}: {err}",
-        )
 
 
 def get_device_parameter(config):
     parameter = None
     try:
-        parameter = device.Parameter(config["parameterFile"])
-    except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}")
+        parameter = device.Parameter(config.parameter_file)
     except FileNotFoundError as err:
-        handle_error(config, f"{err}")
+        handle_error(config.mail, f"{err}")
     return parameter
-
-
-def get_device_timeout(config):
-    try:
-        timeout = float(config["softWaterSystem"].get("timeout", device.DEFAULT_TIMEOUT))
-        if not timeout > 0:
-            raise ValueError("must be greater than 0")
-    except KeyError as err:
-        handle_error(config, f"[-] no config parameter: {err}")
-    except (TypeError, ValueError) as err:
-        handle_error(config, f"[-] invalid config parameter softWaterSystem.timeout: {err}")
-    return timeout
 
 
 def get_consumption_parameters(config, parameter):
@@ -205,7 +172,7 @@ def get_consumption_parameters(config, parameter):
     missing = [name for name in names if name not in known]
     if missing:
         handle_error(
-            config,
+            config.mail,
             f"[-] parameter file {parameter.path_file} lacks the consumption"
             f" parameters: {', '.join(missing)}",
         )
@@ -216,7 +183,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
     attempts = 0
     last_error: Exception | None = None
-    timeout = get_device_timeout(config)
+    timeout = config.soft_water_system.timeout
     # the device clock comes with the values, see check_device_clock()
     request_parameters = [
         device.DEVICE_CLOCK_PARAMETER,
@@ -229,7 +196,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
                 logger.info(f"[*] Retry attempt {attempts}/{max_retries} for API request")
 
             result = device.get_data_from_mux_http(
-                config["softWaterSystem"]["host"],
+                config.soft_water_system.host,
                 request_parameters,
                 timeout=timeout,
             )
@@ -238,10 +205,6 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
             if attempts > 0:
                 logger.info(f"[*] Successfully retrieved data after {attempts} retry attempts")
             return result
-
-        except KeyError as err:
-            # Configuration errors should not be retried
-            handle_error(config, f"[-] no config parameter: {err}")
 
         except ValueError as err:
             # invalid xml or response without values
@@ -267,7 +230,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
             error_msg = (
                 f"[-] failed to get device data after {max_retries + 1} attempts: {last_error}"
             )
-            handle_error(config, error_msg)
+            handle_error(config.mail, error_msg)
 
         # Wait before retrying
 
@@ -276,15 +239,24 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     return result
 
 
-def handle_error(config, error_text: str) -> typing.NoReturn:
+def handle_error(mail_settings: configuration.Mail | None, error_text: str) -> typing.NoReturn:
+    """
+    log the error, send the error mail and exit with code 1
+    :param mail_settings: mail section of the configuration, None if it is invalid
+    """
     logger.error(error_text)
 
     # Try to send an email notification about the error
-    try:
-        mail.send_mail_text(config["mail"], "gruenbeck data collector failure", error_text)
-        logger.info("[*] Error notification email sent")
-    except Exception as mail_error:
-        logger.error(f"[-] Failed to send error notification email: {mail_error}")
+    if mail_settings is None:
+        logger.error("[-] Failed to send error notification email: no valid mail configuration")
+    else:
+        try:
+            mail.send_mail_text(
+                mail_settings.as_dict(), "gruenbeck data collector failure", error_text
+            )
+            logger.info("[*] Error notification email sent")
+        except Exception as mail_error:
+            logger.error(f"[-] Failed to send error notification email: {mail_error}")
 
     logger.info("[*] Exiting program due to error")
     sys.exit(1)
@@ -310,7 +282,7 @@ def filter_first_date(config, device_data, first_date):
         logger.info(f"[*] {skipped} values before dataFile.firstDate {first_date} are not written")
     if device_data and not result:
         handle_error(
-            config,
+            config.mail,
             f"[-] no data was processed: all {skipped} values are before"
             f" dataFile.firstDate {first_date}",
         )
@@ -338,7 +310,7 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
         stored[(day - ONE_DAY).strftime(date_pattern)] == new_values[day] for day in with_day_before
     ):
         handle_error(
-            config,
+            config.mail,
             "[-] one day late: the run was probably before the daily rollover of the"
             " device; run again later (the new values of"
             f" {with_day_before[0]} ... {with_day_before[-1]} equal the stored values"
@@ -349,7 +321,7 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
         for day in differing
     )
     handle_error(
-        config,
+        config.mail,
         f"[-] the new values differ from the stored ones ({details}): nothing written;"
         " check the data files and the device",
     )
@@ -357,7 +329,7 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
 
 def get_mail(config, data_path):
     try:
-        mail.send_mail(config["mail"], data_path)
+        mail.send_mail(config.mail.as_dict(), data_path)
         logger.info("[*] mail sent successfully")
         return True
     except KeyError as error:

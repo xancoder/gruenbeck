@@ -221,7 +221,7 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 def read_device_config(config_file: str) -> tuple[str, float]:
     """host and timeout of the device from the configuration"""
-    config = gruenbeck.config.check_configuration(config_file)
+    config = gruenbeck.config.read_configuration_file(config_file)
     device = config["softWaterSystem"]
     timeout = float(device.get("timeout", gruenbeck.device.DEFAULT_TIMEOUT))
     if not timeout > 0:

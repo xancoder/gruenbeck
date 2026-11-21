@@ -1,10 +1,14 @@
+import copy
 import email
 import email.policy
+import json
 import pathlib
 import smtplib
 import time
 
 import pytest
+
+from gruenbeck import config
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -23,6 +27,53 @@ def config_example_file(repo_root) -> pathlib.Path:
 @pytest.fixture(scope="session")
 def parameter_file(repo_root) -> pathlib.Path:
     return repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
+
+
+# mail section of the configurations of the tests (no mail leaves a test: the tests
+# replace the functions of gruenbeck.mail or smtplib)
+MAIL_SECTION = {
+    "recipients": ["receiver@example.com"],
+    "senderEmail": "sender@example.com",
+    "senderPassword": "test-password",
+    "smtpPort": 587,
+    "smtpServer": "smtp.example.com",
+    "subject": "[data collector] - gruenbeck",
+}
+
+
+@pytest.fixture
+def config_data(tmp_path, parameter_file) -> dict:
+    """a complete and valid configuration as in the JSON file; data folder in tmp_path"""
+    return {
+        "dataFile": {
+            "datePattern": "%Y-%m-%d",
+            "fieldnames": {"date": "date", "value": "value"},
+            "prefix": "gruenbeck_water_consumption",
+        },
+        "dataPath": str(tmp_path / "data"),
+        "mail": copy.deepcopy(MAIL_SECTION),
+        "parameterFile": str(parameter_file),
+        "softWaterSystem": {"host": "device.lan"},
+    }
+
+
+@pytest.fixture
+def write_config(tmp_path):
+    """writes a configuration (dictionary) as JSON; returns the path of the file"""
+
+    def write(data, path=None) -> pathlib.Path:
+        path = pathlib.Path(path) if path is not None else tmp_path / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    return write
+
+
+@pytest.fixture
+def loaded_config(config_data, write_config) -> config.Configuration:
+    """config_data, loaded and checked"""
+    return config.load_configuration(write_config(config_data))
 
 
 class FakeSMTP:

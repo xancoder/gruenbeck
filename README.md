@@ -32,7 +32,22 @@ cp src/config.example.json src/config.json
 chmod 600 src/config.json
 ```
 
-The file is read only by the service user, so restrict its permissions (`600`) and let that user own it.
+The file is read only by the service user, so restrict its permissions (`600`) and let that user own it. The SMTP password is read from this file only.
+
+The data collector and the analysis check the whole file when they start: every missing key and every invalid value is listed in one message, and the run ends with exit code 1 before the device is asked. If the `mail` section itself is valid, that message also goes out as error mail. Unknown keys (e.g. a typo in an optional key) are ignored with a warning in the log.
+
+#### paths
+
+| key | meaning |
+|-----|---------|
+| `dataPath` | folder of the yearly data files; created if it does not exist (its parent folder must exist) |
+| `parameterFile` | parameter list of the device, `assets/Gruenbeck_Webserver_Dokumentation.csv` |
+
+Relative paths start at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json`) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
+
+#### existing configuration with paths relative to the current directory
+
+Up to now relative paths started at the current directory, so a configuration from before this version contains `"./data"` and `"./assets/Gruenbeck_Webserver_Dokumentation.csv"`. Change them to `"../data"` and `"../assets/Gruenbeck_Webserver_Dokumentation.csv"` (relative to `src/`) or to absolute paths. Until then the data collector refuses to run if a path exists only relative to the current directory: the error names the path to use, and nothing is written.
 
 #### existing installation with a versioned config.json
 
@@ -53,11 +68,11 @@ The section `mail` configures the SMTP server used for the data mail and the err
 | key | meaning |
 |-----|---------|
 | `smtpServer` | host name of the SMTP server |
-| `smtpPort` | port of the SMTP server (number; a string like `"587"` is still accepted) |
+| `smtpPort` | port of the SMTP server (number 1 ... 65535; a string like `"587"` is still accepted) |
 | `smtpSecurity` | optional, `"ssl"` (implicit TLS, usually port 465) or `"starttls"` (usually port 587). If omitted, port 465 uses `ssl` and every other port uses `starttls` |
 | `senderEmail`, `senderPassword` | login and sender address |
 | `recipients` | list of recipient addresses |
-| `subject` | subject of the data mail |
+| `subject` | subject of the data mail (may be empty) |
 
 Temporary errors (connection lost, timeout, connection failed) are retried up to 3 times with a 5 seconds delay; permanent errors (wrong login, rejected sender or recipient) fail immediately.
 
@@ -78,6 +93,9 @@ The section `dataFile` sets the name and format of the yearly files `<prefix>_<y
 
 | key | meaning |
 |-----|---------|
+| `prefix` | start of the file names, e.g. `"gruenbeck_water_consumption"` (no path separator) |
+| `datePattern` | format of the dates in the files, with year, month and day, e.g. `"%Y-%m-%d"` or `"%d.%m.%Y"` ([format codes](https://docs.python.org/3/library/datetime.html#format-codes)). The rows are sorted by date |
+| `fieldnames` | names of the two columns, `{"date": "date", "value": "value"}`; both are written as header, and existing files must have them |
 | `firstDate` | optional, date `YYYY-MM-DD`, e.g. `"2026-11-20"`. Values of earlier days are not written (the log names their number), values already stored stay unchanged. Without the key every value is written. Use it while the device memory still holds values that would be stored under a wrong date, e.g. after setting the device clock. The key may stay afterwards. If all values of a run are before `firstDate`, the run fails |
 
 #### exit codes
@@ -88,6 +106,8 @@ The section `dataFile` sets the name and format of the yearly files `<prefix>_<y
 | `1` | any failure: configuration or data folder invalid, device not reachable or without values, new values that differ from the stored ones, e.g. a run before the daily rollover of the device (see the note under [Scheduling](#scheduling)), error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
 
 Cron and systemd can therefore detect a failed run by its exit code.
+
+Before it writes anything, the data collector reads every yearly file it needs. If a file lacks a column of `fieldnames`, or a stored date is not exactly what `datePattern` writes (e.g. `2026-11-20` with `"%d.%m.%Y"`, or `1.12.2026` instead of `01.12.2026`), the run writes nothing and fails with an error mail; the message names the file and line. So changing `datePattern` or `fieldnames` later needs the existing files converted as well.
 
 ### manually running
 
@@ -101,7 +121,7 @@ Warnings and errors are written to the rotating file `./log/gruenbeck_error.log`
 
 ### analysis
 
-`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`) and resolves relative paths from the current directory, so run it from the repository root:
+`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
 
 ```shell script
 uv run --extra analysis gruenbeck-analyse
