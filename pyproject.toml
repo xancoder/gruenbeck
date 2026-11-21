@@ -20,6 +20,7 @@ dev = [
     "pre-commit>=4.7.0",
     "pytest>=9",
     "pytest-cov>=6",
+    "responses>=0.26.3",
     "ruff>=0.17.6",
     "types-requests>=2.33.0.20261030",
 ]

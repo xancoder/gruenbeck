@@ -65,6 +65,16 @@ def test_days_are_calendar_dates_of_the_current_day(data_collector):
     assert key in {before - datetime.timedelta(days=1), after - datetime.timedelta(days=1)}
 
 
+def test_run_time_is_the_local_time_without_time_zone(data_collector):
+    before = datetime.datetime.now()
+    now = data_collector.local_now()
+    after = datetime.datetime.now()
+
+    assert type(now) is datetime.datetime
+    assert now.tzinfo is None
+    assert before <= now <= after
+
+
 def test_year_change(data_collector):
     response = {"D_Y_2_1": "1", "D_Y_2_2": "2", "D_Y_2_3": "3", "D_Y_2_14": "14"}
 
@@ -582,3 +592,174 @@ def test_console_logging_with_option_l_starts_at_info(
 
     assert "INFO - [*] an info" in capsys.readouterr().err
     assert (tmp_path / "collector.log").read_text() == ""
+
+
+# --- merging new and stored values (P006-S1) ----------------------------------------
+
+
+def stored_lines(tmp_path, year):
+    return (tmp_path / "data" / f"{PREFIX}_{year}.csv").read_text(encoding="utf-8").splitlines()
+
+
+def test_run_keeps_the_other_stored_days_and_sorts_the_file(run, tmp_path, mails):
+    write_year(
+        tmp_path,
+        2026,
+        [("2026-12-24", "7"), ("2026-01-05", "5"), ("2026-11-01", "-"), ("2026-11-08", "x")],
+    )
+
+    run(memory(true_value))
+
+    lines = stored_lines(tmp_path, 2026)
+    assert lines[:4] == ["date,value", "2026-01-05,5", "2026-11-01,-", "2026-11-08,x"]
+    assert lines[4:18] == [
+        f"{day_.isoformat()},{true_value(day_)}"
+        for day_ in (day("2026-11-09") + datetime.timedelta(days=n) for n in range(14))
+    ]
+    assert lines[18:] == ["2026-12-24,7"]
+    assert mails == [("data", tmp_path / "data")]
+
+
+@pytest.mark.parametrize(
+    "device_value, stored", [(" 93 ", "93"), ("007", "7"), ("+5", "5"), ("-5", "-5"), ("0", "0")]
+)
+def test_run_stores_the_device_values_as_int(run, tmp_path, device_value, stored):
+    run({**DEVICE_2026_11_23, "D_Y_2_1": device_value})
+
+    assert read_year(tmp_path, 2026)["2026-11-22"] == stored
+
+
+@pytest.mark.parametrize(
+    "device_value, error",
+    [
+        ("-", ValueError),
+        ("", ValueError),
+        ("1.5", ValueError),
+        ("x", ValueError),
+        (None, TypeError),
+    ],
+    ids=repr,
+)
+def test_run_with_a_value_that_is_no_int_fails_without_error_mail(
+    run, tmp_path, mails, device_value, error
+):
+    # outside handle_error(): a traceback instead of an error mail (P006-S9 changes this)
+    with pytest.raises(error):
+        run({**DEVICE_2026_11_23, "D_Y_2_5": device_value})
+
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == []
+
+
+def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one(run, tmp_path):
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-01"), day("2025-12-19")))
+    today = day("2026-01-03")
+
+    run(memory(true_value, today=today), today=today)
+
+    assert read_year(tmp_path, 2025) == dict(stored_rows(day("2025-12-01"), day("2025-12-31")))
+    assert list(read_year(tmp_path, 2025)) == sorted(read_year(tmp_path, 2025))
+    assert read_year(tmp_path, 2026) == dict(stored_rows(day("2026-01-01"), day("2026-01-02")))
+
+
+def test_run_reads_the_file_of_the_last_year_without_writing_it(run, tmp_path, mails):
+    # D_Y_2_14 on 2026-01-15 is 2026-01-01; 2025-12-31 is read for the overlap check
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-20"), day("2025-12-31")))
+    file_2025 = tmp_path / "data" / f"{PREFIX}_2025.csv"
+    before = (file_2025.read_bytes(), file_2025.stat().st_mtime_ns)
+    today = day("2026-01-15")
+
+    run(memory(true_value, today=today), today=today)
+
+    assert (file_2025.read_bytes(), file_2025.stat().st_mtime_ns) == before
+    assert read_year(tmp_path, 2026) == dict(stored_rows(day("2026-01-01"), day("2026-01-14")))
+    assert [kind for kind, _ in mails] == ["data"]
+
+
+def test_run_before_the_rollover_compares_with_the_last_day_of_the_last_year(run, tmp_path, mails):
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-31"), day("2025-12-31")))
+    write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-01")))
+    files = sorted((tmp_path / "data").glob("*.csv"))
+    before = [path.read_bytes() for path in files]
+    today = day("2026-01-15")
+
+    with pytest.raises(SystemExit) as exit_info:
+        run(memory(true_value, today=today, shift=1), today=today)
+
+    assert exit_info.value.code == 1
+    assert [path.read_bytes() for path in files] == before
+    assert mails == [
+        (
+            "error",
+            "[-] one day late: the run was probably before the daily rollover of"
+            " the device; run again later (the new values of 2026-01-01 ..."
+            " 2026-01-01 equal the stored values of the day before; nothing"
+            " written)",
+        )
+    ]
+
+
+def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(run, tmp_path, mails):
+    rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
+    rows[-1] = ("2026-11-15", "-")
+    write_year(tmp_path, 2026, rows)
+
+    with pytest.raises(SystemExit):
+        run(memory(true_value))
+
+    assert mails == [
+        (
+            "error",
+            "[-] the new values differ from the stored ones (2026-11-15: stored -,"
+            f" new {true_value(day('2026-11-15'))}): nothing written; check the data"
+            " files and the device",
+        )
+    ]
+
+
+def test_run_with_another_date_pattern_writes_and_compares_in_that_format(run, tmp_path):
+    today = day("2026-12-05")
+    write_year(
+        tmp_path,
+        2026,
+        [
+            (current.strftime("%d.%m.%Y"), str(true_value(current)))
+            for current in (day("2026-11-19"), day("2026-11-20"), day("2026-11-21"))
+        ],
+    )
+
+    run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
+
+    # sorted as text: December before the end of November
+    assert list(read_year(tmp_path, 2026)) == [
+        "01.12.2026",
+        "02.12.2026",
+        "03.12.2026",
+        "04.12.2026",
+        "19.11.2026",
+        "20.11.2026",
+        "21.11.2026",
+        "22.11.2026",
+        "23.11.2026",
+        "24.11.2026",
+        "25.11.2026",
+        "26.11.2026",
+        "27.11.2026",
+        "28.11.2026",
+        "29.11.2026",
+        "30.11.2026",
+    ]
+    assert read_year(tmp_path, 2026)["04.12.2026"] == str(true_value(day("2026-12-04")))
+
+
+def test_run_with_another_date_pattern_detects_differing_values(run, tmp_path, mails):
+    today = day("2026-12-05")
+    write_year(tmp_path, 2026, [("21.11.2026", "999")])
+
+    with pytest.raises(SystemExit):
+        run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
+
+    assert mails[0][1].startswith(
+        f"[-] the new values differ from the stored ones (2026-11-21: stored 999,"
+        f" new {true_value(day('2026-11-21'))})"
+    )
