@@ -14,6 +14,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "fix_date_offset.py"
 
 spec = importlib.util.spec_from_file_location("fix_date_offset", SCRIPT)
+assert spec is not None and spec.loader is not None
 fix = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fix)
 

@@ -50,7 +50,7 @@ def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
     :param log_file: path of the rotating log file
     :return: list of the added handlers
     """
-    handlers = []
+    handlers: list[logging.Handler] = []
     if log_console:
         console = logging.StreamHandler()
         console.setLevel(logging.INFO)
@@ -221,7 +221,7 @@ def get_consumption_parameters(config, parameter):
 def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
     attempts = 0
-    last_error = None
+    last_error: Exception | None = None
     timeout = get_device_timeout(config)
     # the device clock comes with the values, see check_device_clock()
     request_parameters = [

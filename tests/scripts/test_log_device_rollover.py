@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import typing
 
 import pytest
 import requests
@@ -12,6 +13,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "log_device_rollover.py"
 
 spec = importlib.util.spec_from_file_location("log_device_rollover", SCRIPT)
+assert spec is not None and spec.loader is not None
 rollover = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rollover)
 
@@ -47,7 +49,7 @@ def device(clock, responses):
             raise response
         return response
 
-    fetch.calls = calls
+    fetch.calls = calls  # type: ignore[attr-defined]  # read by the tests
     return fetch
 
 
@@ -194,7 +196,7 @@ def test_keyboard_interrupt_stops_cleanly(tmp_path, monkeypatch, capsys):
 def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan", "timeout": 7}}))
-    seen = {}
+    seen: dict[str, typing.Any] = {}
 
     def fake_run(host, timeout, output, interval, hours, previous_row):
         seen.update(
@@ -228,7 +230,7 @@ def test_main_continues_from_last_complete_row(tmp_path, monkeypatch, capsys):
     output = tmp_path / "out.csv"
     run(tmp_path, [values("105", "93")])
     (tmp_path / "log" / "device_rollover.csv").rename(output)
-    seen = {}
+    seen: dict[str, typing.Any] = {}
     monkeypatch.setattr(
         rollover, "run", lambda *args, previous_row: seen.update(row=previous_row) or 0
     )

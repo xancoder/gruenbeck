@@ -9,6 +9,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "deploy" / "systemd" / "setup_systemd.py"
 
 spec = importlib.util.spec_from_file_location("setup_systemd", SCRIPT)
+assert spec is not None and spec.loader is not None
 setup_systemd = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup_systemd)
 

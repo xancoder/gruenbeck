@@ -192,6 +192,7 @@ def mail_sending(
         attempts += 1
         try:
             context = ssl.create_default_context()
+            server: smtplib.SMTP
             if security == "ssl":
                 server = smtplib.SMTP_SSL(smtp_server, port, context=context, timeout=30)
             else:

@@ -214,7 +214,7 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
         monkeypatch.setattr(data_collector, "local_now", lambda: now)
         data_collector.main(str(config_file))
 
-    run_main.requests = requests
+    run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
     return run_main
 
 
@@ -548,7 +548,7 @@ def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
 @pytest.fixture
 def logging_handlers(data_collector):
     """removes and closes the handlers that setup_logging() adds"""
-    added = []
+    added: list[logging.Handler] = []
     yield added
     for handler in added:
         data_collector.logger.removeHandler(handler)
