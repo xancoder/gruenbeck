@@ -1,5 +1,7 @@
 # data collector - soft water system - Grünbeck
 
+[![CI](https://github.com/xancoder/gruenbeck/actions/workflows/ci.yml/badge.svg)](https://github.com/xancoder/gruenbeck/actions/workflows/ci.yml)
+
 > This python script collects water consumption data from a "Grünbeck" soft water system and stores into csv file
 
 ## Getting Started
@@ -138,7 +140,25 @@ Hooks that already exist in `.git/hooks` are kept as `<hook>.legacy` and still r
 uv run pre-commit run --all-files
 ```
 
-The first run needs network access to set up the hook environments (gitleaks is built with a Go toolchain that pre-commit fetches). The gitleaks hook looks at the staged changes only, so `--all-files` does not scan files that are not staged.
+The first run needs network access to set up the hook environments (gitleaks is built with a Go toolchain that pre-commit fetches). The gitleaks hook looks at the staged changes only, so `--all-files` does not scan files that are not staged. The separate hook `gitleaks-history` (manual stage) scans the whole git history instead:
+
+```shell script
+uv run pre-commit run --hook-stage manual --all-files gitleaks-history
+```
+
+#### continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request: `uv sync --locked`, pre-commit (ruff and the file checks), the gitleaks scan of the git history, mypy and pytest with coverage. Run the same checks locally before pushing:
+
+```shell script
+uv sync --locked
+uv run pre-commit run --all-files
+uv run pre-commit run --hook-stage manual --all-files gitleaks-history
+uv run mypy
+uv run pytest --cov
+```
+
+Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv) and the GitHub Actions once a week and opens one pull request per ecosystem. The hook versions in `.pre-commit-config.yaml` are not covered by it; update them with `uv run pre-commit autoupdate`, and keep the ruff version there in line with `uv.lock`.
 
 ## Scheduling
 
