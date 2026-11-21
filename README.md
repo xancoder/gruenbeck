@@ -17,7 +17,7 @@ The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer
 ```shell script
 cd gruenbeck
 uv sync --no-dev           # data collector only (production)
-uv sync                    # plus the test tools (pytest, pytest-cov)
+uv sync                    # plus the dev tools (pytest, pytest-cov, ruff, mypy, pre-commit)
 uv sync --extra analysis   # plus pandas and matplotlib for src/data-analyse.py
 ```
 
@@ -112,6 +112,33 @@ uv run pytest
 ```
 
 The tests run from any directory and write nothing into the repository.
+
+### code quality
+
+The dev tools (`uv sync`) include ruff, mypy and pre-commit; their settings are in `pyproject.toml` and `.pre-commit-config.yaml`:
+
+```shell script
+uv run ruff format   # format the code (double quotes, line length 100)
+uv run ruff check    # lint
+uv run mypy          # check the types of src and tests
+```
+
+#### pre-commit
+
+[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML and TOML syntax, large files) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. Install the git hooks once per clone:
+
+```shell script
+uv sync
+uv run pre-commit install
+```
+
+Hooks that already exist in `.git/hooks` are kept as `<hook>.legacy` and still run first. To check all files at any time:
+
+```shell script
+uv run pre-commit run --all-files
+```
+
+The first run needs network access to set up the hook environments (gitleaks is built with a Go toolchain that pre-commit fetches). The gitleaks hook looks at the staged changes only, so `--all-files` does not scan files that are not staged.
 
 ## Scheduling
 
