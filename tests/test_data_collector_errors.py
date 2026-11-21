@@ -55,85 +55,76 @@ def logs(caplog):
     return records
 
 
-# --- handle_error -------------------------------------------------------------------
+# --- report_error: log and error mail ------------------------------------------------
 
 
-def test_handle_error_logs_sends_the_error_mail_and_exits_with_1(mails, logs, loaded_config):
-    with pytest.raises(SystemExit) as exit_info:
-        cli.handle_error(loaded_config.mail, "[-] something failed")
+def test_report_error_logs_and_sends_the_error_mail(mails, logs, loaded_config):
+    # no exit (no SystemExit): since P006-S4 main() sets the exit code
+    cli.report_error(loaded_config.mail, "something failed")
 
-    assert exit_info.value.code == 1
     assert mails == [
         (
             "gruenbeck data collector failure",
             loaded_config.mail.as_dict(),
-            "[-] something failed",
+            "something failed",
         )
     ]
     assert logs() == [
-        ("ERROR", "[-] something failed"),
-        ("INFO", "[*] Error notification email sent"),
-        ("INFO", "[*] Exiting program due to error"),
+        ("ERROR", "something failed"),
+        ("INFO", "Error notification email sent"),
     ]
 
 
-def test_handle_error_sends_a_text_mail_over_smtp(smtp, sleeps, loaded_config):
-    with pytest.raises(SystemExit):
-        cli.handle_error(loaded_config.mail, "[-] something failed")
+def test_report_error_sends_a_text_mail_over_smtp(smtp, sleeps, loaded_config):
+    cli.report_error(loaded_config.mail, "something failed")
 
     (message,) = smtp.messages()
     assert message["Subject"] == "gruenbeck data collector failure"
-    assert [part.get_content() for part in message.iter_parts()] == ["[-] something failed"]
+    assert [part.get_content() for part in message.iter_parts()] == ["something failed"]
 
 
-def test_failed_error_mail_is_logged_and_the_exit_code_stays_1(smtp, sleeps, logs, loaded_config):
+def test_failed_error_mail_is_logged(smtp, sleeps, logs, loaded_config):
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.handle_error(loaded_config.mail, "[-] something failed")
+    cli.report_error(loaded_config.mail, "something failed")
 
-    assert exit_info.value.code == 1
     assert logs() == [
-        ("ERROR", "[-] something failed"),
+        ("ERROR", "something failed"),
         (
             "ERROR",
-            "[-] Failed to send error notification email: Error preparing email:"
+            "Failed to send error notification email: Error preparing email:"
             " Authentication failed: (535, b'bad credentials')",
         ),
-        ("INFO", "[*] Exiting program due to error"),
     ]
 
 
 def test_error_mail_without_mail_configuration_is_logged(smtp, logs):
     # None: the mail section of the configuration is missing or invalid
-    with pytest.raises(SystemExit) as exit_info:
-        cli.handle_error(None, "[-] something failed")
+    cli.report_error(None, "something failed")
 
-    assert exit_info.value.code == 1
     assert logs() == [
-        ("ERROR", "[-] something failed"),
-        ("ERROR", "[-] Failed to send error notification email: no valid mail configuration"),
-        ("INFO", "[*] Exiting program due to error"),
+        ("ERROR", "something failed"),
+        ("ERROR", "Failed to send error notification email: no valid mail configuration"),
     ]
     assert smtp.connections == []
+
+
+def test_texts_with_percent_signs_are_logged_unchanged(mails, logs, loaded_config):
+    cli.report_error(loaded_config.mail, "the date does not match '%d.%m.%Y'")
+
+    assert logs()[0] == ("ERROR", "the date does not match '%d.%m.%Y'")
 
 
 # --- configuration and data folder ---------------------------------------------------
 
 
-def test_configuration_is_loaded_and_checked(config_data, write_config, loaded_config):
-    assert cli.get_configuration(str(write_config(config_data))) == loaded_config
-
-
 def test_missing_configuration_exits_with_1_without_mail(mails, logs, tmp_path):
     config_file = tmp_path / "missing.json"
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_configuration(str(config_file))
+    assert cli.main(str(config_file)) == 1
 
-    assert exit_info.value.code == 1
-    assert logs() == [
-        ("ERROR", f"[-] no configuration: [Errno 2] No such file or directory: '{config_file}'")
+    assert logs()[1:] == [
+        ("ERROR", f"no configuration: [Errno 2] No such file or directory: '{config_file}'")
     ]
     assert mails == []
 
@@ -142,17 +133,15 @@ def test_invalid_json_exits_with_1_without_mail(mails, logs, tmp_path):
     config_file = tmp_path / "config.json"
     config_file.write_text("{not json")
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_configuration(str(config_file))
+    assert cli.main(str(config_file)) == 1
 
-    assert exit_info.value.code == 1
-    assert logs()[:2] == [
+    assert logs()[1:] == [
         (
             "ERROR",
-            f"[-] configuration file {config_file} is not valid JSON: Expecting property name"
+            f"configuration file {config_file} is not valid JSON: Expecting property name"
             " enclosed in double quotes: line 1 column 2 (char 1)",
         ),
-        ("ERROR", "[-] Failed to send error notification email: no valid mail configuration"),
+        ("ERROR", "Failed to send error notification email: no valid mail configuration"),
     ]
     assert mails == []
 
@@ -161,31 +150,27 @@ def test_invalid_configuration_sends_every_problem_by_mail(mails, logs, config_d
     del config_data["parameterFile"]
     config_data["softWaterSystem"]["timeout"] = 0
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_configuration(str(write_config(config_data)))
+    assert cli.main(str(write_config(config_data))) == 1
 
-    assert exit_info.value.code == 1
     message = (
-        "[-] invalid config parameter softWaterSystem.timeout 0: must be a number greater"
+        "invalid config parameter softWaterSystem.timeout 0: must be a number greater"
         " than 0; no config parameter: 'parameterFile'"
     )
-    assert logs()[0] == ("ERROR", message)
+    assert logs()[1] == ("ERROR", message)
     assert mails == [("gruenbeck data collector failure", config_data["mail"], message)]
 
 
 def test_invalid_mail_section_exits_with_1_without_mail(mails, logs, config_data, write_config):
     config_data["mail"]["smtpPort"] = "smtp"
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.get_configuration(str(write_config(config_data)))
+    assert cli.main(str(write_config(config_data))) == 1
 
-    assert exit_info.value.code == 1
-    assert logs()[:2] == [
+    assert logs()[1:] == [
         (
             "ERROR",
-            "[-] invalid config parameter mail.smtpPort 'smtp': expected a port number 1 ... 65535",
+            "invalid config parameter mail.smtpPort 'smtp': expected a port number 1 ... 65535",
         ),
-        ("ERROR", "[-] Failed to send error notification email: no valid mail configuration"),
+        ("ERROR", "Failed to send error notification email: no valid mail configuration"),
     ]
     assert mails == []
 
@@ -197,31 +182,32 @@ def test_data_folder_is_created(tmp_path, loaded_config):
     assert folder.is_dir()
 
 
-def test_data_folder_without_permission_is_an_error(mails, monkeypatch, tmp_path, loaded_config):
+def test_data_folder_without_permission_is_an_error(monkeypatch, tmp_path, loaded_config):
     def denied(data_folder):
         raise PermissionError(13, "Permission denied", str(data_folder))
 
     monkeypatch.setattr(storage, "check_data_folder", denied)
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(storage.StorageError) as err:
         cli.get_data_folder(loaded_config)
 
-    assert [text for _, _, text in mails] == [
-        f"[-] creation data folder failed: [Errno 13] Permission denied: '{tmp_path / 'data'}'"
-    ]
+    assert str(err.value) == (
+        f"creation data folder failed: [Errno 13] Permission denied: '{tmp_path / 'data'}'"
+    )
 
 
-def test_data_folder_in_a_missing_folder_raises_without_mail(
-    mails, tmp_path, config_data, write_config
-):
+def test_data_folder_in_a_missing_folder_is_an_error(tmp_path, config_data, write_config):
     config_data["dataPath"] = str(tmp_path / "a" / "data")
     loaded = gruenbeck.config.load_configuration(write_config(config_data))
 
-    # only the last folder is created; FileNotFoundError is not caught
-    with pytest.raises(FileNotFoundError):
+    # only the last folder is created; up to P006-S4 a traceback without error mail
+    with pytest.raises(storage.StorageError) as err:
         cli.get_data_folder(loaded)
 
-    assert mails == []
+    assert str(err.value) == (
+        "creation data folder failed: [Errno 2] No such file or directory:"
+        f" '{tmp_path / 'a' / 'data'}'"
+    )
 
 
 def test_device_parameter_is_read_from_the_parameter_file(loaded_config):
@@ -230,16 +216,16 @@ def test_device_parameter_is_read_from_the_parameter_file(loaded_config):
     assert "D_Y_2_14" in parameter.get_parameter_list()
 
 
-def test_missing_parameter_file_is_an_error(mails, tmp_path, config_data, write_config):
+def test_missing_parameter_file_is_an_error(tmp_path, config_data, write_config):
     path = tmp_path / "missing.csv"
     config_data["parameterFile"] = str(path)
     loaded = gruenbeck.config.load_configuration(write_config(config_data))
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(gruenbeck.device.DeviceError) as err:
         cli.get_device_parameter(loaded)
 
-    # the text of the FileNotFoundError, without prefix
-    assert [text for _, _, text in mails] == [f"[Errno 2] No such file or directory: '{path}'"]
+    # the text of the FileNotFoundError
+    assert str(err.value) == f"[Errno 2] No such file or directory: '{path}'"
 
 
 # --- device request with retries ----------------------------------------------------
@@ -291,13 +277,13 @@ def test_device_request_with_host_and_timeout(
     "error, warning",
     [
         (
-            ValueError("[-] failed to parse xml: x"),
-            "[-] invalid device response: [-] failed to parse xml: x",
+            ValueError("failed to parse xml: x"),
+            "invalid device response: failed to parse xml: x",
         ),
-        (requests.exceptions.ReadTimeout("read timed out"), "[-] request failed: read timed out"),
-        (requests.exceptions.HTTPError("500 Server Error"), "[-] request failed: 500 Server Error"),
-        (RuntimeError("boom"), "[-] unexpected error: boom"),
-        (TypeError("bad type"), "[-] unexpected error: bad type"),
+        (requests.exceptions.ReadTimeout("read timed out"), "request failed: read timed out"),
+        (requests.exceptions.HTTPError("500 Server Error"), "request failed: 500 Server Error"),
+        (RuntimeError("boom"), "unexpected error: boom"),
+        (TypeError("bad type"), "unexpected error: bad type"),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
@@ -313,34 +299,34 @@ def test_device_request_succeeds_after_retries(
     assert sleeps == [5, 5]
     assert logs() == [
         ("WARNING", f"{warning}. Attempt 1/4"),
-        ("INFO", "[*] Retry attempt 1/3 for API request"),
+        ("INFO", "Retry attempt 1/3 for API request"),
         ("WARNING", f"{warning}. Attempt 2/4"),
-        ("INFO", "[*] Retry attempt 2/3 for API request"),
-        ("INFO", "[*] Successfully retrieved data after 2 retry attempts"),
+        ("INFO", "Retry attempt 2/3 for API request"),
+        ("INFO", "Successfully retrieved data after 2 retry attempts"),
     ]
 
 
 def test_device_request_fails_after_four_attempts(
     device, device_parameter, sleeps, mails, loaded_config
 ):
-    device.errors = [
+    device_errors = [
         requests.exceptions.ConnectTimeout("connect timed out"),
         requests.exceptions.ConnectionError("refused"),
-        ValueError("[-] device response contains no values"),
+        ValueError("device response contains no values"),
         requests.exceptions.ReadTimeout("read timed out"),
         ValueError("not reached"),
     ]
+    device.errors = list(device_errors)
 
-    with pytest.raises(SystemExit) as exit_info:
+    with pytest.raises(gruenbeck.device.DeviceError) as err:
         cli.get_device_data(loaded_config, device_parameter)
 
-    assert exit_info.value.code == 1
     assert len(device.calls) == 4
     assert sleeps == [5, 5, 5]
-    # the error mail names the last error only
-    assert [text for _, _, text in mails] == [
-        "[-] failed to get device data after 4 attempts: read timed out"
-    ]
+    # the error names the last error only; the error mail is sent by main()
+    assert str(err.value) == "failed to get device data after 4 attempts: read timed out"
+    assert err.value.__cause__ is device_errors[3]
+    assert mails == []
 
 
 def test_number_of_retries_and_delay_are_parameters(
@@ -348,12 +334,11 @@ def test_number_of_retries_and_delay_are_parameters(
 ):
     device.errors = [ValueError("bad")] * 2
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(gruenbeck.device.DeviceError, match=r"^failed to get device data after 2"):
         cli.get_device_data(loaded_config, device_parameter, max_retries=1, retry_delay=0.5)
 
     assert len(device.calls) == 2
     assert sleeps == [0.5]
-    assert [text for _, _, text in mails] == ["[-] failed to get device data after 2 attempts: bad"]
 
 
 def test_key_error_of_the_request_is_retried_like_other_errors(
@@ -366,7 +351,7 @@ def test_key_error_of_the_request_is_retried_like_other_errors(
 
     assert len(device.calls) == 2
     assert sleeps == [5]
-    assert logs()[0] == ("WARNING", "[-] unexpected error: 'text'. Attempt 1/4")
+    assert logs()[0] == ("WARNING", "unexpected error: 'text'. Attempt 1/4")
     assert mails == []
 
 
@@ -377,18 +362,18 @@ def test_get_mail_sends_the_data_folder(mails, logs, tmp_path, loaded_config):
     assert cli.get_mail(loaded_config, tmp_path) is True
 
     assert mails == [("data", loaded_config.mail.as_dict(), tmp_path)]
-    assert logs() == [("INFO", "[*] mail sent successfully")]
+    assert logs() == [("INFO", "mail sent successfully")]
 
 
 @pytest.mark.parametrize(
     "error, message",
     [
-        (KeyError("smtpServer"), "[-] no mail configured: 'smtpServer'"),
+        (KeyError("smtpServer"), "no mail configured: 'smtpServer'"),
         (
             ValueError("Error preparing email: x"),
-            "[-] mail sending failed: Error preparing email: x",
+            "mail sending failed: Error preparing email: x",
         ),
-        (RuntimeError("boom"), "[-] unexpected error during mail sending: boom"),
+        (RuntimeError("boom"), "unexpected error during mail sending: boom"),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
@@ -411,7 +396,7 @@ def test_data_mail_over_smtp_with_rejected_login_returns_false(
     assert logs() == [
         (
             "ERROR",
-            "[-] mail sending failed: Error preparing email: Authentication failed:"
+            "mail sending failed: Error preparing email: Authentication failed:"
             " (535, b'bad credentials')",
         )
     ]
@@ -437,18 +422,18 @@ def run(device, mails, monkeypatch, config_data, write_config):
         config_file = write_config(
             {key: value for key, value in config.items() if value is not None}
         )
-        cli.main(str(config_file))
+        return cli.main(str(config_file))
 
     return run_main
 
 
 def test_successful_run_logs_start_and_end(run, device, mails, logs, tmp_path, config_data):
-    run()
+    assert run() == 0
 
-    assert logs()[0] == ("INFO", f"[*] run script: {sys.argv[0]}")
+    assert logs()[0] == ("INFO", f"run script: {sys.argv[0]}")
     assert logs()[-2:] == [
-        ("INFO", "[*] mail sent successfully"),
-        ("INFO", "[*] Data collection completed"),
+        ("INFO", "mail sent successfully"),
+        ("INFO", "Data collection completed"),
     ]
     assert mails == [("data", config_data["mail"], tmp_path / "data")]
     assert len((tmp_path / "data" / f"{PREFIX}_2026.csv").read_text().splitlines()) == 15
@@ -465,14 +450,11 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
     monkeypatch.setattr(mail, "send_mail", fail)
     monkeypatch.setattr(mail, "send_mail_text", lambda *args: sent.append(args))
 
-    with pytest.raises(SystemExit) as exit_info:
-        run()
-
-    assert exit_info.value.code == 1
+    assert run() == 1
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").exists()
     assert logs()[-2:] == [
-        ("ERROR", "[-] mail sending failed: Error preparing email: refused"),
-        ("ERROR", "[-] data was collected and stored, but email sending failed"),
+        ("ERROR", "mail sending failed: Error preparing email: refused"),
+        ("ERROR", "data was collected and stored, but email sending failed"),
     ]
     # no error mail in this case
     assert sent == []
@@ -481,19 +463,13 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
 def test_run_without_consumption_values_is_an_error(run, device, mails, tmp_path):
     device.answer = {"D_C_4_2": "16:00"}
 
-    with pytest.raises(SystemExit) as exit_info:
-        run()
-
-    assert exit_info.value.code == 1
-    assert [text for kind, _, text in mails] == ["[-] no data was processed"]
+    assert run() == 1
+    assert [text for kind, _, text in mails] == ["no data was processed"]
     assert list((tmp_path / "data").iterdir()) == []
 
 
 def test_run_without_configuration_file_asks_nobody(device, mails, tmp_path):
-    with pytest.raises(SystemExit) as exit_info:
-        cli.main(str(tmp_path / "missing.json"))
-
-    assert exit_info.value.code == 1
+    assert cli.main(str(tmp_path / "missing.json")) == 1
     assert device.calls == []
     assert mails == []
 
@@ -501,14 +477,14 @@ def test_run_without_configuration_file_asks_nobody(device, mails, tmp_path):
 @pytest.mark.parametrize(
     "changes, message",
     [
-        ({"dataPath": None}, "[-] no config parameter: 'dataPath'"),
-        ({"dataFile": None}, "[-] no config parameter: 'dataFile'"),
-        ({"parameterFile": None}, "[-] no config parameter: 'parameterFile'"),
-        ({"softWaterSystem": None}, "[-] no config parameter: 'softWaterSystem'"),
-        ({"softWaterSystem": {}}, "[-] no config parameter: 'softWaterSystem.host'"),
+        ({"dataPath": None}, "no config parameter: 'dataPath'"),
+        ({"dataFile": None}, "no config parameter: 'dataFile'"),
+        ({"parameterFile": None}, "no config parameter: 'parameterFile'"),
+        ({"softWaterSystem": None}, "no config parameter: 'softWaterSystem'"),
+        ({"softWaterSystem": {}}, "no config parameter: 'softWaterSystem.host'"),
         (
             {"dataPath": None, "softWaterSystem": {"host": ""}},
-            "[-] invalid config parameter softWaterSystem.host '': expected a non-empty"
+            "invalid config parameter softWaterSystem.host '': expected a non-empty"
             " text; no config parameter: 'dataPath'",
         ),
     ],
@@ -517,23 +493,17 @@ def test_run_without_configuration_file_asks_nobody(device, mails, tmp_path):
 def test_run_with_incomplete_configuration_fails_before_asking_the_device(
     run, device, mails, tmp_path, changes, message
 ):
-    with pytest.raises(SystemExit) as exit_info:
-        run(**changes)
-
-    assert exit_info.value.code == 1
+    assert run(**changes) == 1
     assert device.calls == []
     assert [text for _, _, text in mails] == [message]
     assert not list(tmp_path.glob("data/*.csv"))
 
 
 def test_run_without_valid_mail_section_fails_without_mail(run, device, mails, logs, tmp_path):
-    with pytest.raises(SystemExit) as exit_info:
-        run(mail=None, dataPath=None)
-
-    assert exit_info.value.code == 1
+    assert run(mail=None, dataPath=None) == 1
     assert device.calls == []
     assert mails == []
     assert logs()[1] == (
         "ERROR",
-        "[-] no config parameter: 'mail'; no config parameter: 'dataPath'",
+        "no config parameter: 'mail'; no config parameter: 'dataPath'",
     )

@@ -69,11 +69,11 @@ def test_missing_memory_parameter_fails_before_asking_the_device(
     reduced = tmp_path / "parameters.csv"
     reduced.write_text("".join(without), encoding="utf-8")
 
-    with pytest.raises(SystemExit) as exit_info:
+    with pytest.raises(gruenbeck.device.DeviceError) as err:
         cli.get_device_data(loaded_config, gruenbeck.device.Parameter(str(reduced)))
 
-    assert exit_info.value.code == 1
     assert device == []
-    message = f"[-] parameter file {reduced} lacks the consumption parameters: D_Y_2_5, D_Y_2_12"
-    assert message in caplog.text
-    assert error_mails == [message]
+    message = f"parameter file {reduced} lacks the consumption parameters: D_Y_2_5, D_Y_2_12"
+    assert str(err.value) == message
+    # the error mail is sent by main()
+    assert error_mails == []

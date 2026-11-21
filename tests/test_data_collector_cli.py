@@ -69,7 +69,7 @@ def test_defaults_are_relative_to_the_working_directory(tmp_path):
     log = (tmp_path / "log" / "gruenbeck_error.log").read_text()
     # default ./src/config.json, normalized by pathlib
     assert (
-        "ERROR - [-] no configuration: [Errno 2] No such file or directory: 'src/config.json'"
+        "ERROR - no configuration: [Errno 2] No such file or directory: 'src/config.json'"
     ) in log
     # no console logging without -l
     assert result.stderr == ""
@@ -79,7 +79,11 @@ def test_missing_log_folder_fails_before_the_run(tmp_path):
     result = run_command("gruenbeck-collect", tmp_path)
 
     assert result.returncode == 1
-    assert "FileNotFoundError" in result.stderr
+    # up to P006-S4 a traceback
+    assert result.stderr == (
+        "gruenbeck-collect: cannot open the log file: [Errno 2] No such file or directory:"
+        f" '{tmp_path / 'log' / 'gruenbeck_error.log'}'\n"
+    )
     assert not (tmp_path / "log").exists()
 
 
@@ -112,6 +116,6 @@ def test_run_with_options(tmp_path, monkeypatch, capsys, package_logger, config_
     assert len(list((tmp_path / "data").glob("p_*.csv"))) in (1, 2)  # 2 at the year change
     # -l: INFO and above on the console (stderr), also from other modules of the package
     err = capsys.readouterr().err
-    assert "gruenbeck.cli - INFO - [*] Data collection completed" in err
-    assert "gruenbeck.storage - INFO - [*] data to write:" in err
+    assert "gruenbeck.cli - INFO - Data collection completed" in err
+    assert "gruenbeck.storage - INFO - data to write:" in err
     assert log_file.read_text() == ""

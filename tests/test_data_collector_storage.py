@@ -80,7 +80,7 @@ def test_date_that_does_not_match_the_pattern_is_an_error(tmp_path, text):
     path = tmp_path / "p_2026.csv"
     path.write_text(f"date,value\n2026-11-20,1\n{text},2\n", encoding="utf-8")
 
-    with pytest.raises(storage.DataFileError) as err:
+    with pytest.raises(storage.StorageError) as err:
         storage.read_data_file(path, FIELDNAMES, ISO)
 
     assert str(err.value) == (
@@ -92,7 +92,7 @@ def test_short_row_without_date_is_an_error(tmp_path):
     path = tmp_path / "p_2026.csv"
     path.write_text("value,date\n5\n", encoding="utf-8")
 
-    with pytest.raises(storage.DataFileError, match="line 2: the date None does not match"):
+    with pytest.raises(storage.StorageError, match="line 2: the date None does not match"):
         storage.read_data_file(path, FIELDNAMES, ISO)
 
 
@@ -109,7 +109,7 @@ def test_missing_column_is_an_error(tmp_path):
     path = tmp_path / "p_2026.csv"
     path.write_text("date,litres\n2026-11-22,101\n", encoding="utf-8")
 
-    with pytest.raises(storage.DataFileError) as err:
+    with pytest.raises(storage.StorageError) as err:
         storage.read_data_file(path, config.FieldNames(date="day", value="litres"), ISO)
 
     assert str(err.value) == (
@@ -208,7 +208,7 @@ def test_write_data_logs_the_data(tmp_path, caplog):
 
     storage.write_data(tmp_path / "p_2026.csv", FIELDNAMES, {"2026-11-22": 101}, ISO)
 
-    assert caplog.messages == ["[*] data to write: {'2026-11-22': 101}"]
+    assert caplog.messages == ["data to write: {'2026-11-22': 101}"]
 
 
 def test_write_data_keeps_the_mode_of_an_existing_file(tmp_path):
@@ -279,7 +279,7 @@ def test_write_data_with_a_date_that_does_not_match_writes_nothing(tmp_path, tex
     path = tmp_path / "p_2026.csv"
     path.write_text("date,value\n2026-11-01,1\n", encoding="utf-8")
 
-    with pytest.raises(storage.DataFileError) as err:
+    with pytest.raises(storage.StorageError) as err:
         storage.write_data(path, FIELDNAMES, {"2026-11-01": 1, text: 2}, ISO)
 
     assert str(err.value) == f"the date {text!r} does not match dataFile.datePattern '%Y-%m-%d'"

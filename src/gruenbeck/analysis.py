@@ -2,12 +2,16 @@
 
 import pathlib
 import re
-import sys
 
 from gruenbeck import config as configuration
+from gruenbeck import errors
 
 print_pattern_headline = "{:<4} {:<5} {:<4} {:<3} {:<3} {:<3} {:<5}"
 print_pattern = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
+
+
+class AnalysisError(errors.GruenbeckError):
+    """nothing to analyse"""
 
 
 def get_data_files(data_path, prefix):
@@ -30,16 +34,12 @@ def main(config_file):
     import matplotlib.pyplot as plt
     import pandas
 
-    try:
-        config = configuration.load_configuration(config_file)
-    except FileNotFoundError as err:
-        sys.exit(f"[-] no configuration: {err}")
-    except configuration.ConfigurationError as err:
-        sys.exit(f"[-] {err}")
+    # FileNotFoundError and ConfigurationError go to the caller (gruenbeck.cli.analyse)
+    config = configuration.load_configuration(config_file)
     data_file = config.data_file
     data_files = get_data_files(config.data_path, data_file.prefix)
     if not data_files:
-        sys.exit(f"[-] no data files '{data_file.prefix}_<year>.csv' in {config.data_path}")
+        raise AnalysisError(f"no data files '{data_file.prefix}_<year>.csv' in {config.data_path}")
 
     print(f"data folder: {config.data_path}")
     for input_file in data_files:

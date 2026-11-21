@@ -10,6 +10,8 @@ import xml.etree.ElementTree
 
 import requests
 
+from gruenbeck import errors
+
 logger = logging.getLogger(__name__)
 
 # seconds to wait for connect and for the response of the device
@@ -27,6 +29,10 @@ DEVICE_CLOCK_PARAMETER = "D_C_4_2"
 DEVICE_CLOCK_FORMAT = re.compile(r"([01][0-9]|2[0-3]):([0-5][0-9])")
 CLOCK_TOLERANCE_MINUTES = 15
 MINUTES_PER_DAY = 24 * 60
+
+
+class DeviceError(errors.GruenbeckError):
+    """the parameter file or the answer of the device is not usable"""
 
 
 class Parameter:
@@ -103,7 +109,7 @@ def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT):
     try:
         root = xml.etree.ElementTree.fromstring(response_data.text)
     except xml.etree.ElementTree.ParseError as err:
-        raise ValueError(f"[-] failed to parse xml: {err}") from err
+        raise ValueError(f"failed to parse xml: {err}") from err
 
     for child in root:
         if child.tag == "code":
@@ -111,7 +117,7 @@ def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT):
         result_data.update({child.tag: child.text})
 
     if not result_data:
-        raise ValueError("[-] device response contains no values")
+        raise ValueError("device response contains no values")
 
     return result_data
 
@@ -136,12 +142,12 @@ def check_device_clock(device_clock, now):
         or None without a valid device clock
     """
     if device_clock is None:
-        logger.warning(f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}")
+        logger.warning("the device response has no device clock %s", DEVICE_CLOCK_PARAMETER)
         return None
     match = DEVICE_CLOCK_FORMAT.fullmatch(str(device_clock).strip())
     if not match:
         logger.warning(
-            f"[-] invalid device clock {DEVICE_CLOCK_PARAMETER} {device_clock!r} (expected HH:MM)"
+            "invalid device clock %s %r (expected HH:MM)", DEVICE_CLOCK_PARAMETER, device_clock
         )
         return None
     device_minutes = int(match.group(1)) * 60 + int(match.group(2))
@@ -151,8 +157,11 @@ def check_device_clock(device_clock, now):
         deviation -= MINUTES_PER_DAY
     if abs(deviation) > CLOCK_TOLERANCE_MINUTES:
         logger.warning(
-            f"[-] the device clock is off (device clock {match.group(0)}, local time"
-            f" {now:%H:%M}, deviation {format_minutes(deviation)}): set the device clock"
+            "the device clock is off (device clock %s, local time %s, deviation %s): set the"
+            " device clock",
+            match.group(0),
+            f"{now:%H:%M}",
+            format_minutes(deviation),
         )
     return deviation
 
@@ -167,15 +176,15 @@ def add_timestamp_as_key_device_data(device_data, today=None):
     :param device_data: dictionary of parameter code and value
     :param today: date of the run (default: the current local date)
     :return: dictionary of datetime.date and value
-    :raises ValueError: a parameter code is not D_Y_2_<n>
+    :raises DeviceError: a parameter code is not D_Y_2_<n>
     """
     today = today or datetime.date.today()
     result = {}
     for param, value in device_data.items():
         match = DAY_PARAMETER.fullmatch(param)
         if not match:
-            raise ValueError(
-                f"[-] unknown consumption parameter {param!r}:"
+            raise DeviceError(
+                f"unknown consumption parameter {param!r}:"
                 " expected D_Y_2_<n> (consumption of n days ago)"
             )
         result[today - datetime.timedelta(days=int(match.group(1)))] = value

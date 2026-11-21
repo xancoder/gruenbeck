@@ -103,12 +103,11 @@ def test_more_than_14_days_ago():
 def test_unknown_parameter_is_an_error(name):
     response = {"D_Y_2_1": "93", name: "33"}
 
-    with pytest.raises(ValueError) as err:
+    with pytest.raises(device.DeviceError) as err:
         device.add_timestamp_as_key_device_data(response, today=TODAY)
 
     assert str(err.value) == (
-        f"[-] unknown consumption parameter {name!r}:"
-        " expected D_Y_2_<n> (consumption of n days ago)"
+        f"unknown consumption parameter {name!r}: expected D_Y_2_<n> (consumption of n days ago)"
     )
 
 
@@ -124,31 +123,31 @@ def test_first_date_filters_earlier_days(caplog, loaded_config):
         day("2026-11-18"): "9",
     }
 
-    result = cli.filter_first_date(loaded_config, device_data, day("2026-11-20"))
+    result = cli.filter_first_date(device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
-    assert "[*] 2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
+    assert "2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
 def test_without_first_date_nothing_is_filtered(caplog, loaded_config):
     caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
-    assert cli.filter_first_date(loaded_config, device_data, None) == device_data
-    assert cli.filter_first_date(loaded_config, device_data, day("2025-01-01")) == device_data
+    assert cli.filter_first_date(device_data, None) == device_data
+    assert cli.filter_first_date(device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
 def test_all_values_before_first_date_fail_the_run(mails, caplog, loaded_config):
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
-    with pytest.raises(SystemExit) as exit_info:
-        cli.filter_first_date(loaded_config, device_data, day("2026-11-20"))
+    with pytest.raises(cli.CollectError) as err:
+        cli.filter_first_date(device_data, day("2026-11-20"))
 
-    assert exit_info.value.code == 1
-    assert (
-        "[-] no data was processed: all 2 values are before dataFile.firstDate 2026-11-20"
-    ) in caplog.text
+    assert str(err.value) == (
+        "no data was processed: all 2 values are before dataFile.firstDate 2026-11-20"
+    )
+    assert mails == []
 
 
 # --- complete run ------------------------------------------------------------------
@@ -178,7 +177,7 @@ def run(mails, monkeypatch, config_data, write_config):
         now = datetime.datetime.combine(today, datetime.time.fromisoformat(local_time))
         monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
         monkeypatch.setattr(cli, "local_now", lambda: now)
-        cli.main(str(config_file))
+        return cli.main(str(config_file))
 
     run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
     return run_main
@@ -254,7 +253,7 @@ def test_run_with_first_date_keeps_the_migrated_values(run, tmp_path, caplog):
         "2026-11-21": "102",
         "2026-11-22": "101",
     }
-    assert "[*] 11 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
+    assert "11 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
 def test_run_over_the_year_change_writes_both_files(run, tmp_path):
@@ -272,25 +271,18 @@ def test_run_over_the_year_change_writes_both_files(run, tmp_path):
 def test_run_with_unknown_parameter_fails_without_writing(run, tmp_path, mails):
     response = {**DEVICE_2026_11_23, "D_Y_1": "101"}
 
-    with pytest.raises(SystemExit) as exit_info:
-        run(response)
-
-    assert exit_info.value.code == 1
+    assert run(response) == 1
     assert not list((tmp_path / "data").glob("*.csv"))
     assert mails == [
         (
             "error",
-            "[-] unknown consumption parameter 'D_Y_1':"
-            " expected D_Y_2_<n> (consumption of n days ago)",
+            "unknown consumption parameter 'D_Y_1': expected D_Y_2_<n> (consumption of n days ago)",
         )
     ]
 
 
 def test_run_with_invalid_first_date_fails_before_asking_the_device(run, mails):
-    with pytest.raises(SystemExit) as exit_info:
-        run(DEVICE_2026_11_23, firstDate="2026-11-31")
-
-    assert exit_info.value.code == 1
+    assert run(DEVICE_2026_11_23, firstDate="2026-11-31") == 1
     assert run.requests == []
     assert mails[0][0] == "error"
     assert "dataFile.firstDate '2026-11-31'" in mails[0][1]
@@ -338,7 +330,7 @@ def test_device_clock_off_is_only_a_warning(
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
     assert clock_warnings(caplog) == [
-        f"[-] the device clock is off (device clock {device_clock}, local time"
+        f"the device clock is off (device clock {device_clock}, local time"
         f" {local_time}, deviation {deviation}): set the device clock"
     ]
 
@@ -346,11 +338,11 @@ def test_device_clock_off_is_only_a_warning(
 @pytest.mark.parametrize(
     "device_clock, warning",
     [
-        (None, "[-] the device response has no device clock D_C_4_2"),
-        ("24:00", "[-] invalid device clock D_C_4_2 '24:00' (expected HH:MM)"),
-        ("7:05", "[-] invalid device clock D_C_4_2 '7:05' (expected HH:MM)"),
-        ("-", "[-] invalid device clock D_C_4_2 '-' (expected HH:MM)"),
-        ("", "[-] invalid device clock D_C_4_2 '' (expected HH:MM)"),
+        (None, "the device response has no device clock D_C_4_2"),
+        ("24:00", "invalid device clock D_C_4_2 '24:00' (expected HH:MM)"),
+        ("7:05", "invalid device clock D_C_4_2 '7:05' (expected HH:MM)"),
+        ("-", "invalid device clock D_C_4_2 '-' (expected HH:MM)"),
+        ("", "invalid device clock D_C_4_2 '' (expected HH:MM)"),
     ],
 )
 def test_missing_or_invalid_device_clock_is_only_a_warning(
@@ -435,15 +427,12 @@ def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(run, tmp_pat
     write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
     before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
 
-    with pytest.raises(SystemExit) as exit_info:
-        run(memory(true_value, shift=1), local_time="06:00", device_clock="06:00")
-
-    assert exit_info.value.code == 1
+    assert run(memory(true_value, shift=1), local_time="06:00", device_clock="06:00") == 1
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
     assert mails == [
         (
             "error",
-            "[-] one day late: the run was probably before the daily rollover of"
+            "one day late: the run was probably before the daily rollover of"
             " the device; run again later (the new values of 2026-11-09 ..."
             " 2026-11-15 equal the stored values of the day before; nothing"
             " written)",
@@ -457,16 +446,18 @@ def test_run_before_the_rollover_over_the_year_change_writes_no_file(run, tmp_pa
     files = sorted((tmp_path / "data").glob("*.csv"))
     before = [path.read_bytes() for path in files]
 
-    with pytest.raises(SystemExit):
+    assert (
         run(
             memory(true_value, today=day("2026-01-11"), shift=1),
             today=day("2026-01-11"),
             local_time="07:00",
             device_clock="07:00",
         )
+        == 1
+    )
 
     assert [path.read_bytes() for path in files] == before
-    assert mails[0][1].startswith("[-] one day late:")
+    assert mails[0][1].startswith("one day late:")
 
 
 def test_overlap_with_other_values_writes_nothing_and_names_the_days(run, tmp_path, mails):
@@ -477,13 +468,12 @@ def test_overlap_with_other_values_writes_nothing_and_names_the_days(run, tmp_pa
     new_13 = true_value(day("2026-11-13"))
     new_15 = true_value(day("2026-11-15"))
 
-    with pytest.raises(SystemExit):
-        run(memory(true_value))
+    assert run(memory(true_value)) == 1
 
     assert mails == [
         (
             "error",
-            f"[-] the new values differ from the stored ones (2026-11-13: stored"
+            f"the new values differ from the stored ones (2026-11-13: stored"
             f" 0, new {new_13}, 2026-11-15: stored 999, new {new_15}): nothing"
             " written; check the data files and the device",
         )
@@ -525,14 +515,14 @@ def test_log_file_takes_warnings_and_errors_but_no_infos(logging_handlers, tmp_p
     log_file = tmp_path / "collector.log"
     logging_handlers += cli.setup_logging(False, log_file)
 
-    cli.logger.info("[*] an info")
-    cli.logger.warning("[-] the device clock is off")
-    cli.logger.error("[-] an error")
+    cli.logger.info("an info")
+    cli.logger.warning("the device clock is off")
+    cli.logger.error("an error")
 
     lines = log_file.read_text().splitlines()
     assert [line.split(" - ", 3)[2:] for line in lines] == [
-        ["WARNING", "[-] the device clock is off"],
-        ["ERROR", "[-] an error"],
+        ["WARNING", "the device clock is off"],
+        ["ERROR", "an error"],
     ]
     assert capsys.readouterr().err == ""
 
@@ -540,9 +530,9 @@ def test_log_file_takes_warnings_and_errors_but_no_infos(logging_handlers, tmp_p
 def test_console_logging_with_option_l_starts_at_info(logging_handlers, tmp_path, capsys):
     logging_handlers += cli.setup_logging(True, tmp_path / "collector.log")
 
-    cli.logger.info("[*] an info")
+    cli.logger.info("an info")
 
-    assert "INFO - [*] an info" in capsys.readouterr().err
+    assert "INFO - an info" in capsys.readouterr().err
     assert (tmp_path / "collector.log").read_text() == ""
 
 
@@ -584,23 +574,32 @@ def test_run_stores_the_device_values_as_int(run, tmp_path, device_value, stored
 @pytest.mark.parametrize(
     "device_value, error",
     [
-        ("-", ValueError),
-        ("", ValueError),
-        ("1.5", ValueError),
-        ("x", ValueError),
-        (None, TypeError),
+        ("-", "ValueError: invalid literal for int() with base 10: '-'"),
+        ("", "ValueError: invalid literal for int() with base 10: ''"),
+        ("1.5", "ValueError: invalid literal for int() with base 10: '1.5'"),
+        ("x", "ValueError: invalid literal for int() with base 10: 'x'"),
+        (
+            None,
+            "TypeError: int() argument must be a string, a bytes-like object or a real"
+            " number, not 'NoneType'",
+        ),
     ],
     ids=repr,
 )
-def test_run_with_a_value_that_is_no_int_fails_without_error_mail(
-    run, tmp_path, mails, device_value, error
+def test_run_with_a_value_that_is_no_int_fails_with_error_mail(
+    run, tmp_path, mails, caplog, device_value, error
 ):
-    # outside handle_error(): a traceback instead of an error mail (P006-S9 changes this)
-    with pytest.raises(error):
-        run({**DEVICE_2026_11_23, "D_Y_2_5": device_value})
+    # up to P006-S4 a traceback without error mail; P006-S9 checks the values itself
+    assert run({**DEVICE_2026_11_23, "D_Y_2_5": device_value}) == 1
 
     assert not list((tmp_path / "data").glob("*.csv"))
-    assert mails == []
+    ((kind, text),) = mails
+    assert kind == "error"
+    assert text.startswith(f"unexpected error: {error}\n\nTraceback (most recent call last):")
+    # the log has the traceback as well
+    (record,) = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert record.getMessage() == f"unexpected error: {error}"
+    assert record.exc_info is not None
 
 
 def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one(run, tmp_path):
@@ -635,15 +634,12 @@ def test_run_before_the_rollover_compares_with_the_last_day_of_the_last_year(run
     before = [path.read_bytes() for path in files]
     today = day("2026-01-15")
 
-    with pytest.raises(SystemExit) as exit_info:
-        run(memory(true_value, today=today, shift=1), today=today)
-
-    assert exit_info.value.code == 1
+    assert run(memory(true_value, today=today, shift=1), today=today) == 1
     assert [path.read_bytes() for path in files] == before
     assert mails == [
         (
             "error",
-            "[-] one day late: the run was probably before the daily rollover of"
+            "one day late: the run was probably before the daily rollover of"
             " the device; run again later (the new values of 2026-01-01 ..."
             " 2026-01-01 equal the stored values of the day before; nothing"
             " written)",
@@ -656,13 +652,12 @@ def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(run, tmp_path
     rows[-1] = ("2026-11-15", "-")
     write_year(tmp_path, 2026, rows)
 
-    with pytest.raises(SystemExit):
-        run(memory(true_value))
+    assert run(memory(true_value)) == 1
 
     assert mails == [
         (
             "error",
-            "[-] the new values differ from the stored ones (2026-11-15: stored -,"
+            "the new values differ from the stored ones (2026-11-15: stored -,"
             f" new {true_value(day('2026-11-15'))}): nothing written; check the data"
             " files and the device",
         )
@@ -708,11 +703,10 @@ def test_run_with_another_date_pattern_detects_differing_values(run, tmp_path, m
     today = day("2026-12-05")
     write_year(tmp_path, 2026, [("21.11.2026", "999")])
 
-    with pytest.raises(SystemExit):
-        run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
+    assert run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y") == 1
 
     assert mails[0][1].startswith(
-        f"[-] the new values differ from the stored ones (2026-11-21: stored 999,"
+        f"the new values differ from the stored ones (2026-11-21: stored 999,"
         f" new {true_value(day('2026-11-21'))})"
     )
 
@@ -758,15 +752,12 @@ def test_stored_file_without_the_configured_columns_writes_nothing(run, tmp_path
     path = tmp_path / "data" / f"{PREFIX}_2026.csv"
     before = path.read_bytes()
 
-    with pytest.raises(SystemExit) as exit_info:
-        run(memory(true_value), fieldnames={"date": "day", "value": "litres"})
-
-    assert exit_info.value.code == 1
+    assert run(memory(true_value), fieldnames={"date": "day", "value": "litres"}) == 1
     assert path.read_bytes() == before
     assert mails == [
         (
             "error",
-            f"[-] {path} has no column 'day', 'litres' of dataFile.fieldnames (columns: date,"
+            f"{path} has no column 'day', 'litres' of dataFile.fieldnames (columns: date,"
             " value): nothing written",
         )
     ]
@@ -779,15 +770,12 @@ def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(run, tm
     files = sorted((tmp_path / "data").glob("*.csv"))
     before = [path.read_bytes() for path in files]
 
-    with pytest.raises(SystemExit) as exit_info:
-        run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y")
-
-    assert exit_info.value.code == 1
+    assert run(memory(true_value, today=today), today=today, datePattern="%d.%m.%Y") == 1
     assert [path.read_bytes() for path in files] == before
     assert mails == [
         (
             "error",
-            f"[-] {tmp_path / 'data' / f'{PREFIX}_2026.csv'}, line 3: the date '2026-11-20'"
+            f"{tmp_path / 'data' / f'{PREFIX}_2026.csv'}, line 3: the date '2026-11-20'"
             " does not match dataFile.datePattern '%d.%m.%Y': nothing written",
         )
     ]
@@ -797,12 +785,14 @@ def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(run, tm
 def test_date_text_has_to_be_exactly_what_the_pattern_writes(run, tmp_path, mails, text):
     write_year(tmp_path, 2026, [(text, "1")])
 
-    with pytest.raises(SystemExit):
+    assert (
         run(
             memory(true_value, today=day("2026-12-05")),
             today=day("2026-12-05"),
             datePattern="%d.%m.%Y",
         )
+        == 1
+    )
 
     assert mails[0][1].endswith(
         f"line 2: the date {text!r} does not match dataFile.datePattern '%d.%m.%Y': nothing written"

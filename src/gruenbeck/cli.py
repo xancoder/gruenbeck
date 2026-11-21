@@ -1,5 +1,9 @@
 """
 commands of the package: gruenbeck-collect (data collector) and gruenbeck-analyse
+
+Only this module catches the errors of the package (gruenbeck.errors.GruenbeckError and
+its subclasses), sends the error mail and sets the exit code; only this module configures
+the logging handlers.
 """
 
 import argparse
@@ -7,17 +11,16 @@ import datetime
 import logging.handlers
 import sys
 import time
-import typing
+import traceback
 
 import requests
 
-from gruenbeck import analysis, device, mail, storage
+from gruenbeck import analysis, device, errors, mail, storage
 from gruenbeck import config as configuration
 
 # the handlers of setup_logging() sit on the logger of the package, so they also get the
-# messages of the other modules (gruenbeck.device, gruenbeck.storage)
+# messages of the other modules (gruenbeck.config, gruenbeck.device, gruenbeck.storage)
 package_logger = logging.getLogger("gruenbeck")
-package_logger.setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 # create logging formatter
@@ -26,49 +29,96 @@ formatter = logging.Formatter(
 )
 
 ONE_DAY = datetime.timedelta(days=1)
+ERROR_MAIL_SUBJECT = "gruenbeck data collector failure"
+
+
+class CollectError(errors.GruenbeckError):
+    """the new values are not stored (none left, or they differ from the stored ones)"""
 
 
 def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
     """
-    attach the handlers to the logger of the package
+    attach the handlers to the logger of the package and let it pass INFO and above
 
     The rotating file takes warnings as well as errors: scheduled runs (systemd timer,
     cron) have no console, so a warning would be lost otherwise.
     :param log_console: also log INFO and above to the console (stderr)
     :param log_file: path of the rotating log file
     :return: list of the added handlers
+    :raises OSError: the log file cannot be opened (e.g. its folder is missing)
     """
     handlers: list[logging.Handler] = []
-    if log_console:
-        console = logging.StreamHandler()
-        console.setLevel(logging.INFO)
-        handlers.append(console)
     log_rotate_file = logging.handlers.RotatingFileHandler(
         f"{log_file}", maxBytes=8000000, backupCount=5
     )
     log_rotate_file.setLevel(logging.WARNING)
     handlers.append(log_rotate_file)
+    if log_console:
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        handlers.insert(0, console)
+    package_logger.setLevel(logging.INFO)
     for handler in handlers:
         handler.setFormatter(formatter)
         package_logger.addHandler(handler)
     return handlers
 
 
-def main(config_file):
-    logger.info(f"[*] run script: {sys.argv[0]}")
+def main(config_file) -> int:
+    """
+    run the data collector once
+    :return: exit code, 0 if the data was collected, stored and sent by mail, else 1
+    """
+    logger.info("run script: %s", sys.argv[0])
 
-    config = get_configuration(config_file)
+    try:
+        config = configuration.load_configuration(config_file)
+    except FileNotFoundError as err:
+        logger.error("no configuration: %s", err)
+        return 1
+    except configuration.ConfigurationError as err:
+        # an error mail is only possible if the mail section is valid
+        report_error(err.mail, str(err))
+        return 1
+
+    try:
+        data_path = collect_and_store(config)
+    except errors.GruenbeckError as err:
+        report_error(config.mail, str(err))
+        return 1
+    except Exception as err:
+        # a failure nobody expected: with traceback in the log and in the error mail
+        report_error(
+            config.mail,
+            f"unexpected error: {type(err).__name__}: {err}\n\n{traceback.format_exc()}",
+            unexpected=True,
+        )
+        return 1
+
+    # the data is stored at this point; a failed mail still has to be visible
+    # as a failed run (exit code 1) for cron and systemd
+    if not get_mail(config, data_path):
+        logger.error("data was collected and stored, but email sending failed")
+        return 1
+
+    logger.info("Data collection completed")
+    return 0
+
+
+def collect_and_store(config: configuration.Configuration):
+    """
+    request the device and store the new values in the yearly files
+    :return: pathlib.Path of the data folder
+    :raises errors.GruenbeckError: the run fails; nothing is written then
+    """
     data_path = get_data_folder(config)
     data_file = config.data_file
     device_parameter = get_device_parameter(config)
     device_data = get_device_data(config, device_parameter)
     now = local_now()
     device.check_device_clock(device_data.pop(device.DEVICE_CLOCK_PARAMETER, None), now)
-    try:
-        device_data = device.add_timestamp_as_key_device_data(device_data, today=now.date())
-    except ValueError as err:
-        handle_error(config.mail, f"{err}")
-    device_data = filter_first_date(config, device_data, data_file.first_date)
+    device_data = device.add_timestamp_as_key_device_data(device_data, today=now.date())
+    device_data = filter_first_date(device_data, data_file.first_date)
     new_values = {day: int(value) for day, value in device_data.items()}
 
     # read every yearly file involved (also the one of the day before the oldest new
@@ -86,10 +136,9 @@ def main(config_file):
             )
             for year in sorted(years_to_read)
         }
-    except storage.DataFileError as err:
-        handle_error(config.mail, f"[-] {err}: nothing written")
+    except storage.StorageError as err:
+        raise storage.StorageError(f"{err}: nothing written") from err
     check_stored_overlap(
-        config,
         new_values,
         {day: value for values in stored_by_year.values() for day, value in values.items()},
         data_file.date_pattern,
@@ -118,47 +167,31 @@ def main(config_file):
 
     # nothing stored is a failure, not a successful run
     if not data_processed:
-        handle_error(config.mail, "[-] no data was processed")
-
-    # the data is stored at this point; a failed mail still has to be visible
-    # as a failed run (exit code 1) for cron and systemd
-    if not get_mail(config, data_path):
-        logger.error("[-] data was collected and stored, but email sending failed")
-        sys.exit(1)
-
-    logger.info("[*] Data collection completed")
-
-
-def get_configuration(config_file) -> configuration.Configuration:
-    try:
-        return configuration.load_configuration(config_file)
-    except FileNotFoundError as err:
-        logger.error(f"[-] no configuration: {err}")
-        sys.exit(1)
-    except configuration.ConfigurationError as err:
-        # an error mail is only possible if the mail section is valid
-        handle_error(err.mail, f"[-] {err}")
-
-
-def get_data_folder(config):
-    data_path = None
-    try:
-        data_path = storage.check_data_folder(config.data_path)
-    except PermissionError as err:
-        handle_error(config.mail, f"[-] creation data folder failed: {err}")
+        raise CollectError("no data was processed")
     return data_path
 
 
-def get_device_parameter(config):
-    parameter = None
+def get_data_folder(config):
+    """
+    :raises storage.StorageError: the data folder cannot be created
+    """
     try:
-        parameter = device.Parameter(config.parameter_file)
+        return storage.check_data_folder(config.data_path)
+    except OSError as err:
+        raise storage.StorageError(f"creation data folder failed: {err}") from err
+
+
+def get_device_parameter(config):
+    """
+    :raises device.DeviceError: the parameter file is missing
+    """
+    try:
+        return device.Parameter(config.parameter_file)
     except FileNotFoundError as err:
-        handle_error(config.mail, f"{err}")
-    return parameter
+        raise device.DeviceError(f"{err}") from err
 
 
-def get_consumption_parameters(config, parameter):
+def get_consumption_parameters(parameter):
     """
     parameter codes of the 14-day memory: D_Y_2_1 ... D_Y_2_14 in this order
 
@@ -166,34 +199,36 @@ def get_consumption_parameters(config, parameter):
     are not requested.
     :param parameter: device.Parameter of the parameter file
     :return: list of parameter codes
+    :raises device.DeviceError: the parameter file lacks one of them
     """
     names = [f"D_Y_2_{n}" for n in range(1, device.DEVICE_MEMORY_DAYS + 1)]
     known = parameter.get_parameter_list()
     missing = [name for name in names if name not in known]
     if missing:
-        handle_error(
-            config.mail,
-            f"[-] parameter file {parameter.path_file} lacks the consumption"
-            f" parameters: {', '.join(missing)}",
+        raise device.DeviceError(
+            f"parameter file {parameter.path_file} lacks the consumption"
+            f" parameters: {', '.join(missing)}"
         )
     return names
 
 
 def get_device_data(config, parameter, max_retries=3, retry_delay=5):
-    result = None
+    """
+    :raises device.DeviceError: no valid answer after max_retries + 1 attempts
+    """
     attempts = 0
     last_error: Exception | None = None
     timeout = config.soft_water_system.timeout
     # the device clock comes with the values, see check_device_clock()
     request_parameters = [
         device.DEVICE_CLOCK_PARAMETER,
-        *get_consumption_parameters(config, parameter),
+        *get_consumption_parameters(parameter),
     ]
 
-    while attempts <= max_retries:
+    while True:
         try:
             if attempts > 0:
-                logger.info(f"[*] Retry attempt {attempts}/{max_retries} for API request")
+                logger.info("Retry attempt %d/%d for API request", attempts, max_retries)
 
             result = device.get_data_from_mux_http(
                 config.soft_water_system.host,
@@ -203,63 +238,62 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
 
             # If we got here, the request was successful
             if attempts > 0:
-                logger.info(f"[*] Successfully retrieved data after {attempts} retry attempts")
+                logger.info("Successfully retrieved data after %d retry attempts", attempts)
             return result
 
         except ValueError as err:
             # invalid xml or response without values
             last_error = err
             logger.warning(
-                f"[-] invalid device response: {err}. Attempt {attempts + 1}/{max_retries + 1}"
+                "invalid device response: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1
             )
 
         except requests.exceptions.RequestException as err:
             # Network-related errors
             last_error = err
-            logger.warning(f"[-] request failed: {err}. Attempt {attempts + 1}/{max_retries + 1}")
+            logger.warning("request failed: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1)
 
         except Exception as err:
             # Any other unexpected errors
             last_error = err
-            logger.warning(f"[-] unexpected error: {err}. Attempt {attempts + 1}/{max_retries + 1}")
+            logger.warning(
+                "unexpected error: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1
+            )
 
         attempts += 1
 
-        # If we've reached max retries, handle the error
+        # If we've reached max retries, the run fails
         if attempts > max_retries:
-            error_msg = (
-                f"[-] failed to get device data after {max_retries + 1} attempts: {last_error}"
-            )
-            handle_error(config.mail, error_msg)
+            raise device.DeviceError(
+                f"failed to get device data after {max_retries + 1} attempts: {last_error}"
+            ) from last_error
 
         # Wait before retrying
-
         time.sleep(retry_delay)
 
-    return result
 
-
-def handle_error(mail_settings: configuration.Mail | None, error_text: str) -> typing.NoReturn:
+def report_error(
+    mail_settings: configuration.Mail | None, error_text: str, unexpected: bool = False
+) -> None:
     """
-    log the error, send the error mail and exit with code 1
+    log the error and send it as error mail
     :param mail_settings: mail section of the configuration, None if it is invalid
+    :param unexpected: called while handling an unexpected exception: log its traceback
     """
-    logger.error(error_text)
+    if unexpected:
+        logger.exception("%s", error_text.split("\n", 1)[0])
+    else:
+        logger.error("%s", error_text)
 
     # Try to send an email notification about the error
     if mail_settings is None:
-        logger.error("[-] Failed to send error notification email: no valid mail configuration")
-    else:
-        try:
-            mail.send_mail_text(
-                mail_settings.as_dict(), "gruenbeck data collector failure", error_text
-            )
-            logger.info("[*] Error notification email sent")
-        except Exception as mail_error:
-            logger.error(f"[-] Failed to send error notification email: {mail_error}")
-
-    logger.info("[*] Exiting program due to error")
-    sys.exit(1)
+        logger.error("Failed to send error notification email: no valid mail configuration")
+        return
+    try:
+        mail.send_mail_text(mail_settings.as_dict(), ERROR_MAIL_SUBJECT, error_text)
+        logger.info("Error notification email sent")
+    except Exception as mail_error:
+        logger.error("Failed to send error notification email: %s", mail_error)
 
 
 def local_now():
@@ -267,29 +301,29 @@ def local_now():
     return datetime.datetime.now()
 
 
-def filter_first_date(config, device_data, first_date):
+def filter_first_date(device_data, first_date):
     """
     drop the values of days before dataFile.firstDate
     :param device_data: dictionary of datetime.date and value
     :param first_date: datetime.date, or None for no limit
     :return: dictionary of the remaining datetime.date and value
+    :raises CollectError: every value is before first_date
     """
     if first_date is None:
         return device_data
     result = {day: value for day, value in device_data.items() if day >= first_date}
     skipped = len(device_data) - len(result)
     if skipped:
-        logger.info(f"[*] {skipped} values before dataFile.firstDate {first_date} are not written")
+        logger.info("%d values before dataFile.firstDate %s are not written", skipped, first_date)
     if device_data and not result:
-        handle_error(
-            config.mail,
-            f"[-] no data was processed: all {skipped} values are before"
-            f" dataFile.firstDate {first_date}",
+        raise CollectError(
+            f"no data was processed: all {skipped} values are before"
+            f" dataFile.firstDate {first_date}"
         )
     return result
 
 
-def check_stored_overlap(config, new_values, stored, date_pattern):
+def check_stored_overlap(new_values, stored, date_pattern):
     """
     compare the new values with the days that are stored already
 
@@ -300,6 +334,7 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
     :param new_values: dictionary of datetime.date and value (int)
     :param stored: dictionary of date text and stored value of all files involved
     :param date_pattern: dataFile.datePattern, the format of the date texts
+    :raises CollectError: a stored day gets another value
     """
     overlap = [day for day in sorted(new_values) if day.strftime(date_pattern) in stored]
     differing = [day for day in overlap if stored[day.strftime(date_pattern)] != new_values[day]]
@@ -309,47 +344,49 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
     if with_day_before and all(
         stored[(day - ONE_DAY).strftime(date_pattern)] == new_values[day] for day in with_day_before
     ):
-        handle_error(
-            config.mail,
-            "[-] one day late: the run was probably before the daily rollover of the"
+        raise CollectError(
+            "one day late: the run was probably before the daily rollover of the"
             " device; run again later (the new values of"
             f" {with_day_before[0]} ... {with_day_before[-1]} equal the stored values"
-            " of the day before; nothing written)",
+            " of the day before; nothing written)"
         )
     details = ", ".join(
         f"{day}: stored {stored[day.strftime(date_pattern)]}, new {new_values[day]}"
         for day in differing
     )
-    handle_error(
-        config.mail,
-        f"[-] the new values differ from the stored ones ({details}): nothing written;"
-        " check the data files and the device",
+    raise CollectError(
+        f"the new values differ from the stored ones ({details}): nothing written;"
+        " check the data files and the device"
     )
 
 
 def get_mail(config, data_path):
     try:
         mail.send_mail(config.mail.as_dict(), data_path)
-        logger.info("[*] mail sent successfully")
+        logger.info("mail sent successfully")
         return True
     except KeyError as error:
-        logger.error(f"[-] no mail configured: {error}")
+        logger.error("no mail configured: %s", error)
         # Continue execution instead of exiting
         return False
     except ValueError as error:
-        logger.error(f"[-] mail sending failed: {error}")
+        logger.error("mail sending failed: %s", error)
         # Continue execution instead of exiting
         return False
     except Exception as error:
-        logger.error(f"[-] unexpected error during mail sending: {error}")
+        logger.error("unexpected error during mail sending: %s", error)
         # Continue execution instead of exiting
         return False
 
 
-def collect(argv=None):
-    """command gruenbeck-collect: the options of the former src/data-collector.py"""
+def collect(argv=None) -> int:
+    """
+    command gruenbeck-collect: the options of the former src/data-collector.py
+    :return: exit code (the console script passes it to sys.exit)
+    """
     parser = argparse.ArgumentParser(
-        description="collect the water consumption of the soft water system, store it and mail it"
+        prog="gruenbeck-collect",
+        description="collect the water consumption of the soft water system, store it and mail it",
     )
     parser.add_argument(
         "--config-file",
@@ -368,15 +405,24 @@ def collect(argv=None):
     )
     args = parser.parse_args(argv)
 
-    setup_logging(args.log_console, args.log_error)
+    try:
+        setup_logging(args.log_console, args.log_error)
+    except OSError as err:
+        # before the configuration is read: no log file and no error mail
+        print(f"{parser.prog}: cannot open the log file: {err}", file=sys.stderr)
+        return 1
 
-    main(args.config_file)
+    return main(args.config_file)
 
 
-def analyse(argv=None):
-    """command gruenbeck-analyse: the options of the former src/data-analyse.py"""
+def analyse(argv=None) -> int:
+    """
+    command gruenbeck-analyse: the options of the former src/data-analyse.py
+    :return: exit code (the console script passes it to sys.exit)
+    """
     parser = argparse.ArgumentParser(
-        description="monthly statistics of the collected water consumption"
+        prog="gruenbeck-analyse",
+        description="monthly statistics of the collected water consumption",
     )
     parser.add_argument(
         "--config-file",
@@ -387,4 +433,12 @@ def analyse(argv=None):
     )
     args = parser.parse_args(argv)
 
-    analysis.main(args.config_file)
+    try:
+        analysis.main(args.config_file)
+    except FileNotFoundError as err:
+        print(f"{parser.prog}: no configuration: {err}", file=sys.stderr)
+        return 1
+    except errors.GruenbeckError as err:
+        print(f"{parser.prog}: {err}", file=sys.stderr)
+        return 1
+    return 0

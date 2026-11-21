@@ -164,7 +164,7 @@ def test_data_mail_wraps_the_send_errors_again(smtp, sleeps, data_folder):
 
 
 def test_text_mail_has_the_given_subject_and_text(smtp, sleeps):
-    mail.send_mail_text(MAIL, "gruenbeck data collector failure", "[-] an error")
+    mail.send_mail_text(MAIL, "gruenbeck data collector failure", "an error")
 
     (message,) = smtp.messages()
     assert message["Subject"] == "gruenbeck data collector failure"
@@ -172,7 +172,7 @@ def test_text_mail_has_the_given_subject_and_text(smtp, sleeps):
     # the parsed header adds a space after the comma
     assert "\nTo: one@example.com,two@example.com\n" in smtp.raw_messages()[0]
     assert message.get_content_type() == "multipart/mixed"
-    assert parts(message) == [("text/plain", None, "[-] an error")]
+    assert parts(message) == [("text/plain", None, "an error")]
     (connection,) = smtp.connections
     assert [call[0] for call in connection["calls"]] == [
         "starttls",

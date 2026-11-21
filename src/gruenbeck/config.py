@@ -17,7 +17,7 @@ import re
 import typing
 import warnings
 
-from gruenbeck import device
+from gruenbeck import device, errors
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +28,13 @@ SMTP_SECURITY = ("ssl", "starttls")
 _MISSING = object()
 
 
-class ConfigurationError(ValueError):
+class ConfigurationError(errors.GruenbeckError, ValueError):
     """
     the configuration file is invalid; str() lists every problem
 
     `mail` is the mail section if that part is valid (to send the error mail), else None.
+    Also a ValueError for callers of read_configuration_file() such as
+    scripts/log_device_rollover.py.
     """
 
     def __init__(self, problems: list[str], mail: "Mail | None" = None):
@@ -153,7 +155,7 @@ class _Section:
     def warn_unknown(self) -> None:
         for key in self.data:
             if key not in self.read:
-                logger.warning(f"[-] unknown config parameter {self.name(key)!r} is ignored")
+                logger.warning("unknown config parameter %r is ignored", self.name(key))
 
 
 def read_configuration_file(configuration_file) -> dict:

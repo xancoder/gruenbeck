@@ -132,8 +132,8 @@ def test_unknown_keys_are_ignored_with_a_warning(config_data, write_config, capl
 
     assert loaded.mail.smtp_security is None
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
-        (logging.WARNING, "[-] unknown config parameter 'mail.smtpSecurty' is ignored"),
-        (logging.WARNING, "[-] unknown config parameter 'comment' is ignored"),
+        (logging.WARNING, "unknown config parameter 'mail.smtpSecurty' is ignored"),
+        (logging.WARNING, "unknown config parameter 'comment' is ignored"),
     ]
 
 

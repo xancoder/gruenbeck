@@ -2,6 +2,7 @@ import copy
 import email
 import email.policy
 import json
+import logging
 import pathlib
 import smtplib
 import time
@@ -150,6 +151,18 @@ class FakeSMTP:
             email.message_from_string(raw, policy=email.policy.default)
             for raw in self.raw_messages()
         ]
+
+
+@pytest.fixture(autouse=True)
+def restore_package_logger():
+    """removes the handlers and the level that setup_logging() gives the package logger"""
+    logger = logging.getLogger("gruenbeck")
+    level, handlers = logger.level, list(logger.handlers)
+    yield
+    for handler in [h for h in logger.handlers if h not in handlers]:
+        logger.removeHandler(handler)
+        handler.close()
+    logger.setLevel(level)
 
 
 @pytest.fixture

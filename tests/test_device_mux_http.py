@@ -168,7 +168,7 @@ def test_answer_without_values_is_an_error(device, body):
     with pytest.raises(ValueError) as err:
         gruenbeck.device.get_data_from_mux_http(HOST, ["D_Y_2_1"])
 
-    assert str(err.value) == "[-] device response contains no values"
+    assert str(err.value) == "device response contains no values"
 
 
 @pytest.mark.parametrize(
@@ -184,7 +184,7 @@ def test_answer_without_values_is_an_error(device, body):
 def test_invalid_xml_is_an_error(device, body):
     device.post(URL, body=body)
 
-    with pytest.raises(ValueError, match=r"^\[-\] failed to parse xml: ") as err:
+    with pytest.raises(ValueError, match=r"^failed to parse xml: ") as err:
         gruenbeck.device.get_data_from_mux_http(HOST, ["D_Y_2_1"])
 
     assert type(err.value.__cause__).__name__ == "ParseError"

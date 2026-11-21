@@ -7,13 +7,13 @@ import os
 import pathlib
 import shutil
 
-from gruenbeck import config
+from gruenbeck import config, errors
 
 logger = logging.getLogger(__name__)
 
 
-class DataFileError(ValueError):
-    """a yearly data file does not fit dataFile of the configuration (columns, dates)"""
+class StorageError(errors.GruenbeckError):
+    """the data folder or a yearly data file is not usable (e.g. columns, dates)"""
 
 
 def date_of(text: str, date_pattern: str) -> datetime.date:
@@ -50,7 +50,7 @@ def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -
     :param fieldnames: column names of date and value (dataFile.fieldnames)
     :param date_pattern: format of the dates (dataFile.datePattern)
     :return: dictionary of date text and value (int if numeric), empty without file
-    :raises DataFileError: a column is missing, or a date does not match date_pattern
+    :raises StorageError: a column is missing, or a date does not match date_pattern
     """
     data = {}
     if file_obj.exists():
@@ -60,7 +60,7 @@ def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -
             missing = [name for name in (fieldnames.date, fieldnames.value) if name not in columns]
             # an empty file has no header and no values
             if missing and columns:
-                raise DataFileError(
+                raise StorageError(
                     f"{file_obj} has no column {', '.join(map(repr, missing))} of"
                     f" dataFile.fieldnames (columns: {', '.join(columns)})"
                 )
@@ -69,7 +69,7 @@ def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -
                 try:
                     date_of(text, date_pattern)
                 except (TypeError, ValueError):  # TypeError: short row without date
-                    raise DataFileError(
+                    raise StorageError(
                         f"{file_obj}, line {reader.line_num}: the date {text!r} does not match"
                         f" dataFile.datePattern {date_pattern!r}"
                     ) from None
@@ -87,14 +87,14 @@ def write_data(
     :param fieldnames: column names of date and value (dataFile.fieldnames)
     :param data: dictionary of date text and value
     :param date_pattern: format of the date texts (dataFile.datePattern)
-    :raises DataFileError: a date text does not match date_pattern (nothing is written)
+    :raises StorageError: a date text does not match date_pattern (nothing is written)
     """
     days = {}
     for text in data:
         try:
             days[text] = date_of(text, date_pattern)
         except ValueError:
-            raise DataFileError(
+            raise StorageError(
                 f"the date {text!r} does not match dataFile.datePattern {date_pattern!r}"
             ) from None
     # build data structure to write
@@ -105,7 +105,7 @@ def write_data(
 
     # write into a temporary file next to the target and replace the target
     # afterwards, so an interruption never leaves a truncated data file
-    logger.info(f"[*] data to write: {data}")
+    logger.info("data to write: %s", data)
     tmp_file = file_object.with_name(f".{file_object.name}.tmp")
     try:
         with tmp_file.open(mode="w", newline="", encoding="utf-8") as csv_out_file:
