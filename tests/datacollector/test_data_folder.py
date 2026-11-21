@@ -4,7 +4,7 @@ import datacollector
 
 
 def test_check_data_folder_not_exists(tmp_path):
-    data_folder = tmp_path / 'folderName'
+    data_folder = tmp_path / "folderName"
     data_path = datacollector.check_data_folder(str(data_folder))
     assert data_path.exists()
     assert data_path == data_folder

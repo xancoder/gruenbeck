@@ -22,7 +22,8 @@ def device(data_collector, monkeypatch):
 def error_mails(data_collector, monkeypatch):
     sent = []
     monkeypatch.setattr(
-        data_collector.datacollector, "send_mail_text",
+        data_collector.datacollector,
+        "send_mail_text",
         lambda param, subject, text: sent.append(text),
     )
     return sent
@@ -32,7 +33,9 @@ def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file):
     parameter = gruenbeck.Parameter(str(parameter_file))
 
     assert parameter.get_parameter_by_note("Wasserverbrauch") == [
-        "D_Y_1", *MEMORY, "D_Y_2_27",
+        "D_Y_1",
+        *MEMORY,
+        "D_Y_2_27",
     ]
 
 
@@ -69,9 +72,6 @@ def test_missing_memory_parameter_fails_before_asking_the_device(
 
     assert exit_info.value.code == 1
     assert device == []
-    message = (
-        f"[-] parameter file {reduced} lacks the consumption parameters:"
-        " D_Y_2_5, D_Y_2_12"
-    )
+    message = f"[-] parameter file {reduced} lacks the consumption parameters: D_Y_2_5, D_Y_2_12"
     assert message in caplog.text
     assert error_mails == [message]

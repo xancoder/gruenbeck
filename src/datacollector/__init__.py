@@ -62,29 +62,21 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
 
         # Check if data_folder exists and is a directory
         if not data_folder.exists() or not data_folder.is_dir():
-            raise ValueError(
-                f"Data folder does not exist or is not a directory: {data_folder}"
-            )
+            raise ValueError(f"Data folder does not exist or is not a directory: {data_folder}")
 
         # Attach files
         files_to_send = list(data_folder.glob("*.csv"))
         if not files_to_send:
             # No files to send, but continue with just the text message
-            part_text = email.mime.text.MIMEText(
-                "No data files found to attach.", "plain"
-            )
+            part_text = email.mime.text.MIMEText("No data files found to attach.", "plain")
             message.attach(part_text)
         else:
             for f in sorted(files_to_send):
                 try:
                     with f.open(mode="rb") as fil:
-                        part_file = email.mime.application.MIMEApplication(
-                            fil.read(), Name=f.name
-                        )
+                        part_file = email.mime.application.MIMEApplication(fil.read(), Name=f.name)
                     # After the file is closed
-                    part_file["Content-Disposition"] = (
-                        f'attachment; filename="{f.name}"'
-                    )
+                    part_file["Content-Disposition"] = f'attachment; filename="{f.name}"'
                     message.attach(part_file)
                 except (IOError, PermissionError) as error:
                     # Log the error but continue with other files
@@ -93,9 +85,7 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
                     )
                     message.attach(part_text)
 
-        mail_sending(
-            message, param, sender_email, sender_password, smtp_port, smtp_server
-        )
+        mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
         raise ValueError(f"Invalid mail configuration: {error}")
@@ -130,9 +120,7 @@ def send_mail_text(param: dict, subject: str, text: str) -> None:
         part_text = email.mime.text.MIMEText(text, "plain")
         message.attach(part_text)
 
-        mail_sending(
-            message, param, sender_email, sender_password, smtp_port, smtp_server
-        )
+        mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
         raise ValueError(f"Invalid mail configuration: {error}")
@@ -184,9 +172,7 @@ def get_smtp_connection_settings(param: dict, smtp_port) -> tuple:
         return port, "ssl" if port == 465 else "starttls"
     if isinstance(security, str) and security.strip().lower() in ("ssl", "starttls"):
         return port, security.strip().lower()
-    raise ValueError(
-        f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')"
-    )
+    raise ValueError(f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')")
 
 
 def mail_sending(
@@ -207,9 +193,7 @@ def mail_sending(
         try:
             context = ssl.create_default_context()
             if security == "ssl":
-                server = smtplib.SMTP_SSL(
-                    smtp_server, port, context=context, timeout=30
-                )
+                server = smtplib.SMTP_SSL(smtp_server, port, context=context, timeout=30)
             else:
                 server = smtplib.SMTP(smtp_server, port, timeout=30)
             with server:

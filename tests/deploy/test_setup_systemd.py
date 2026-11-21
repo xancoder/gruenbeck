@@ -71,7 +71,9 @@ def test_main_prints_system_install_commands(tmp_path, capsys):
     )
     printed = capsys.readouterr().out
     assert code == 0
-    assert f"sudo install -m 644 -t /etc/systemd/system/ {out}/gruenbeck-collector.service" in printed
+    assert (
+        f"sudo install -m 644 -t /etc/systemd/system/ {out}/gruenbeck-collector.service" in printed
+    )
     assert "sudo systemctl daemon-reload" in printed
     assert "sudo systemctl enable --now gruenbeck-collector.timer" in printed
     assert "enable --now gruenbeck-collector.service" not in printed

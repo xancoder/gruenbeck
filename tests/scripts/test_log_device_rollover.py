@@ -63,8 +63,14 @@ def run(tmp_path, responses, interval=300, hours=None, clock=None):
     output = tmp_path / "log" / "device_rollover.csv"
     # like main(): continue the comparison of an earlier run in the same file
     count = rollover.run(
-        "device.lan", 12.5, output, interval, hours,
-        fetch=fetch, now=clock.now, sleep=clock.sleep,
+        "device.lan",
+        12.5,
+        output,
+        interval,
+        hours,
+        fetch=fetch,
+        now=clock.now,
+        sleep=clock.sleep,
         previous_row=rollover.last_complete_row(output),
     )
     return count, read_rows(output), fetch, clock
@@ -94,9 +100,7 @@ def test_row_format_with_local_time_offset_and_device_values(tmp_path):
             "message": "",
         }
     ]
-    assert fetch.calls == [
-        ("device.lan", ["D_C_4_2", "D_Y_2_1", "D_Y_2_2", "D_Y_2_3"], 12.5)
-    ]
+    assert fetch.calls == [("device.lan", ["D_C_4_2", "D_Y_2_1", "D_Y_2_2", "D_Y_2_3"], 12.5)]
 
 
 def test_header_is_written_only_once_across_runs(tmp_path):
@@ -144,7 +148,12 @@ def test_incomplete_response_is_no_rollover(tmp_path):
     _, rows, _, _ = run(tmp_path, responses)
 
     assert [row["status"] for row in rows] == [
-        "ok", "error", "error", "error", "ok", "rollover",
+        "ok",
+        "error",
+        "error",
+        "error",
+        "ok",
+        "rollover",
     ]
     assert rows[1]["message"] == "incomplete response: D_Y_2_2, D_Y_2_3"
     assert rows[2]["message"] == "incomplete response: D_Y_2_1"
@@ -161,9 +170,7 @@ def test_first_complete_response_after_errors_is_no_rollover(tmp_path):
 def test_run_ends_after_hours_and_keeps_the_schedule(tmp_path):
     clock = FakeClock(request_seconds=20)
     responses = [values("93", "33")] * 10
-    count, rows, _, clock = run(
-        tmp_path, responses, interval=600, hours=1, clock=clock
-    )
+    count, rows, _, clock = run(tmp_path, responses, interval=600, hours=1, clock=clock)
 
     # polls at 0, 10, ..., 60 minutes: slow requests do not shift the schedule
     assert count == 7
@@ -186,24 +193,33 @@ def test_keyboard_interrupt_stops_cleanly(tmp_path, monkeypatch, capsys):
 
 def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
     config = tmp_path / "config.json"
-    config.write_text(
-        json.dumps({"softWaterSystem": {"host": "device.lan", "timeout": 7}})
-    )
+    config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan", "timeout": 7}}))
     seen = {}
 
     def fake_run(host, timeout, output, interval, hours, previous_row):
-        seen.update(host=host, timeout=timeout, output=output,
-                    interval=interval, hours=hours, previous_row=previous_row)
+        seen.update(
+            host=host,
+            timeout=timeout,
+            output=output,
+            interval=interval,
+            hours=hours,
+            previous_row=previous_row,
+        )
         return 0
 
     monkeypatch.setattr(rollover, "run", fake_run)
     output = tmp_path / "out.csv"
-    argv = ["-c", str(config), "--interval", "60", "--hours", "2",
-            "--output", str(output)]
+    argv = ["-c", str(config), "--interval", "60", "--hours", "2", "--output", str(output)]
 
     assert rollover.main(argv) == 0
-    assert seen == {"host": "device.lan", "timeout": 7.0, "output": output,
-                    "interval": 60.0, "hours": 2.0, "previous_row": None}
+    assert seen == {
+        "host": "device.lan",
+        "timeout": 7.0,
+        "output": output,
+        "interval": 60.0,
+        "hours": 2.0,
+        "previous_row": None,
+    }
 
 
 def test_main_continues_from_last_complete_row(tmp_path, monkeypatch, capsys):
