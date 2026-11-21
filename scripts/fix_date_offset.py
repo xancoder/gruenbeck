@@ -149,9 +149,7 @@ def find_data_files(files: DataFiles) -> dict:
         if match and path.is_file():
             found[int(match.group(1))] = path
     if not found:
-        raise MigrationError(
-            f"no data files {files.prefix}_<year>.csv in {files.folder}"
-        )
+        raise MigrationError(f"no data files {files.prefix}_<year>.csv in {files.folder}")
     return dict(sorted(found.items()))
 
 
@@ -175,9 +173,7 @@ def read_data_file(path: pathlib.Path, year: int, files: DataFiles) -> dict:
         header = next(reader, None)
         if header != columns:
             found = ",".join(header) if header else "(none)"
-            raise MigrationError(
-                f"{path.name}: header {found} instead of {','.join(columns)}"
-            )
+            raise MigrationError(f"{path.name}: header {found} instead of {','.join(columns)}")
         for row in reader:
             if not row:
                 continue
@@ -200,8 +196,7 @@ def read_data_file(path: pathlib.Path, year: int, files: DataFiles) -> dict:
 def load_data(files: DataFiles) -> dict:
     """values of all yearly files: year -> (date -> value)"""
     return {
-        year: read_data_file(path, year, files)
-        for year, path in find_data_files(files).items()
+        year: read_data_file(path, year, files) for year, path in find_data_files(files).items()
     }
 
 
@@ -346,9 +341,7 @@ def write_data_file(path: pathlib.Path, files: DataFiles, values: dict) -> None:
 
 
 def write_marker(path: pathlib.Path, info: dict) -> None:
-    write_atomically(
-        path, lambda out_file: out_file.write(json.dumps(info, indent=2) + "\n")
-    )
+    write_atomically(path, lambda out_file: out_file.write(json.dumps(info, indent=2) + "\n"))
 
 
 def check_marker(files: DataFiles) -> None:
@@ -402,9 +395,7 @@ def apply_migration(
         "shiftDays": -1,
         "configFile": config_file,
         "dataPath": str(files.folder),
-        "set": {
-            day.isoformat(): value for day, value in sorted(migration.set_values.items())
-        },
+        "set": {day.isoformat(): value for day, value in sorted(migration.set_values.items())},
         "files": [change.path.name for change in changed],
         "backups": [backup.name for backup in backups.values()],
     }
@@ -438,9 +429,7 @@ def parse_args(argv=None) -> argparse.Namespace:
             " (dry run unless --apply)"
         )
     )
-    parser.add_argument(
-        "--config-file", "-c", default="./src/config.json", help="set config file"
-    )
+    parser.add_argument("--config-file", "-c", default="./src/config.json", help="set config file")
     parser.add_argument(
         "--set",
         type=parse_set,
@@ -448,9 +437,7 @@ def parse_args(argv=None) -> argparse.Namespace:
         metavar="DATE=VALUE",
         help="store VALUE (litres) under DATE (YYYY-MM-DD) after the move; repeatable",
     )
-    parser.add_argument(
-        "--apply", action="store_true", help="write the changes (default: dry run)"
-    )
+    parser.add_argument("--apply", action="store_true", help="write the changes (default: dry run)")
     return parser.parse_args(argv)
 
 

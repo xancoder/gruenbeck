@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks scans the whole history
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.4.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # ruff (lint, format) and the file checks; the gitleaks hook checks staged changes,
+      # of which there are none in CI, so the next step scans the history instead
+      - name: pre-commit
+        env:
+          SKIP: gitleaks
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+
+      - name: gitleaks (git history)
+        run: uv run pre-commit run --hook-stage manual --all-files gitleaks-history
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest
+        run: uv run pytest --cov

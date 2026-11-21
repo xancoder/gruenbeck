@@ -9,6 +9,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "deploy" / "systemd" / "setup_systemd.py"
 
 spec = importlib.util.spec_from_file_location("setup_systemd", SCRIPT)
+assert spec is not None and spec.loader is not None
 setup_systemd = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup_systemd)
 
@@ -71,7 +72,9 @@ def test_main_prints_system_install_commands(tmp_path, capsys):
     )
     printed = capsys.readouterr().out
     assert code == 0
-    assert f"sudo install -m 644 -t /etc/systemd/system/ {out}/gruenbeck-collector.service" in printed
+    assert (
+        f"sudo install -m 644 -t /etc/systemd/system/ {out}/gruenbeck-collector.service" in printed
+    )
     assert "sudo systemctl daemon-reload" in printed
     assert "sudo systemctl enable --now gruenbeck-collector.timer" in printed
     assert "enable --now gruenbeck-collector.service" not in printed

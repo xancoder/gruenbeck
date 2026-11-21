@@ -63,11 +63,7 @@ def local_now() -> datetime.datetime:
 
 def missing_values(values: dict) -> list:
     """names of the consumption values that are absent or not a number"""
-    return [
-        name
-        for name in VALUE_PARAMETERS
-        if not str(values.get(name) or "").strip().isdigit()
-    ]
+    return [name for name in VALUE_PARAMETERS if not str(values.get(name) or "").strip().isdigit()]
 
 
 def poll(
@@ -95,16 +91,14 @@ def poll(
     }
     missing = missing_values(values)
     if missing:
-        row.update(
-            status=STATUS_ERROR, message=f"incomplete response: {', '.join(missing)}"
-        )
+        row.update(status=STATUS_ERROR, message=f"incomplete response: {', '.join(missing)}")
         return row, previous
 
     current = tuple(values[name].strip() for name in ROLLOVER_PARAMETERS)
     if previous is not None and current != previous:
         message = ", ".join(
             f"{name} {old} -> {new}"
-            for name, old, new in zip(ROLLOVER_PARAMETERS, previous, current)
+            for name, old, new in zip(ROLLOVER_PARAMETERS, previous, current, strict=True)
         )
         if since:
             message += f" (since {since})"
@@ -205,9 +199,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="log the daily rollover of the consumption values (read-only)"
     )
-    parser.add_argument(
-        "--config-file", "-c", default="./src/config.json", help="set config file"
-    )
+    parser.add_argument("--config-file", "-c", default="./src/config.json", help="set config file")
     parser.add_argument(
         "--interval",
         type=positive_float,
@@ -260,8 +252,7 @@ def main(argv=None) -> int:
         return 1
 
     print(
-        f"[*] logging {host} every {args.interval:g} s for {args.hours:g} h"
-        f" into {args.output}",
+        f"[*] logging {host} every {args.interval:g} s for {args.hours:g} h into {args.output}",
         flush=True,
     )
     if previous_row:

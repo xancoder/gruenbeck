@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 import csv
 import datetime
@@ -51,7 +50,7 @@ def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
     :param log_file: path of the rotating log file
     :return: list of the added handlers
     """
-    handlers = []
+    handlers: list[logging.Handler] = []
     if log_console:
         console = logging.StreamHandler()
         console.setLevel(logging.INFO)
@@ -115,9 +114,7 @@ def main(config_file):
                 if day.year == year
             }
         )
-        write_data(
-            get_data_file(config, data_path, year), data_file["fieldnames"], data_existing
-        )
+        write_data(get_data_file(config, data_path, year), data_file["fieldnames"], data_existing)
         data_processed = True
 
     # nothing stored is a failure, not a successful run
@@ -190,17 +187,13 @@ def get_device_parameter(config):
 
 def get_device_timeout(config):
     try:
-        timeout = float(
-            config["softWaterSystem"].get("timeout", gruenbeck.DEFAULT_TIMEOUT)
-        )
+        timeout = float(config["softWaterSystem"].get("timeout", gruenbeck.DEFAULT_TIMEOUT))
         if not timeout > 0:
             raise ValueError("must be greater than 0")
     except KeyError as err:
         handle_error(config, f"[-] no config parameter: {err}")
     except (TypeError, ValueError) as err:
-        handle_error(
-            config, f"[-] invalid config parameter softWaterSystem.timeout: {err}"
-        )
+        handle_error(config, f"[-] invalid config parameter softWaterSystem.timeout: {err}")
     return timeout
 
 
@@ -228,7 +221,7 @@ def get_consumption_parameters(config, parameter):
 def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     result = None
     attempts = 0
-    last_error = None
+    last_error: Exception | None = None
     timeout = get_device_timeout(config)
     # the device clock comes with the values, see check_device_clock()
     request_parameters = [
@@ -239,9 +232,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
     while attempts <= max_retries:
         try:
             if attempts > 0:
-                logger.info(
-                    f"[*] Retry attempt {attempts}/{max_retries} for API request"
-                )
+                logger.info(f"[*] Retry attempt {attempts}/{max_retries} for API request")
 
             result = gruenbeck.get_data_from_mux_http(
                 config["softWaterSystem"]["host"],
@@ -251,9 +242,7 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
 
             # If we got here, the request was successful
             if attempts > 0:
-                logger.info(
-                    f"[*] Successfully retrieved data after {attempts} retry attempts"
-                )
+                logger.info(f"[*] Successfully retrieved data after {attempts} retry attempts")
             return result
 
         except KeyError as err:
@@ -264,28 +253,26 @@ def get_device_data(config, parameter, max_retries=3, retry_delay=5):
             # invalid xml or response without values
             last_error = err
             logger.warning(
-                f"[-] invalid device response: {err}. Attempt {attempts+1}/{max_retries+1}"
+                f"[-] invalid device response: {err}. Attempt {attempts + 1}/{max_retries + 1}"
             )
 
         except requests.exceptions.RequestException as err:
             # Network-related errors
             last_error = err
-            logger.warning(
-                f"[-] request failed: {err}. Attempt {attempts+1}/{max_retries+1}"
-            )
+            logger.warning(f"[-] request failed: {err}. Attempt {attempts + 1}/{max_retries + 1}")
 
         except Exception as err:
             # Any other unexpected errors
             last_error = err
-            logger.warning(
-                f"[-] unexpected error: {err}. Attempt {attempts+1}/{max_retries+1}"
-            )
+            logger.warning(f"[-] unexpected error: {err}. Attempt {attempts + 1}/{max_retries + 1}")
 
         attempts += 1
 
         # If we've reached max retries, handle the error
         if attempts > max_retries:
-            error_msg = f"[-] failed to get device data after {max_retries+1} attempts: {last_error}"
+            error_msg = (
+                f"[-] failed to get device data after {max_retries + 1} attempts: {last_error}"
+            )
             handle_error(config, error_msg)
 
         # Wait before retrying
@@ -300,9 +287,7 @@ def handle_error(config, error_text: str) -> typing.NoReturn:
 
     # Try to send an email notification about the error
     try:
-        datacollector.send_mail_text(
-            config["mail"], "gruenbeck data collector failure", error_text
-        )
+        datacollector.send_mail_text(config["mail"], "gruenbeck data collector failure", error_text)
         logger.info("[*] Error notification email sent")
     except Exception as mail_error:
         logger.error(f"[-] Failed to send error notification email: {mail_error}")
@@ -336,15 +321,12 @@ def check_device_clock(device_clock, now):
         or None without a valid device clock
     """
     if device_clock is None:
-        logger.warning(
-            f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}"
-        )
+        logger.warning(f"[-] the device response has no device clock {DEVICE_CLOCK_PARAMETER}")
         return None
     match = DEVICE_CLOCK_FORMAT.fullmatch(str(device_clock).strip())
     if not match:
         logger.warning(
-            f"[-] invalid device clock {DEVICE_CLOCK_PARAMETER} {device_clock!r}"
-            " (expected HH:MM)"
+            f"[-] invalid device clock {DEVICE_CLOCK_PARAMETER} {device_clock!r} (expected HH:MM)"
         )
         return None
     device_minutes = int(match.group(1)) * 60 + int(match.group(2))
@@ -397,10 +379,7 @@ def filter_first_date(config, device_data, first_date):
     result = {day: value for day, value in device_data.items() if day >= first_date}
     skipped = len(device_data) - len(result)
     if skipped:
-        logger.info(
-            f"[*] {skipped} values before dataFile.firstDate {first_date}"
-            " are not written"
-        )
+        logger.info(f"[*] {skipped} values before dataFile.firstDate {first_date} are not written")
     if device_data and not result:
         handle_error(
             config,
@@ -442,17 +421,12 @@ def check_stored_overlap(config, new_values, stored, date_pattern):
     :param date_pattern: dataFile.datePattern, the format of the date texts
     """
     overlap = [day for day in sorted(new_values) if day.strftime(date_pattern) in stored]
-    differing = [
-        day for day in overlap if stored[day.strftime(date_pattern)] != new_values[day]
-    ]
+    differing = [day for day in overlap if stored[day.strftime(date_pattern)] != new_values[day]]
     if not differing:
         return
-    with_day_before = [
-        day for day in overlap if (day - ONE_DAY).strftime(date_pattern) in stored
-    ]
+    with_day_before = [day for day in overlap if (day - ONE_DAY).strftime(date_pattern) in stored]
     if with_day_before and all(
-        stored[(day - ONE_DAY).strftime(date_pattern)] == new_values[day]
-        for day in with_day_before
+        stored[(day - ONE_DAY).strftime(date_pattern)] == new_values[day] for day in with_day_before
     ):
         handle_error(
             config,
@@ -534,9 +508,7 @@ if __name__ == "__main__":
         required=False,
         default="./src/config.json",
     )
-    parser.add_argument(
-        "--log-console", "-l", help="activate console logging", action="store_true"
-    )
+    parser.add_argument("--log-console", "-l", help="activate console logging", action="store_true")
     parser.add_argument(
         "--log-error",
         "-e",

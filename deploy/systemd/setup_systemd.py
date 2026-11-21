@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Generate the systemd units of the Gruenbeck data collector from the templates
 next to this script and print the commands to install them as system service.
@@ -38,8 +37,7 @@ def generate_units(user, install_path, output_dir=None):
     for name, value in (("user", user), ("install path", str(install_path))):
         if not value or INVALID_VALUE.search(value):
             raise ValueError(
-                f"Invalid {name} {value!r}: must not be empty or contain "
-                "whitespace or '%'"
+                f"Invalid {name} {value!r}: must not be empty or contain whitespace or '%'"
             )
     install_path = pathlib.Path(install_path).absolute()
 
@@ -48,15 +46,11 @@ def generate_units(user, install_path, output_dir=None):
     else:
         output_dir = pathlib.Path(output_dir).expanduser().absolute()
         if output_dir == REPO_ROOT or REPO_ROOT in output_dir.parents:
-            raise ValueError(
-                f"Output directory {output_dir} is inside the repository {REPO_ROOT}"
-            )
+            raise ValueError(f"Output directory {output_dir} is inside the repository {REPO_ROOT}")
         output_dir.mkdir(parents=True, exist_ok=True)
 
     template = (TEMPLATE_DIR / SERVICE_TEMPLATE).read_text(encoding="utf-8")
-    service = template.replace("{{USER}}", user).replace(
-        "{{INSTALL_PATH}}", str(install_path)
-    )
+    service = template.replace("{{USER}}", user).replace("{{INSTALL_PATH}}", str(install_path))
     if "{{" in service:
         raise ValueError(f"Unreplaced placeholder in {SERVICE_TEMPLATE}")
 
@@ -70,9 +64,7 @@ def install_commands(output_dir):
     """
     :return: list of shell commands to install the units as system service
     """
-    files = " ".join(
-        shlex.quote(str(output_dir / name)) for name in (SERVICE_NAME, TIMER_NAME)
-    )
+    files = " ".join(shlex.quote(str(output_dir / name)) for name in (SERVICE_NAME, TIMER_NAME))
     return [
         f"sudo install -m 644 -t {SYSTEMD_DIR} {files}",
         "sudo systemctl daemon-reload",

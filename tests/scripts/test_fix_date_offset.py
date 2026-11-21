@@ -14,6 +14,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "fix_date_offset.py"
 
 spec = importlib.util.spec_from_file_location("fix_date_offset", SCRIPT)
+assert spec is not None and spec.loader is not None
 fix = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fix)
 
@@ -24,8 +25,16 @@ STAMP = "20261120T101500"
 
 # the last run of the old data collector (2026-11-16) and the missing days
 STORED_2026 = [("2026-11-14", "256"), ("2026-11-15", "127"), ("2026-11-16", "170")]
-SET_GAP = ["--set", "2026-11-16=33", "--set", "2026-11-17=93",
-           "--set", "2026-11-18=105", "--set", "2026-11-19=21"]
+SET_GAP = [
+    "--set",
+    "2026-11-16=33",
+    "--set",
+    "2026-11-17=93",
+    "--set",
+    "2026-11-18=105",
+    "--set",
+    "2026-11-19=21",
+]
 
 
 def write_config(tmp_path, data_path=None, name="config.json", **data_file):
@@ -97,7 +106,10 @@ def test_runs_with_the_standard_library_only(tmp_path):
     # -S: no site-packages, so third-party packages like requests are missing
     result = subprocess.run(
         [sys.executable, "-S", str(SCRIPT), "-c", str(config)],
-        capture_output=True, text=True, cwd=tmp_path, check=False,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr
@@ -144,16 +156,26 @@ def test_apply_moves_every_value_one_day_back_and_adds_set_values(tmp_path, caps
 
 
 def test_values_are_moved_unchanged_also_non_numeric(tmp_path):
-    write_year(tmp_path, 2026, [
-        ("2026-03-01", "n/a"), ("2026-03-02", ""), ("2026-03-03", "007"),
-        ("2026-03-04", "1,5"), ("2026-03-05", "64"),
-    ])
+    write_year(
+        tmp_path,
+        2026,
+        [
+            ("2026-03-01", "n/a"),
+            ("2026-03-02", ""),
+            ("2026-03-03", "007"),
+            ("2026-03-04", "1,5"),
+            ("2026-03-05", "64"),
+        ],
+    )
 
     assert migrate(tmp_path, "--apply") == 0
 
     assert read_year(tmp_path, 2026) == [
-        ("2026-02-28", "n/a"), ("2026-03-01", ""), ("2026-03-02", "007"),
-        ("2026-03-03", "1,5"), ("2026-03-04", "64"),
+        ("2026-02-28", "n/a"),
+        ("2026-03-01", ""),
+        ("2026-03-02", "007"),
+        ("2026-03-03", "1,5"),
+        ("2026-03-04", "64"),
     ]
 
 
@@ -178,7 +200,9 @@ def test_value_of_first_january_joins_existing_previous_year_file(tmp_path):
     assert migrate(tmp_path, "--apply") == 0
 
     assert read_year(tmp_path, 2025) == [
-        ("2025-12-29", "40"), ("2025-12-30", "41"), ("2025-12-31", "54"),
+        ("2025-12-29", "40"),
+        ("2025-12-30", "41"),
+        ("2025-12-31", "54"),
     ]
     assert read_year(tmp_path, 2026) == [("2026-01-01", "60")]
 
@@ -209,9 +233,7 @@ def test_a_single_missing_day_is_reported(tmp_path, capsys):
     assert migrate(tmp_path, *SET_GAP[:6]) == 0  # 2026-11-19 forgotten
 
     out = capsys.readouterr().out.splitlines()
-    assert [line for line in out if line.startswith("[!]")] == [
-        "[!] no value for 2026-11-19"
-    ]
+    assert [line for line in out if line.startswith("[!]")] == ["[!] no value for 2026-11-19"]
 
 
 def test_without_set_the_days_after_the_last_run_are_reported(tmp_path, capsys):
@@ -233,8 +255,7 @@ def test_set_conflicting_with_a_moved_value_aborts_without_changes(tmp_path, cap
     assert snapshot(tmp_path) == before
     err = capsys.readouterr().err
     assert (
-        "conflict with a moved value: --set 2026-11-15=99,"
-        " but 2026-11-15 has 170 (from 2026-11-16)"
+        "conflict with a moved value: --set 2026-11-15=99, but 2026-11-15 has 170 (from 2026-11-16)"
     ) in err
     assert "[-] nothing changed" in err
 
@@ -248,12 +269,8 @@ def test_set_equal_to_the_moved_value_is_accepted(tmp_path, capsys):
     assert "from 2026-11-16 (= --set)" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "youngest", ["2026-11-19", "2026-11-23", "2027-01-04"]
-)
-def test_aborts_if_a_collector_wrote_after_the_clock_change(
-    tmp_path, capsys, youngest
-):
+@pytest.mark.parametrize("youngest", ["2026-11-19", "2026-11-23", "2027-01-04"])
+def test_aborts_if_a_collector_wrote_after_the_clock_change(tmp_path, capsys, youngest):
     write_year(tmp_path, 2026, STORED_2026)
     if youngest.startswith("2026"):
         write_year(tmp_path, 2026, [*STORED_2026, (youngest, "88")])
@@ -314,7 +331,8 @@ def test_apply_backs_up_every_changed_file_with_timestamp(tmp_path, capsys):
         assert files[f"{name}.{STAMP}.bak"] == content
     # backups are not attached to the data mail (*.csv) or read by the analysis
     assert sorted(name for name in files if name.endswith(".csv")) == [
-        f"{PREFIX}_2025.csv", f"{PREFIX}_2026.csv",
+        f"{PREFIX}_2025.csv",
+        f"{PREFIX}_2026.csv",
     ]
     assert f"[*] backup {PREFIX}_2026.csv.{STAMP}.bak" in capsys.readouterr().out
 
@@ -335,17 +353,17 @@ def test_marker_records_date_and_parameters_of_the_run(tmp_path):
         "configFile": str(config),
         "dataPath": str(tmp_path / "data"),
         "set": {
-            "2026-11-16": "33", "2026-11-17": "93",
-            "2026-11-18": "105", "2026-11-19": "21",
+            "2026-11-16": "33",
+            "2026-11-17": "93",
+            "2026-11-18": "105",
+            "2026-11-19": "21",
         },
         "files": [f"{PREFIX}_2026.csv"],
         "backups": [f"{PREFIX}_2026.csv.{STAMP}.bak"],
     }
 
 
-def test_failed_apply_leaves_a_marker_that_blocks_another_run(
-    tmp_path, capsys, monkeypatch
-):
+def test_failed_apply_leaves_a_marker_that_blocks_another_run(tmp_path, capsys, monkeypatch):
     write_year(tmp_path, 2025, [("2025-12-31", "41")])
     path_2026 = write_year(tmp_path, 2026, [("2026-01-01", "54"), *STORED_2026])
     original_2026 = path_2026.read_bytes()
@@ -366,7 +384,8 @@ def test_failed_apply_leaves_a_marker_that_blocks_another_run(
     monkeypatch.undo()
     assert marker(tmp_path)["status"] == "in progress"
     assert marker(tmp_path)["backups"] == [
-        f"{PREFIX}_2025.csv.{STAMP}.bak", f"{PREFIX}_2026.csv.{STAMP}.bak",
+        f"{PREFIX}_2025.csv.{STAMP}.bak",
+        f"{PREFIX}_2026.csv.{STAMP}.bak",
     ]
     assert read_year(tmp_path, 2025) == [("2025-12-30", "41"), ("2025-12-31", "54")]
     assert path_2026.read_bytes() == original_2026
@@ -448,10 +467,11 @@ def test_set_value_is_stored_as_whole_number(tmp_path):
 @pytest.mark.parametrize(
     "arguments, message",
     [
-        (["--set", "2026-11-17=1", "--set", "2026-11-17=2"],
-         "--set 2026-11-17 is given twice"),
-        (["--set", "2026-11-20=5"],
-         "--set 2026-11-20 is after 2026-11-19: from 2026-11-20 on the data collector"),
+        (["--set", "2026-11-17=1", "--set", "2026-11-17=2"], "--set 2026-11-17 is given twice"),
+        (
+            ["--set", "2026-11-20=5"],
+            "--set 2026-11-20 is after 2026-11-19: from 2026-11-20 on the data collector",
+        ),
     ],
 )
 def test_invalid_set_dates_abort_without_changes(tmp_path, capsys, arguments, message):
@@ -469,19 +489,25 @@ def test_invalid_set_dates_abort_without_changes(tmp_path, capsys, arguments, me
     [
         (STORED_2026, ("day", "litres"), "header day,litres instead of date,value"),
         ([("2026-11-14", "256", "x")], ("date", "value"), "line 2: 3 columns instead of 2"),
-        ([("14.11.2026", "256")], ("date", "value"),
-         "line 2: date '14.11.2026' does not match the date pattern '%Y-%m-%d'"),
-        ([("2026-11-5", "256")], ("date", "value"),
-         "line 2: date '2026-11-5' does not match the date pattern"),
-        ([("2025-12-31", "256")], ("date", "value"),
-         "line 2: 2025-12-31 does not belong to 2026"),
-        ([("2026-11-14", "256"), ("2026-11-14", "1")], ("date", "value"),
-         "line 3: 2026-11-14 appears twice"),
+        (
+            [("14.11.2026", "256")],
+            ("date", "value"),
+            "line 2: date '14.11.2026' does not match the date pattern '%Y-%m-%d'",
+        ),
+        (
+            [("2026-11-5", "256")],
+            ("date", "value"),
+            "line 2: date '2026-11-5' does not match the date pattern",
+        ),
+        ([("2025-12-31", "256")], ("date", "value"), "line 2: 2025-12-31 does not belong to 2026"),
+        (
+            [("2026-11-14", "256"), ("2026-11-14", "1")],
+            ("date", "value"),
+            "line 3: 2026-11-14 appears twice",
+        ),
     ],
 )
-def test_unexpected_data_file_aborts_without_changes(
-    tmp_path, capsys, rows, header, message
-):
+def test_unexpected_data_file_aborts_without_changes(tmp_path, capsys, rows, header, message):
     write_year(tmp_path, 2026, rows, header=header)
     before = snapshot(tmp_path)
 
@@ -508,7 +534,9 @@ def test_only_yearly_files_with_the_configured_prefix_are_migrated(tmp_path):
 
 def test_columns_and_prefix_come_from_the_configuration(tmp_path):
     config = write_config(
-        tmp_path, prefix="water", datePattern="%d.%m.%Y",
+        tmp_path,
+        prefix="water",
+        datePattern="%d.%m.%Y",
         fieldnames={"date": "day", "value": "litres"},
     )
     path = tmp_path / "data" / "water_2026.csv"
@@ -523,9 +551,7 @@ def test_columns_and_prefix_come_from_the_configuration(tmp_path):
     )
 
 
-def test_default_config_and_relative_data_path_from_the_current_directory(
-    tmp_path, monkeypatch
-):
+def test_default_config_and_relative_data_path_from_the_current_directory(tmp_path, monkeypatch):
     write_year(tmp_path, 2026, STORED_2026)
     write_config(tmp_path, data_path="./data", name="src/config.json")
     monkeypatch.chdir(tmp_path)

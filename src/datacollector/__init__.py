@@ -56,52 +56,42 @@ def send_mail(param: dict, data_folder: pathlib.Path) -> None:
 
         # Turn these into plain/html MIMEText objects
         # text email
-        text = f"your stored data"
+        text = "your stored data"
         part_text = email.mime.text.MIMEText(text, "plain")
         message.attach(part_text)
 
         # Check if data_folder exists and is a directory
         if not data_folder.exists() or not data_folder.is_dir():
-            raise ValueError(
-                f"Data folder does not exist or is not a directory: {data_folder}"
-            )
+            raise ValueError(f"Data folder does not exist or is not a directory: {data_folder}")
 
         # Attach files
         files_to_send = list(data_folder.glob("*.csv"))
         if not files_to_send:
             # No files to send, but continue with just the text message
-            part_text = email.mime.text.MIMEText(
-                "No data files found to attach.", "plain"
-            )
+            part_text = email.mime.text.MIMEText("No data files found to attach.", "plain")
             message.attach(part_text)
         else:
             for f in sorted(files_to_send):
                 try:
                     with f.open(mode="rb") as fil:
-                        part_file = email.mime.application.MIMEApplication(
-                            fil.read(), Name=f.name
-                        )
+                        part_file = email.mime.application.MIMEApplication(fil.read(), Name=f.name)
                     # After the file is closed
-                    part_file["Content-Disposition"] = (
-                        f'attachment; filename="{f.name}"'
-                    )
+                    part_file["Content-Disposition"] = f'attachment; filename="{f.name}"'
                     message.attach(part_file)
-                except (IOError, PermissionError) as error:
+                except OSError as error:
                     # Log the error but continue with other files
                     part_text = email.mime.text.MIMEText(
                         f"Error attaching file {f.name}: {error}", "plain"
                     )
                     message.attach(part_text)
 
-        mail_sending(
-            message, param, sender_email, sender_password, smtp_port, smtp_server
-        )
+        mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
-        raise ValueError(f"Invalid mail configuration: {error}")
+        raise ValueError(f"Invalid mail configuration: {error}") from error
     except Exception as error:
         # Re-raise any other exceptions as ValueError for consistent error handling
-        raise ValueError(f"Error preparing email: {error}")
+        raise ValueError(f"Error preparing email: {error}") from error
 
 
 def send_mail_text(param: dict, subject: str, text: str) -> None:
@@ -130,15 +120,13 @@ def send_mail_text(param: dict, subject: str, text: str) -> None:
         part_text = email.mime.text.MIMEText(text, "plain")
         message.attach(part_text)
 
-        mail_sending(
-            message, param, sender_email, sender_password, smtp_port, smtp_server
-        )
+        mail_sending(message, param, sender_email, sender_password, smtp_port, smtp_server)
     except KeyError as error:
         # Missing configuration parameter
-        raise ValueError(f"Invalid mail configuration: {error}")
+        raise ValueError(f"Invalid mail configuration: {error}") from error
     except Exception as error:
         # Re-raise any other exceptions as ValueError for consistent error handling
-        raise ValueError(f"Error preparing email: {error}")
+        raise ValueError(f"Error preparing email: {error}") from error
 
 
 # Errors that may disappear on a later attempt (connection problems, timeouts)
@@ -176,17 +164,15 @@ def get_smtp_connection_settings(param: dict, smtp_port) -> tuple:
     """
     try:
         port = int(smtp_port)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid smtpPort: {smtp_port!r}")
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid smtpPort: {smtp_port!r}") from error
 
     security = param.get("smtpSecurity")
     if security is None:
         return port, "ssl" if port == 465 else "starttls"
     if isinstance(security, str) and security.strip().lower() in ("ssl", "starttls"):
         return port, security.strip().lower()
-    raise ValueError(
-        f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')"
-    )
+    raise ValueError(f"Invalid smtpSecurity: {security!r} (expected 'ssl' or 'starttls')")
 
 
 def mail_sending(
@@ -206,10 +192,9 @@ def mail_sending(
         attempts += 1
         try:
             context = ssl.create_default_context()
+            server: smtplib.SMTP
             if security == "ssl":
-                server = smtplib.SMTP_SSL(
-                    smtp_server, port, context=context, timeout=30
-                )
+                server = smtplib.SMTP_SSL(smtp_server, port, context=context, timeout=30)
             else:
                 server = smtplib.SMTP(smtp_server, port, timeout=30)
             with server:
@@ -221,7 +206,7 @@ def mail_sending(
                 return  # Success, exit the function
         except smtplib.SMTPAuthenticationError as error:
             # Authentication errors are not retryable
-            raise ValueError(f"Authentication failed: {error}")
+            raise ValueError(f"Authentication failed: {error}") from error
         except TRANSIENT_SMTP_ERRORS as error:
             if attempts > max_retries:
                 raise ValueError(
@@ -230,7 +215,7 @@ def mail_sending(
             time.sleep(retry_delay)  # Wait before retrying
         except PERMANENT_SMTP_ERRORS as error:
             # Permanent errors, retrying does not help
-            raise ValueError(f"Email rejected: {error}")
+            raise ValueError(f"Email rejected: {error}") from error
         except Exception as error:
             # Unexpected errors
-            raise ValueError(f"Unexpected error while sending email: {error}")
+            raise ValueError(f"Unexpected error while sending email: {error}") from error

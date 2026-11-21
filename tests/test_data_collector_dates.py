@@ -19,11 +19,13 @@ def mails(data_collector, monkeypatch):
     """records data and error mails instead of sending them"""
     sent = []
     monkeypatch.setattr(
-        data_collector.datacollector, "send_mail",
+        data_collector.datacollector,
+        "send_mail",
         lambda param, data_folder: sent.append(("data", data_folder)),
     )
     monkeypatch.setattr(
-        data_collector.datacollector, "send_mail_text",
+        data_collector.datacollector,
+        "send_mail_text",
         lambda param, subject, text: sent.append(("error", text)),
     )
     return sent
@@ -37,9 +39,7 @@ def test_parameter_name_gives_the_day(data_collector):
 
     result = data_collector.add_timestamp_as_key_device_data(response, today=TODAY)
 
-    assert result == {
-        TODAY - datetime.timedelta(days=n): str(100 + n) for n in range(1, 15)
-    }
+    assert result == {TODAY - datetime.timedelta(days=n): str(100 + n) for n in range(1, 15)}
     assert result[day("2026-11-22")] == "101"  # D_Y_2_1: yesterday
     assert result[day("2026-11-09")] == "114"  # D_Y_2_14: 14 days ago
 
@@ -52,10 +52,7 @@ def test_order_of_the_response_does_not_matter(data_collector):
     expected = data_collector.add_timestamp_as_key_device_data(in_order, today=TODAY)
 
     for response in (shuffled, reversed_order):
-        assert (
-            data_collector.add_timestamp_as_key_device_data(response, today=TODAY)
-            == expected
-        )
+        assert data_collector.add_timestamp_as_key_device_data(response, today=TODAY) == expected
 
 
 def test_days_are_calendar_dates_of_the_current_day(data_collector):
@@ -71,9 +68,7 @@ def test_days_are_calendar_dates_of_the_current_day(data_collector):
 def test_year_change(data_collector):
     response = {"D_Y_2_1": "1", "D_Y_2_2": "2", "D_Y_2_3": "3", "D_Y_2_14": "14"}
 
-    result = data_collector.add_timestamp_as_key_device_data(
-        response, today=day("2026-01-02")
-    )
+    result = data_collector.add_timestamp_as_key_device_data(response, today=day("2026-01-02"))
 
     assert result == {
         day("2026-01-01"): "1",
@@ -84,9 +79,7 @@ def test_year_change(data_collector):
 
 
 def test_more_than_14_days_ago(data_collector):
-    result = data_collector.add_timestamp_as_key_device_data(
-        {"D_Y_2_27": "80"}, today=TODAY
-    )
+    result = data_collector.add_timestamp_as_key_device_data({"D_Y_2_27": "80"}, today=TODAY)
 
     assert result == {day("2026-10-27"): "80"}
 
@@ -113,9 +106,7 @@ def test_first_date_is_optional(data_collector):
     assert data_collector.get_first_date({"dataFile": {"prefix": PREFIX}}) is None
 
 
-def test_first_date_without_data_file_section_is_an_error(
-    data_collector, mails, caplog
-):
+def test_first_date_without_data_file_section_is_an_error(data_collector, mails, caplog):
     with pytest.raises(SystemExit) as exit_info:
         data_collector.get_first_date({"mail": {}})
 
@@ -132,13 +123,10 @@ def test_first_date_is_read_as_date(data_collector):
 
 @pytest.mark.parametrize(
     "value",
-    ["20.11.2026", "2026-11-31", "2026-1-5", "20261120", "2026-11-20T00:00", "",
-     20261120, None],
+    ["20.11.2026", "2026-11-31", "2026-1-5", "20261120", "2026-11-20T00:00", "", 20261120, None],
     ids=repr,
 )
-def test_invalid_first_date_is_a_configuration_error(
-    data_collector, mails, caplog, value
-):
+def test_invalid_first_date_is_a_configuration_error(data_collector, mails, caplog, value):
     config = {"dataFile": {"firstDate": value}, "mail": {}}
 
     with pytest.raises(SystemExit) as exit_info:
@@ -163,9 +151,7 @@ def test_first_date_filters_earlier_days(data_collector, caplog):
     result = data_collector.filter_first_date({}, device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
-    assert "[*] 2 values before dataFile.firstDate 2026-11-20 are not written" in (
-        caplog.text
-    )
+    assert "[*] 2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
 def test_without_first_date_nothing_is_filtered(data_collector, caplog):
@@ -173,9 +159,7 @@ def test_without_first_date_nothing_is_filtered(data_collector, caplog):
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
     assert data_collector.filter_first_date({}, device_data, None) == device_data
-    assert data_collector.filter_first_date(
-        {}, device_data, day("2025-01-01")
-    ) == device_data
+    assert data_collector.filter_first_date({}, device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
@@ -187,8 +171,7 @@ def test_all_values_before_first_date_fail_the_run(data_collector, mails, caplog
 
     assert exit_info.value.code == 1
     assert (
-        "[-] no data was processed: all 2 values are before dataFile.firstDate"
-        " 2026-11-20"
+        "[-] no data was processed: all 2 values are before dataFile.firstDate 2026-11-20"
     ) in caplog.text
 
 
@@ -205,9 +188,7 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
     """
     requests = []
 
-    def run_main(
-        response, today=TODAY, local_time="16:00", device_clock="16:00", **data_file
-    ):
+    def run_main(response, today=TODAY, local_time="16:00", device_clock="16:00", **data_file):
         config = {
             "dataFile": {
                 "datePattern": "%Y-%m-%d",
@@ -228,14 +209,12 @@ def run(data_collector, mails, monkeypatch, tmp_path, parameter_file):
             clock = {} if device_clock is None else {"D_C_4_2": device_clock}
             return {**clock, **response}
 
-        now = datetime.datetime.combine(
-            today, datetime.time.fromisoformat(local_time)
-        )
+        now = datetime.datetime.combine(today, datetime.time.fromisoformat(local_time))
         monkeypatch.setattr(data_collector.gruenbeck, "get_data_from_mux_http", fetch)
         monkeypatch.setattr(data_collector, "local_now", lambda: now)
         data_collector.main(str(config_file))
 
-    run_main.requests = requests
+    run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
     return run_main
 
 
@@ -257,15 +236,29 @@ def read_year(tmp_path, year):
 # device memory on 2026-11-23 after setting the clock on 2026-11-19: 2026-11-19 takes
 # two places (D_Y_2_4 and D_Y_2_5), so D_Y_2_5 and older are one day older than n
 DEVICE_2026_11_23 = {
-    "D_Y_2_1": "101", "D_Y_2_2": "102", "D_Y_2_3": "103", "D_Y_2_4": "12",
-    "D_Y_2_5": "9", "D_Y_2_6": "105", "D_Y_2_7": "93", "D_Y_2_8": "33",
-    "D_Y_2_9": "170", "D_Y_2_10": "127", "D_Y_2_11": "256", "D_Y_2_12": "64",
-    "D_Y_2_13": "74", "D_Y_2_14": "93",
+    "D_Y_2_1": "101",
+    "D_Y_2_2": "102",
+    "D_Y_2_3": "103",
+    "D_Y_2_4": "12",
+    "D_Y_2_5": "9",
+    "D_Y_2_6": "105",
+    "D_Y_2_7": "93",
+    "D_Y_2_8": "33",
+    "D_Y_2_9": "170",
+    "D_Y_2_10": "127",
+    "D_Y_2_11": "256",
+    "D_Y_2_12": "64",
+    "D_Y_2_13": "74",
+    "D_Y_2_14": "93",
 }
 # data file after the migration (scripts/fix_date_offset.py)
 MIGRATED_2026 = [
-    ("2026-11-13", "256"), ("2026-11-14", "127"), ("2026-11-15", "170"),
-    ("2026-11-16", "33"), ("2026-11-17", "93"), ("2026-11-18", "105"),
+    ("2026-11-13", "256"),
+    ("2026-11-14", "127"),
+    ("2026-11-15", "170"),
+    ("2026-11-16", "33"),
+    ("2026-11-17", "93"),
+    ("2026-11-18", "105"),
     ("2026-11-19", "21"),
 ]
 
@@ -295,9 +288,7 @@ def test_run_with_first_date_keeps_the_migrated_values(run, tmp_path, caplog):
         "2026-11-21": "102",
         "2026-11-22": "101",
     }
-    assert "[*] 11 values before dataFile.firstDate 2026-11-20 are not written" in (
-        caplog.text
-    )
+    assert "[*] 11 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
 def test_run_over_the_year_change_writes_both_files(run, tmp_path):
@@ -321,8 +312,11 @@ def test_run_with_unknown_parameter_fails_without_writing(run, tmp_path, mails):
     assert exit_info.value.code == 1
     assert not list((tmp_path / "data").glob("*.csv"))
     assert mails == [
-        ("error", "[-] unknown consumption parameter 'D_Y_1':"
-                  " expected D_Y_2_<n> (consumption of n days ago)")
+        (
+            "error",
+            "[-] unknown consumption parameter 'D_Y_1':"
+            " expected D_Y_2_<n> (consumption of n days ago)",
+        )
     ]
 
 
@@ -405,8 +399,7 @@ def test_missing_or_invalid_device_clock_is_only_a_warning(
 
 def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
     # 2026-11-24 16:30: yesterday is 2026-11-23
-    run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="16:30",
-        device_clock="16:30")
+    run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="16:30", device_clock="16:30")
 
     stored = read_year(tmp_path, 2026)
     assert stored["2026-11-23"] == "101"
@@ -472,9 +465,7 @@ def test_overlap_with_the_same_values_is_written(run, tmp_path, mails):
     assert [kind for kind, _ in mails] == ["data"]
 
 
-def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(
-    run, tmp_path, mails
-):
+def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(run, tmp_path, mails):
     write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
     before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
 
@@ -484,32 +475,35 @@ def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(
     assert exit_info.value.code == 1
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
     assert mails == [
-        ("error", "[-] one day late: the run was probably before the daily rollover of"
-                  " the device; run again later (the new values of 2026-11-09 ..."
-                  " 2026-11-15 equal the stored values of the day before; nothing"
-                  " written)")
+        (
+            "error",
+            "[-] one day late: the run was probably before the daily rollover of"
+            " the device; run again later (the new values of 2026-11-09 ..."
+            " 2026-11-15 equal the stored values of the day before; nothing"
+            " written)",
+        )
     ]
 
 
-def test_run_before_the_rollover_over_the_year_change_writes_no_file(
-    run, tmp_path, mails
-):
+def test_run_before_the_rollover_over_the_year_change_writes_no_file(run, tmp_path, mails):
     write_year(tmp_path, 2025, stored_rows(day("2025-12-20"), day("2025-12-31")))
     write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-03")))
     files = sorted((tmp_path / "data").glob("*.csv"))
     before = [path.read_bytes() for path in files]
 
     with pytest.raises(SystemExit):
-        run(memory(true_value, today=day("2026-01-11"), shift=1),
-            today=day("2026-01-11"), local_time="07:00", device_clock="07:00")
+        run(
+            memory(true_value, today=day("2026-01-11"), shift=1),
+            today=day("2026-01-11"),
+            local_time="07:00",
+            device_clock="07:00",
+        )
 
     assert [path.read_bytes() for path in files] == before
     assert mails[0][1].startswith("[-] one day late:")
 
 
-def test_overlap_with_other_values_writes_nothing_and_names_the_days(
-    run, tmp_path, mails
-):
+def test_overlap_with_other_values_writes_nothing_and_names_the_days(run, tmp_path, mails):
     rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
     rows[-1] = ("2026-11-15", "999")
     rows[-3] = ("2026-11-13", "0")
@@ -521,9 +515,12 @@ def test_overlap_with_other_values_writes_nothing_and_names_the_days(
         run(memory(true_value))
 
     assert mails == [
-        ("error", f"[-] the new values differ from the stored ones (2026-11-13: stored"
-                  f" 0, new {new_13}, 2026-11-15: stored 999, new {new_15}): nothing"
-                  " written; check the data files and the device")
+        (
+            "error",
+            f"[-] the new values differ from the stored ones (2026-11-13: stored"
+            f" 0, new {new_13}, 2026-11-15: stored 999, new {new_15}): nothing"
+            " written; check the data files and the device",
+        )
     ]
 
 
@@ -551,7 +548,7 @@ def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
 @pytest.fixture
 def logging_handlers(data_collector):
     """removes and closes the handlers that setup_logging() adds"""
-    added = []
+    added: list[logging.Handler] = []
     yield added
     for handler in added:
         data_collector.logger.removeHandler(handler)
