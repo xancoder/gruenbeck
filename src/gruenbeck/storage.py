@@ -75,9 +75,15 @@ def read_data_file(
 ) -> dict[str, int | str]:
     """
     stored values of one yearly file
+
+    A value is a number if it is made of decimal digits only (str.isdecimal(): exactly the
+    characters int() accepts, also digits of other scripts). Anything else stays text without
+    an error: "-", an empty value, a sign, a decimal point or blanks, and characters such as
+    "²" or "½" that str.isnumeric() accepts but int() does not.
     :param fieldnames: column names of date and value (dataFile.fieldnames)
     :param date_pattern: format of the dates (dataFile.datePattern)
-    :return: dictionary of date text and value (int if numeric), empty without file
+    :return: dictionary of date text and value (int if a number, else the text), empty without
+        file
     :raises StorageError: a column is missing, or a date does not match date_pattern
     """
     data: dict[str, int | str] = {}
@@ -102,7 +108,7 @@ def read_data_file(
                         f" dataFile.datePattern {date_pattern!r}"
                     ) from None
                 value = row[fieldnames.value]
-                data[text] = int(value) if value.isnumeric() else value
+                data[text] = int(value) if value.isdecimal() else value
     return data
 
 

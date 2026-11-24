@@ -185,6 +185,25 @@ def test_data_mail_with_a_long_history_compares_with_the_latest_five_years(
     assert len(attachments) == 10
 
 
+def test_data_mail_with_a_superscript_in_a_data_file_has_a_missing_day(
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    # "\u00b2" is no number for int(): the day is missing, the statistics are made as usual
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, "\u00b2"))
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    text, attachments = sent(smtp)
+    lines = text.splitlines()
+    assert "  Sun 2026-11-22        -   missing" in lines
+    assert "      incomplete: 1 day missing" in lines
+    assert STATISTICS_FAILED not in text
+    assert len(attachments) == 1
+    assert warnings() == []
+
+
 def test_unusable_data_file_gives_a_note_instead_of_the_statistics(
     smtp: "FakeSMTP",
     warnings: typing.Callable[[], list[logging.LogRecord]],

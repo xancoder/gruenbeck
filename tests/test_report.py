@@ -549,7 +549,7 @@ def test_gap_over_the_turn_of_the_year_is_interpolated_in_both_years() -> None:
 # --- files ----------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("text", ["-", "", "n/a", "1.5", "-5"])
+@pytest.mark.parametrize("text", ["-", "", "n/a", "1.5", "-5", "\u00b2", "\u00bd"])
 def test_value_that_is_not_a_number_is_a_missing_day(
     loaded_config: config.Configuration, text: str
 ) -> None:
