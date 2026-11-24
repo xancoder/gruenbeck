@@ -268,7 +268,7 @@ uv run pytest --cov  # tests with line and branch coverage of the code (src, scr
 The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
 #### pre-commit
 
-[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML and TOML syntax, large files) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. Install the git hooks once per clone:
+[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:
 
 ```shell script
 uv sync
@@ -306,7 +306,7 @@ uv run pytest -rs --cov
 
 Another Python version can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest`.
 
-Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv) and the GitHub Actions once a week and opens one pull request per ecosystem. The hook versions in `.pre-commit-config.yaml` are not covered by it; update them with `uv run pre-commit autoupdate`, and keep the ruff version there in line with `uv.lock`.
+Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv, including ruff), the GitHub Actions and the hook versions in `.pre-commit-config.yaml` (ecosystem `pre-commit`; the local ruff hooks have no version there) once a week and opens one pull request per ecosystem. `uv run pre-commit autoupdate` updates the hook versions by hand.
 
 ## Scheduling
 

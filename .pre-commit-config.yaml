@@ -1,10 +1,20 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # keep in sync with the ruff version in uv.lock
-    rev: v0.17.6
+  # ruff runs from the virtual environment, so its version comes from uv.lock and
+  # Dependabot updates it there (uv sync first, or start pre-commit with uv run)
+  - repo: local
     hooks:
       - id: ruff-check
+        name: ruff check
+        entry: uv run --no-sync ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: ruff-format
+        name: ruff format
+        entry: uv run --no-sync ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -17,6 +27,8 @@ repos:
         exclude: ^assets/
       - id: check-yaml
       - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
       - id: check-added-large-files
 
   - repo: https://github.com/gitleaks/gitleaks

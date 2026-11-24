@@ -22,3 +22,15 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # the hook versions in .pre-commit-config.yaml (local hooks are skipped)
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build(deps)
+    groups:
+      pre-commit:
+        patterns:
+          - "*"
