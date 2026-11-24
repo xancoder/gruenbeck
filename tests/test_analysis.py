@@ -1,12 +1,12 @@
 """
 analysis: gruenbeck-analyse, formerly src/data-analyse.py
 
-pandas and matplotlib belong to the extra "analysis" and are not part of the dev
-environment, so only the parts without them are tested here.
+pandas and matplotlib belong to the extra "analysis". The tests that really need them skip
+without the extra (uv sync); CI installs it (uv sync --all-extras). A missing extra is
+simulated in-process, so that test runs in both environments.
 """
 
 import collections.abc
-import importlib.util
 import pathlib
 import subprocess
 import sys
@@ -17,7 +17,6 @@ import pytest
 from gruenbeck import analysis, cli
 
 BIN = pathlib.Path(sys.executable).parent
-HAS_ANALYSIS_EXTRA = importlib.util.find_spec("pandas") is not None
 
 
 def run_command(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -37,12 +36,19 @@ def test_help_works_without_the_analysis_extra(tmp_path: pathlib.Path) -> None:
     assert "monthly statistics of the collected water consumption" in result.stdout
 
 
-@pytest.mark.skipif(HAS_ANALYSIS_EXTRA, reason="the extra analysis is installed")
-def test_run_without_the_analysis_extra_fails(tmp_path: pathlib.Path) -> None:
-    result = run_command(tmp_path)
+def test_run_without_the_analysis_extra_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    # None in sys.modules makes the import fail as if the package was not installed, also
+    # if the extra is installed and the modules are already imported
+    for name in ("matplotlib", "matplotlib.pyplot", "pandas"):
+        monkeypatch.setitem(sys.modules, name, None)
 
-    assert result.returncode == 1
-    assert "No module named 'matplotlib'" in result.stderr
+    with pytest.raises(ModuleNotFoundError) as excinfo:
+        cli.analyse(["--config-file", str(tmp_path / "config.json")])
+
+    # the import comes before the configuration is read: no configuration file is needed
+    assert (excinfo.value.name or "").split(".")[0] == "matplotlib"
 
 
 @pytest.mark.parametrize(
@@ -84,7 +90,6 @@ def test_statistics_use_the_columns_and_the_date_pattern_of_the_configuration(
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # only with the extra "analysis" (uv sync --extra analysis)
     config_data["dataFile"].update(
         prefix="p", datePattern="%d.%m.%Y", fieldnames={"date": "day", "value": "litres"}
     )

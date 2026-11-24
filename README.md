@@ -14,14 +14,17 @@ git clone https://github.com/xancoder/gruenbeck.git
 
 ### install dependencies into a virtual environment
 
-The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock` and installs the package `gruenbeck` (from `src/gruenbeck/`) with the commands `gruenbeck-collect` and `gruenbeck-analyse` into `./.venv/bin`:
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `.python-version` pins `3.15`, the version on the Raspberry Pi, for the virtual environment; CI tests 3.12 (the lowest supported version), 3.14 and 3.15. `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock` and installs the package `gruenbeck` (from `src/gruenbeck/`) with the commands `gruenbeck-collect` and `gruenbeck-analyse` into `./.venv/bin`:
 
 ```shell script
 cd gruenbeck
 uv sync --no-dev           # data collector only (production)
 uv sync                    # plus the dev tools (pytest, pytest-cov, ruff, mypy, pre-commit)
 uv sync --extra analysis   # plus pandas and matplotlib for gruenbeck-analyse
+uv sync --all-extras       # dev tools and the extra: what CI installs
 ```
+
+Without the extra, the tests that need pandas and matplotlib are skipped; `uv sync --all-extras` runs all of them.
 
 ### create the config.json
 
@@ -284,15 +287,22 @@ uv run pre-commit run --hook-stage manual --all-files gitleaks-history
 
 #### continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request: `uv sync --locked`, pre-commit (ruff and the file checks), the gitleaks scan of the git history, mypy and pytest with coverage. Run the same checks locally before pushing:
+`.github/workflows/ci.yml` runs on every push and pull request, always with `uv sync --locked --all-extras`, so that the extra `analysis` (pandas, matplotlib) is installed and tested:
+
+- job `checks` (Python 3.12): pre-commit (ruff and the file checks), the gitleaks scan of the git history and mypy;
+- job `tests`: pytest with coverage on Python 3.12 (lowest supported version), 3.14 and 3.15 (the version on the Raspberry Pi).
+
+Run the same checks locally before pushing:
 
 ```shell script
-uv sync --locked
+uv sync --locked --all-extras
 uv run pre-commit run --all-files
 uv run pre-commit run --hook-stage manual --all-files gitleaks-history
 uv run mypy
-uv run pytest --cov
+uv run pytest -rs --cov
 ```
+
+Another Python version can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest`.
 
 Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv) and the GitHub Actions once a week and opens one pull request per ecosystem. The hook versions in `.pre-commit-config.yaml` are not covered by it; update them with `uv run pre-commit autoupdate`, and keep the ruff version there in line with `uv.lock`.
 
