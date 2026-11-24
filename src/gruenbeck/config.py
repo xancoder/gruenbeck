@@ -241,31 +241,12 @@ def load_configuration(
 
 
 def _read_path(section: _Section, key: str, base: pathlib.Path) -> pathlib.Path | None:
-    """
-    absolute path of a path parameter; a relative path starts at `base`
-
-    Up to P006-S3 relative paths started at the working directory. A configuration
-    written for that (e.g. "./data" in src/config.json, run from the repository root)
-    would silently use another folder, so that case is an error with the new path.
-    """
+    """absolute path of a path parameter; a relative path starts at `base`, the config folder"""
     text = section.text(key)
     if text is None:
         return None
     path = pathlib.Path(text)
-    if path.is_absolute():
-        return path
-    resolved = (base / path).resolve()
-    former = (pathlib.Path.cwd() / path).resolve()
-    if resolved != former and not resolved.exists() and former.exists():
-        section.problem(
-            key,
-            text,
-            f"relative paths start at the folder of the configuration file ({base}), not at"
-            f" the working directory: {resolved} does not exist, but {former} does; use"
-            f" {os.path.relpath(former, base)!r}",
-        )
-        return None
-    return resolved
+    return path if path.is_absolute() else (base / path).resolve()
 
 
 def _read_mail(section: _Section | None, password_required: bool) -> Mail | None:

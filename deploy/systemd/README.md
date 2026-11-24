@@ -231,25 +231,6 @@ crontab -e
 
 Cron does not make up a run that was missed while the machine was off.
 
-## Updating from `src/data-collector.py`
-
-Older versions ran the script `src/data-collector.py`, which no longer exists. After updating
-the repository:
-
-1. Run `uv sync --no-dev` again; it installs the command `.venv/bin/gruenbeck-collect`.
-2. Create the folders `data/` and `log/` if they do not exist (the service is hardened and
-   cannot create them, see [Hardening](#hardening)). Generate the units again with `setup_systemd.py` and install them with the printed commands
-   (system service), or copy the generated service again (user service). The new unit starts
-   `.venv/bin/gruenbeck-collect`; check it with `systemctl cat gruenbeck-collector.service`.
-3. With cron, replace the old line by the one under [Cron](#cron-alternative).
-4. Relative paths in `src/config.json` now start at `src/`: change `"./data"` and
-   `"./assets/…"` to `"../data"` and `"../assets/…"` (see
-   [the main README](../../README.md#existing-configuration-with-paths-relative-to-the-current-directory)).
-   Run the collector once by hand (`sudo systemctl start gruenbeck-collector.service`) and
-   check `systemctl status gruenbeck-collector.service`.
-
-The options (`-c`, `-l`, `-e`) and their defaults are the same as before.
-
 ## Switching from cron to systemd
 
 Remove the cron entry (`crontab -e`) when the timer is active. Otherwise the data is collected

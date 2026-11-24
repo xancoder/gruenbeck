@@ -51,22 +51,6 @@ The key `parameterFile` of older configurations is not used any more (the data c
 
 A relative path starts at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json` unless `GRUENBECK_CONFIG` is set) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
 
-#### existing configuration with paths relative to the current directory
-
-Up to now relative paths started at the current directory, so a configuration from before this version contains `"./data"`. Change it to `"../data"` (relative to `src/`) or to an absolute path. Until then the data collector refuses to run if a path exists only relative to the current directory: the error names the path to use, and nothing is written.
-
-#### existing installation with a versioned config.json
-
-Older versions of the repository contained `src/config.json`. It is no longer versioned, so a `git pull` that brings this change removes the file (or aborts if the file was modified locally). Save the file before the next pull and put it back afterwards:
-
-```shell script
-cp src/config.json ~/gruenbeck-config.json.bak
-git checkout -- src/config.json
-git pull
-cp ~/gruenbeck-config.json.bak src/config.json
-chmod 600 src/config.json
-```
-
 #### mail settings
 
 The section `mail` configures the SMTP server used for the data mail and the error notifications:
@@ -151,7 +135,7 @@ Before it writes anything, the data collector reads every yearly file it needs. 
 uv run gruenbeck-collect -l
 ```
 
-Scheduled runs call the command of the virtual environment directly (`./.venv/bin/gruenbeck-collect`), so uv is not needed at run time. The command replaces the former script `src/data-collector.py` with the same options and defaults; an installation that still runs the script needs the steps in [deploy/systemd/README.md](deploy/systemd/README.md#updating-from-srcdata-collectorpy).
+Scheduled runs call the command of the virtual environment directly (`./.venv/bin/gruenbeck-collect`), so uv is not needed at run time.
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
@@ -237,7 +221,7 @@ Warnings of the statistics and the charts go to stderr. An error in the configur
 
 ### analysis
 
-`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `$GRUENBECK_CONFIG` if set, else `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
+`gruenbeck-analyse` prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `$GRUENBECK_CONFIG` if set, else `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
 
 ```shell script
 uv run --extra analysis gruenbeck-analyse

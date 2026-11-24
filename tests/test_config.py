@@ -6,7 +6,6 @@ import copy
 import datetime
 import json
 import logging
-import os
 import pathlib
 import typing
 
@@ -779,36 +778,14 @@ def test_absolute_paths_stay(
     assert loaded.data_path == pathlib.Path("/srv/gruenbeck/data")
 
 
-def test_path_written_for_the_working_directory_is_an_error(
+def test_a_folder_of_the_working_directory_is_not_used(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # the configuration of P006-S2 and earlier: src/config.json, run from the repository
+    # only repo/data exists, the folder of the configuration file has no data folder (yet)
     (tmp_path / "repo" / "data").mkdir(parents=True)
-    config_data["dataPath"] = "./data"
-    write_config(config_data, tmp_path / "repo" / "src" / "config.json")
-    monkeypatch.chdir(tmp_path / "repo")
-
-    found = problems_of("src/config.json")
-
-    src = tmp_path / "repo" / "src"
-    assert found == [
-        f"invalid config parameter dataPath './data': relative paths start at the folder of"
-        f" the configuration file ({src}), not at the working directory: {src / 'data'} does"
-        f" not exist, but {tmp_path / 'repo' / 'data'} does; use '../data'"
-    ]
-
-
-def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
-    config_data: dict[str, typing.Any],
-    write_config: collections.abc.Callable[..., pathlib.Path],
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "repo" / "data").mkdir(parents=True)
-    (tmp_path / "repo" / "src" / "data").mkdir(parents=True)
     config_data["dataPath"] = "./data"
     write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     monkeypatch.chdir(tmp_path / "repo")
@@ -816,28 +793,6 @@ def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
     loaded = configuration.load_configuration("src/config.json")
 
     assert loaded.data_path == tmp_path / "repo" / "src" / "data"
-
-
-def test_path_that_exists_nowhere_is_taken_from_the_configuration(
-    config_data: dict[str, typing.Any],
-    write_config: collections.abc.Callable[..., pathlib.Path],
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # the first run: the data folder is created later
-    config_data["dataPath"] = "data"
-    write_config(config_data, tmp_path / "repo" / "src" / "config.json")
-    monkeypatch.chdir(tmp_path / "repo")
-
-    loaded = configuration.load_configuration("src/config.json")
-
-    assert loaded.data_path == tmp_path / "repo" / "src" / "data"
-
-
-def problems_of(path: str | os.PathLike[str]) -> list[str]:
-    with pytest.raises(configuration.ConfigurationError) as err:
-        configuration.load_configuration(path)
-    return err.value.problems
 
 
 # --- the file without checks --------------------------------------------------------

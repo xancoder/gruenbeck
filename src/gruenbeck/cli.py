@@ -130,7 +130,7 @@ def report_error(
 
 def collect(argv: Sequence[str] | None = None) -> int:
     """
-    command gruenbeck-collect: the options of the former src/data-collector.py
+    command gruenbeck-collect: collect, store and mail the data of the soft water system
     :return: exit code (the console script passes it to sys.exit)
     """
     parser = argparse.ArgumentParser(
@@ -160,7 +160,7 @@ def collect(argv: Sequence[str] | None = None) -> int:
 
 def analyse(argv: Sequence[str] | None = None) -> int:
     """
-    command gruenbeck-analyse: the options of the former src/data-analyse.py
+    command gruenbeck-analyse: monthly statistics of the stored data
     :return: exit code (the console script passes it to sys.exit)
     """
     parser = argparse.ArgumentParser(
