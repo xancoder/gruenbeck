@@ -31,6 +31,14 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
 
+  # audits the GitHub Actions workflows (unpinned actions, excessive permissions, injection);
+  # offline: the audits that ask the GitHub API need a token and are left out
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.33.1
+    hooks:
+      - id: zizmor
+        args: [--offline]
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:

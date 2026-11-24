@@ -1,25 +1,32 @@
 name: CI
 
 on:
+  # a branch with an open pull request would run twice if it ran on push as well
   push:
+    branches: [master, development]
   pull_request:
 
 permissions:
   contents: read
+
+# a newer run for the same branch or pull request cancels the older one
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # gitleaks scans the whole history
           fetch-depth: 0
           persist-credentials: false
 
       # the lowest supported version; mypy checks against it (python_version in pyproject.toml)
-      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: "3.12"
           enable-cache: true
@@ -51,11 +58,11 @@ jobs:
         # (.python-version)
         python-version: ["3.12", "3.14", "3.15"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10.4.0
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
