@@ -3,6 +3,8 @@
 Generate the systemd units of the Gruenbeck data collector from the templates
 next to this script and print the commands to install them as system service.
 
+The service is hardened: it may only write to the data folder and the log folder
+(`<install path>/data` and `<install path>/log`, or the folders of --write-path).
 The generated files are never written into the repository.
 """
 
@@ -23,29 +25,46 @@ SERVICE_NAME = "gruenbeck-collector.service"
 TIMER_NAME = "gruenbeck-collector.timer"
 SYSTEMD_DIR = "/etc/systemd/system/"
 
-# whitespace splits ExecStart, '%' starts a systemd specifier
+# whitespace splits ExecStart and ReadWritePaths, '%' starts a systemd specifier
 INVALID_VALUE = re.compile(r"[\s%]")
+
+
+def default_write_paths(install_path: str | os.PathLike[str]) -> list[pathlib.Path]:
+    """the data folder and the log folder next to the repository, where the collector writes"""
+    base = pathlib.Path(install_path).absolute()
+    return [base / "data", base / "log"]
 
 
 def generate_units(
     user: str,
     install_path: str | os.PathLike[str],
     output_dir: str | os.PathLike[str] | None = None,
+    write_paths: collections.abc.Sequence[str | os.PathLike[str]] | None = None,
 ) -> pathlib.Path:
     """
     Create service and timer unit in output_dir (a new temporary directory if None)
     :param user: user the service runs as
     :param install_path: path of the repository on the target machine
     :param output_dir: directory for the generated files, must be outside of the repository
+    :param write_paths: the only folders the service may write to; they replace the default
+        (`data` and `log` in install_path), so list every folder the collector writes to
     :return: pathlib.Path of the directory with the generated files
-    :raises ValueError: invalid user, install path or output directory
+    :raises ValueError: invalid user, install path, write path or output directory
     """
-    for name, value in (("user", user), ("install path", str(install_path))):
+    checked = [("user", user), ("install path", str(install_path))]
+    checked += [("write path", str(path)) for path in write_paths or ()]
+    for name, value in checked:
         if not value or INVALID_VALUE.search(value):
             raise ValueError(
                 f"Invalid {name} {value!r}: must not be empty or contain whitespace or '%'"
             )
     install_path = pathlib.Path(install_path).absolute()
+    # systemd wants absolute, normalized paths
+    folders = (
+        [pathlib.Path(os.path.normpath(pathlib.Path(path).absolute())) for path in write_paths]
+        if write_paths
+        else default_write_paths(install_path)
+    )
 
     if output_dir is None:
         output_dir = pathlib.Path(tempfile.mkdtemp(prefix="gruenbeck-systemd-"))
@@ -56,7 +75,11 @@ def generate_units(
         output_dir.mkdir(parents=True, exist_ok=True)
 
     template = (TEMPLATE_DIR / SERVICE_TEMPLATE).read_text(encoding="utf-8")
-    service = template.replace("{{USER}}", user).replace("{{INSTALL_PATH}}", str(install_path))
+    service = (
+        template.replace("{{USER}}", user)
+        .replace("{{INSTALL_PATH}}", str(install_path))
+        .replace("{{WRITE_PATHS}}", " ".join(str(folder) for folder in folders))
+    )
     if "{{" in service:
         raise ValueError(f"Unreplaced placeholder in {SERVICE_TEMPLATE}")
 
@@ -93,6 +116,15 @@ def main(argv: collections.abc.Sequence[str] | None = None) -> int:
         default=str(REPO_ROOT),
     )
     parser.add_argument(
+        "--write-path",
+        action="append",
+        metavar="PATH",
+        help="folder the service may write to; repeat it for several folders. They replace the"
+        " default (data and log in the install path), so list the folder of dataPath and the"
+        " folder of the log file (--log-error) if they are somewhere else",
+        default=None,
+    )
+    parser.add_argument(
         "--output-dir",
         help="directory for the generated units, outside of the repository "
         "(default: a new temporary directory)",
@@ -101,7 +133,7 @@ def main(argv: collections.abc.Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        output_dir = generate_units(args.user, args.install_path, args.output_dir)
+        output_dir = generate_units(args.user, args.install_path, args.output_dir, args.write_path)
     except ValueError as err:
         parser.error(str(err))
     except OSError as err:

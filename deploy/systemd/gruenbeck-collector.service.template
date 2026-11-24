@@ -8,3 +8,27 @@ Type=oneshot
 User={{USER}}
 WorkingDirectory={{INSTALL_PATH}}
 ExecStart={{INSTALL_PATH}}/.venv/bin/gruenbeck-collect
+# a run takes a few minutes at most, also with all retries of the device and the mail
+TimeoutStartSec=30min
+
+# Hardening: the collector only needs the network and write access to the data and log folders
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{WRITE_PATHS}}
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+# AF_UNIX and AF_NETLINK are used by the name resolution of the C library
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK

@@ -28,6 +28,79 @@ def test_generate_units_replaces_placeholders(tmp_path: pathlib.Path) -> None:
     assert service.endswith("\n")
 
 
+def settings(service: str) -> dict[str, str]:
+    """the `[Service]` settings of a unit as name and value (comments and sections skipped)"""
+    pairs = (
+        line.partition("=")
+        for line in service.splitlines()
+        if line and not line.startswith(("#", "["))
+    )
+    return {name: value for name, _, value in pairs}
+
+
+def test_generated_service_is_limited_in_time_and_hardened(tmp_path: pathlib.Path) -> None:
+    out = setup_systemd.generate_units("collector", "/opt/gruenbeck", tmp_path)
+    service = settings((out / "gruenbeck-collector.service").read_text())
+
+    assert service["TimeoutStartSec"] == "30min"
+    for name in (
+        "NoNewPrivileges",
+        "PrivateTmp",
+        "PrivateDevices",
+        "ProtectKernelTunables",
+        "ProtectKernelModules",
+        "ProtectKernelLogs",
+        "ProtectControlGroups",
+        "ProtectClock",
+        "ProtectHostname",
+        "RestrictSUIDSGID",
+        "RestrictRealtime",
+        "RestrictNamespaces",
+        "LockPersonality",
+    ):
+        assert service[name] == "true", name
+    assert service["ProtectSystem"] == "strict"
+    assert service["ProtectHome"] == "read-only"
+    assert service["SystemCallArchitectures"] == "native"
+    assert service["CapabilityBoundingSet"] == ""
+    assert service["RestrictAddressFamilies"] == "AF_INET AF_INET6 AF_UNIX AF_NETLINK"
+
+
+def test_generated_service_may_write_to_data_and_log_of_the_install_path(
+    tmp_path: pathlib.Path,
+) -> None:
+    out = setup_systemd.generate_units("collector", "/opt/gruenbeck", tmp_path)
+
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert "ReadWritePaths=/opt/gruenbeck/data /opt/gruenbeck/log\n" in service
+
+
+def test_write_paths_replace_the_default_paths(tmp_path: pathlib.Path) -> None:
+    out = setup_systemd.generate_units(
+        "collector",
+        "/opt/gruenbeck",
+        tmp_path,
+        write_paths=["/srv/water/data", pathlib.Path("/var/log/gruenbeck/../gruenbeck")],
+    )
+
+    service = (out / "gruenbeck-collector.service").read_text()
+    # the paths are normalized: systemd refuses ".."
+    assert "ReadWritePaths=/srv/water/data /var/log/gruenbeck\n" in service
+    assert "/opt/gruenbeck/data" not in service
+    assert "{{" not in service
+
+
+def test_default_write_paths_follow_a_relative_install_path(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert setup_systemd.default_write_paths("gruenbeck") == [
+        tmp_path / "gruenbeck" / "data",
+        tmp_path / "gruenbeck" / "log",
+    ]
+
+
 def test_generate_units_copies_timer_unchanged(tmp_path: pathlib.Path) -> None:
     out = setup_systemd.generate_units("collector", "/opt/gruenbeck", tmp_path)
     timer = SCRIPT.with_name("gruenbeck-collector.timer").read_text()
@@ -56,6 +129,15 @@ def test_generate_units_rejects_invalid_install_path(
 def test_generate_units_rejects_invalid_user(tmp_path: pathlib.Path) -> None:
     with pytest.raises(ValueError, match="user"):
         setup_systemd.generate_units("my user", "/opt/gruenbeck", tmp_path)
+
+
+@pytest.mark.parametrize("write_path", ["/srv/my data", "/srv/da%ta", ""])
+def test_generate_units_rejects_invalid_write_path(tmp_path: pathlib.Path, write_path: str) -> None:
+    with pytest.raises(ValueError, match="write path"):
+        setup_systemd.generate_units(
+            "collector", "/opt/gruenbeck", tmp_path, write_paths=["/srv/data", write_path]
+        )
+    assert not list(tmp_path.iterdir())
 
 
 def test_generate_units_rejects_output_dir_inside_repo() -> None:
@@ -88,3 +170,37 @@ def test_main_rejects_invalid_install_path(
         setup_systemd.main(["--install-path", "/opt/a b", "--output-dir", str(tmp_path)])
     assert exit_info.value.code == 2
     assert "install path" in capsys.readouterr().err
+
+
+def test_main_passes_the_repeated_write_paths_to_the_unit(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "out"
+    code = setup_systemd.main(
+        [
+            "--install-path",
+            "/opt/gruenbeck",
+            "--output-dir",
+            str(out),
+            "--write-path",
+            "/srv/water",
+            "--write-path",
+            "/opt/gruenbeck/log",
+        ]
+    )
+
+    assert code == 0
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert "ReadWritePaths=/srv/water /opt/gruenbeck/log\n" in service
+    capsys.readouterr()
+
+
+def test_main_rejects_invalid_write_path(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        setup_systemd.main(["--write-path", "/srv/a b", "--output-dir", str(tmp_path)])
+
+    assert exit_info.value.code == 2
+    assert "write path" in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())
