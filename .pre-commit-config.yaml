@@ -9,8 +9,8 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # assets/ holds the unchanged documentation of the manufacturer; in the .tsv file,
-      # rows made of tabs are empty fields, not trailing whitespace
+      # assets/ holds the documentation of the manufacturer and its manual conversion
+      # into the parameter file: the hooks must not change them
       - id: trailing-whitespace
         exclude: ^assets/
       - id: end-of-file-fixer

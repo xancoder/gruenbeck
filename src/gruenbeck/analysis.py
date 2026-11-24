@@ -1,49 +1,56 @@
-#!/usr/bin/env python3
+"""monthly statistics of the collected water consumption (extra "analysis")"""
 
+import os
 import pathlib
 import re
-import sys
 
-import matplotlib.pyplot as plt
-import pandas
-
-import datacollector
+from gruenbeck import config as configuration
+from gruenbeck import errors
 
 print_pattern_headline = "{:<4} {:<5} {:<4} {:<3} {:<3} {:<3} {:<5}"
 print_pattern = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
 
 
-def get_data_files(config):
+class AnalysisError(errors.GruenbeckError):
+    """nothing to analyse"""
+
+
+def get_data_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:
     """
     find the yearly data files written by the data collector
-    :param config: dictionary of the configuration
+    :param data_path: data folder (dataPath)
+    :param prefix: dataFile.prefix
     :return: sorted list of pathlib.Path of '<prefix>_<year>.csv' in the data folder
     """
-    data_path = pathlib.Path(config["dataPath"])
-    year_file = re.compile(rf"{re.escape(config['dataFile']['prefix'])}_\d{{4}}\.csv")
+    data_path = pathlib.Path(data_path)
+    year_file = re.compile(rf"{re.escape(prefix)}_\d{{4}}\.csv")
     return sorted(
         input_file for input_file in data_path.glob("*.csv") if year_file.fullmatch(input_file.name)
     )
 
 
-def main(config_file):
-    try:
-        config = datacollector.check_configuration(config_file)
-        data_files = get_data_files(config)
-    except FileNotFoundError as err:
-        sys.exit(f"[-] no configuration: {err}")
-    except KeyError as err:
-        sys.exit(f"[-] no config parameter: {err}")
-    if not data_files:
-        sys.exit(
-            f"[-] no data files '{config['dataFile']['prefix']}_<year>.csv' in {config['dataPath']}"
-        )
+def main(config_file: str | os.PathLike[str]) -> None:
+    # pandas and matplotlib belong to the extra "analysis"; importing them here
+    # keeps the module and the help of gruenbeck-analyse usable without it
+    import matplotlib.pyplot as plt
+    import pandas
 
-    print(f"data folder: {config['dataPath']}")
+    # FileNotFoundError and ConfigurationError go to the caller (gruenbeck.cli.analyse)
+    config = configuration.load_configuration(config_file)
+    data_file = config.data_file
+    data_files = get_data_files(config.data_path, data_file.prefix)
+    if not data_files:
+        raise AnalysisError(f"no data files '{data_file.prefix}_<year>.csv' in {config.data_path}")
+
+    print(f"data folder: {config.data_path}")
     for input_file in data_files:
         year = input_file.stem.split("_")[-1]
         b = pandas.read_csv(input_file)
-        b["date"] = pandas.to_datetime(b["date"], format="%Y-%m-%d")
+        # the columns of dataFile.fieldnames as date and value
+        b = b.rename(
+            columns={data_file.fieldnames.date: "date", data_file.fieldnames.value: "value"}
+        )
+        b["date"] = pandas.to_datetime(b["date"], format=data_file.date_pattern)
         b.index = b["date"]
         grouped_df = b.groupby(by=[b.index.year, b.index.month])
 
@@ -89,21 +96,3 @@ def main(config_file):
     plt.grid(True)
     plt.legend()
     plt.show()
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="monthly statistics of the collected water consumption"
-    )
-    parser.add_argument(
-        "--config-file",
-        "-c",
-        help="set config file",
-        required=False,
-        default="./src/config.json",
-    )
-    args = parser.parse_args()
-
-    main(args.config_file)

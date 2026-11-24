@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "requests>=2.32",
+    "urllib3>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -14,12 +15,21 @@ analysis = [
     "matplotlib>=3.9",
 ]
 
+[project.scripts]
+gruenbeck-collect = "gruenbeck.cli:collect"
+gruenbeck-analyse = "gruenbeck.cli:analyse"
+
+[build-system]
+requires = ["uv_build>=0.11.24,<0.12"]
+build-backend = "uv_build"
+
 [dependency-groups]
 dev = [
     "mypy>=2.4.1",
     "pre-commit>=4.7.0",
     "pytest>=9",
     "pytest-cov>=6",
+    "responses>=0.26.3",
     "ruff>=0.17.6",
     "types-requests>=2.33.0.20261030",
 ]
@@ -32,13 +42,14 @@ target-version = "py312"
 quote-style = "double"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# G (flake8-logging-format): %-style arguments instead of f-strings in logging calls
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
 
 [tool.mypy]
 python_version = "3.12"
 files = ["src", "tests"]
 mypy_path = "src"
-check_untyped_defs = true
+strict = true
 
 # pandas and matplotlib only belong to the optional "analysis" extra, which is not part of
 # the dev environment, and pandas ships no type information
