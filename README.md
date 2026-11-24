@@ -253,7 +253,19 @@ uv run --extra analysis gruenbeck-analyse
 uv run pytest
 ```
 
-The tests run from any directory and write nothing into the repository.
+The tests run from any directory and write nothing into the repository, except the folder `.hypothesis/` of the property tests in the current directory (it is ignored by git).
+
+Two dev tools shape the run:
+
+- **pytest-randomly** shuffles the order of the tests on every run, so a test that depends on another one fails soon instead of years later. The first lines of the pytest output name the seed (`Using --randomly-seed=3811257189`). To repeat a run in the same order, for example a failed one from CI, pass that seed or take the one of the last run; to switch the shuffling off use `-p no:randomly`:
+
+  ```shell script
+  uv run pytest --randomly-seed=3811257189
+  uv run pytest --randomly-seed=last
+  uv run pytest -p no:randomly
+  ```
+
+- **hypothesis** generates the inputs of the property tests in `tests/test_properties.py` (about 1.5 s): they state what holds for *every* input instead of single examples, for instance that the interpolated days of a short gap lie between the measured neighbours, that a data file is read back as it was written, or that the device clock deviation is the shortest way round the clock. A failing example is shrunk to a small one and printed; the same seed (see above) generates it again, and hypothesis remembers it in `.hypothesis/` and tries it first on the next run.
 
 ### code quality
 

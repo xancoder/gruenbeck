@@ -12,11 +12,18 @@ import ssl
 import time
 import typing
 
+import hypothesis
 import pytest
 
 from gruenbeck import config
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# the property tests (tests/test_properties.py): no time limit per example, because a slow or busy
+# machine (CI) must not turn a correct property into a failure; the number of examples is the
+# default (100) and the whole file takes about a second
+hypothesis.settings.register_profile("project", deadline=None)
+hypothesis.settings.load_profile("project")
 
 # smtplib.SMTP.send_message, taken before a test replaces smtplib.SMTP by the fake server;
 # Any: it is called with the fake server as self

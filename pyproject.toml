@@ -28,10 +28,12 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "git-cliff>=2.14.2",
+    "hypothesis>=6.170.17",
     "mypy>=2.4.1",
     "pre-commit>=4.7.0",
     "pytest>=9",
     "pytest-cov>=6",
+    "pytest-randomly>=5.1.0",
     "responses>=0.26.3",
     "ruff>=0.17.6",
     "types-requests>=2.33.0.20261030",
