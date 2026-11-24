@@ -46,6 +46,7 @@ def mails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, typing.Any]]:
         subject: str,
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
     ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append(("error", text))

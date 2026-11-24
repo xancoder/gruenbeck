@@ -31,6 +31,9 @@ import dataclasses
 import datetime
 import enum
 import os
+import re
+import textwrap
+from html import escape
 
 from gruenbeck import analysis, config, storage
 
@@ -427,11 +430,70 @@ TABLE_RULE = TABLE_ROW.format(
 # a note about an incomplete period is indented to the column "Period"
 NOTE_INDENT = " " * 6
 NO_EARLIER_YEAR_TEXT = "No earlier year has values for this period."
-LEGEND_TEXT = (
-    "* includes interpolated days: a gap of up to {gap} days between measured days is\n"
-    "  filled with a straight line (whole liters), not stored in the data files.\n"
-    "Mean: liters per day with a value. Min and Max: measured days only."
+LEGEND_INTERPOLATED = (
+    "* includes interpolated days: a gap of up to {gap} days between measured days is filled"
+    " with a straight line (whole liters), not stored in the data files."
 )
+LEGEND_BASIS = "Mean: liters per day with a value. Min and Max: measured days only."
+
+
+@dataclasses.dataclass(frozen=True)
+class _Section:
+    """
+    a part of the statistics: the period of the run and the same period of earlier years
+
+    :param key: week, current-month, last-month, year or years (where charts belong)
+    :param periods: the period of the run first, then the earlier years; the earlier years
+        as a whole in the section "years"
+    :param daily: the week with every day
+    :param note: a note below the table; the only content if there are no periods
+    """
+
+    key: str
+    title: str
+    periods: tuple[Period, ...]
+    daily: Period | None = None
+    note: str | None = None
+
+
+def _sections(report: Report) -> list[_Section]:
+    """the sections of the data mail, in order; the same for the text and the HTML part"""
+    week = report.week.current
+    iso_year, iso_week, _ = week.start.isocalendar()
+    sections = [
+        _comparison_section(
+            "week", f"Last week: week {iso_week}/{iso_year}, {_range(week)}", report.week, week
+        )
+    ]
+    if report.current_month is not None:
+        title = f"Current month so far: {_range(report.current_month.current)}"
+        sections.append(_comparison_section("current-month", title, report.current_month))
+    title = f"Last month: {_range(report.last_month.current)}"
+    sections.append(_comparison_section("last-month", title, report.last_month))
+    if report.year_to_date is not None:
+        title = f"Year so far: {_range(report.year_to_date.current)}"
+        sections.append(_comparison_section("year", title, report.year_to_date))
+    sections.append(
+        _Section(
+            "years",
+            "Earlier years as a whole",
+            report.previous_years,
+            note=None if report.previous_years else "No earlier year has values.",
+        )
+    )
+    return sections
+
+
+def _comparison_section(
+    key: str, title: str, comparison: Comparison, daily: Period | None = None
+) -> _Section:
+    return _Section(
+        key,
+        title,
+        (comparison.current, *comparison.previous),
+        daily,
+        None if comparison.previous else NO_EARLIER_YEAR_TEXT,
+    )
 
 
 def format_text(report: Report) -> str:
@@ -443,72 +505,32 @@ def format_text(report: Report) -> str:
     years as a whole. A period with missing days or days without data is marked as
     incomplete with their number; a total with interpolated days has a `*`.
     """
-    shown: list[Period] = []
-    sections = [f"Water consumption in liters, run on {report.today.isoformat()}"]
-
-    week = report.week.current
-    iso_year, iso_week, _ = week.start.isocalendar()
-    sections.append(
-        _section(
-            f"Last week: week {iso_week}/{iso_year}, {_range(week)}",
-            report.week,
-            shown,
-            daily=week,
-        )
-    )
-    if report.current_month is not None:
-        sections.append(
-            _section(
-                f"Current month so far: {_range(report.current_month.current)}",
-                report.current_month,
-                shown,
-            )
-        )
-    sections.append(
-        _section(f"Last month: {_range(report.last_month.current)}", report.last_month, shown)
-    )
-    if report.year_to_date is not None:
-        sections.append(
-            _section(
-                f"Year so far: {_range(report.year_to_date.current)}", report.year_to_date, shown
-            )
-        )
-    sections.append(_previous_years_section(report.previous_years, shown))
-
-    legend = []
+    sections = _sections(report)
+    shown = [period for section in sections for period in section.periods]
+    parts = [f"Water consumption in liters, run on {report.today.isoformat()}"]
+    parts += [_text_section(section) for section in sections]
+    legend = [LEGEND_BASIS]
     if any(period.interpolated for period in shown):
-        legend.append(LEGEND_TEXT.format(gap=MAX_INTERPOLATED_GAP))
-    else:
-        legend.append(LEGEND_TEXT.splitlines()[-1])
-    return "\n\n".join([*sections, *legend]) + "\n"
+        legend.insert(0, textwrap.fill(_interpolated_legend(), 78, subsequent_indent="  "))
+    parts.append("\n".join(legend))
+    return "\n\n".join(parts) + "\n"
 
 
 def _range(period: Period) -> str:
     return f"{period.start.isoformat()} .. {period.end.isoformat()}"
 
 
-def _section(
-    title: str, comparison: Comparison, shown: list[Period], daily: Period | None = None
-) -> str:
-    lines = [title, ""]
-    if daily is not None:
-        lines += [_day_line(day) for day in daily.days]
+def _text_section(section: _Section) -> str:
+    lines = [section.title, ""]
+    if section.daily is not None:
+        lines += [_day_line(day) for day in section.daily.days]
         lines.append("")
-    periods = [comparison.current, *comparison.previous]
-    shown.extend(periods)
-    lines += _table(periods)
-    if not comparison.previous:
-        lines += ["", NO_EARLIER_YEAR_TEXT]
-    return "\n".join(lines)
-
-
-def _previous_years_section(years: tuple[Period, ...], shown: list[Period]) -> str:
-    lines = ["Earlier years as a whole", ""]
-    if years:
-        shown.extend(years)
-        lines += _table(years)
-    else:
-        lines.append("No earlier year has values.")
+    if section.periods:
+        lines += _table(section.periods)
+        if section.note:
+            lines += ["", section.note]
+    elif section.note:
+        lines.append(section.note)
     return "\n".join(lines)
 
 
@@ -565,3 +587,235 @@ def _incomplete_note(period: Period) -> str | None:
 
 def _days(count: int) -> str:
     return f"{count} day" if count == 1 else f"{count} days"
+
+
+def _interpolated_legend() -> str:
+    return LEGEND_INTERPOLATED.format(gap=MAX_INTERPOLATED_GAP)
+
+
+# --- HTML part of the data mail -------------------------------------------------------------
+
+HTML_WIDTH = 640
+HTML_FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+# The colors are inline, so a mail program without style sheets shows the light variant. The
+# style sheet only switches them for a dark color scheme; the charts follow the text color.
+HTML_DARK_STYLE = (
+    "@media (prefers-color-scheme: dark) {"
+    " .gb-page { background: #0b1220 !important; }"
+    " .gb-card { background: #111827 !important; color: #e5e7eb !important; }"
+    " .gb-muted { color: #9ca3af !important; }"
+    " .gb-warn { color: #fbbf24 !important; }"
+    " .gb-rule { border-color: #374151 !important; }"
+    " .gb-head { background: #1f2937 !important; }"
+    " }"
+)
+HTML_HEAD = (
+    '<meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    '<meta name="color-scheme" content="light dark">'
+    '<meta name="supported-color-schemes" content="light dark">'
+    "<title>Water consumption</title>"
+    f"<style>{HTML_DARK_STYLE}</style>"
+)
+NBSP = "\N{NO-BREAK SPACE}"
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+HTML_MUTED = "color:#6b7280;"
+HTML_RULE = "border-bottom:1px solid #e5e7eb;"
+# the charts (keys of gruenbeck.charts.CHARTS) before and after the tables of a section
+HTML_CHARTS_BEFORE = {"week": ("week",), "year": ("cumulative",)}
+HTML_CHARTS_AFTER = {"week": ("weekly",), "last-month": ("monthly",)}
+TABLE_COLUMNS = (
+    ("Year", "left"),
+    ("Period", "left"),
+    ("Total", "right"),
+    ("Mean", "right"),
+    ("Min", "right"),
+    ("Max", "right"),
+)
+
+
+def format_html(
+    report: Report,
+    charts: collections.abc.Mapping[str, str] | None = None,
+    notes: collections.abc.Sequence[str] = (),
+) -> str:
+    """
+    the statistics as HTML document for the data mail: the tables of format_text() and the charts
+
+    The layout is a table of at most HTML_WIDTH pixels with inline CSS, so it works in mail
+    programs; a style sheet in the head only adds the colors for a dark color scheme.
+    :param charts: the SVG of the charts by name (gruenbeck.charts.CHARTS), put in the section
+        they belong to; a chart that is not there is left out
+    :param notes: texts for the top of the page (e.g. that no data files are attached)
+    """
+    charts = charts or {}
+    sections = _sections(report)
+    shown = [period for section in sections for period in section.periods]
+    body = [_html_heading(f"in liters, run on {report.today.isoformat()}")]
+    body += [_html_paragraph(note) for note in notes]
+    for section in sections:
+        body.append(_html_section(section, charts))
+    legend = [LEGEND_BASIS]
+    if any(period.interpolated for period in shown):
+        legend.insert(0, _interpolated_legend())
+    body.append(
+        f'<p class="gb-muted" style="margin:20px 0 0;font-size:12px;{HTML_MUTED}">'
+        + "<br>".join(escape(line) for line in legend)
+        + "</p>"
+    )
+    return _html_document("".join(body))
+
+
+def format_failure_html(message: str, notes: collections.abc.Sequence[str] = ()) -> str:
+    """the HTML document of a data mail whose statistics could not be calculated"""
+    body = [_html_heading("statistics not available")]
+    body += [_html_paragraph(note) for note in notes]
+    body.append(_html_paragraph(message))
+    return _html_document("".join(body))
+
+
+def _html_document(body: str) -> str:
+    return (
+        "<!DOCTYPE html>\n"
+        f'<html lang="en"><head>{HTML_HEAD}</head>\n'
+        '<body class="gb-page" style="margin:0;padding:0;background:#f3f4f6;">'
+        '<table role="presentation" class="gb-page" width="100%" cellpadding="0"'
+        ' cellspacing="0" border="0" style="background:#f3f4f6;"><tr>'
+        '<td align="center" style="padding:16px 8px;">'
+        f'<table role="presentation" width="{HTML_WIDTH}" cellpadding="0" cellspacing="0"'
+        f' border="0" style="width:100%;max-width:{HTML_WIDTH}px;"><tr>'
+        '<td class="gb-card" style="padding:20px 16px;background:#ffffff;color:#1f2937;'
+        f"font-family:{HTML_FONT};font-size:14px;line-height:1.45;border-radius:12px;"
+        f'">{body}</td></tr></table></td></tr></table></body></html>\n'
+    )
+
+
+def _html_heading(subtitle: str) -> str:
+    return (
+        '<h1 style="margin:0;font-size:20px;line-height:1.3;">Water consumption</h1>'
+        f'<p class="gb-muted" style="margin:2px 0 12px;font-size:13px;{HTML_MUTED}">'
+        f"{escape(subtitle)}</p>"
+    )
+
+
+def _html_paragraph(text: str) -> str:
+    """a paragraph of plain text (a line break stays one)"""
+    return f'<p style="margin:8px 0;font-size:13px;">{escape(text).replace(chr(10), "<br>")}</p>'
+
+
+def _html_section(section: _Section, charts: collections.abc.Mapping[str, str]) -> str:
+    heading = '<h2 style="margin:24px 0 8px;font-size:16px;line-height:1.3;">'
+    # a date is not broken at its hyphens on a narrow screen
+    title = DATE.sub(
+        lambda date: f'<span style="white-space:nowrap;">{date[0]}</span>', escape(section.title)
+    )
+    parts = [f"{heading}{title}</h2>"]
+    parts += _html_charts(HTML_CHARTS_BEFORE.get(section.key, ()), charts)
+    if section.daily is not None:
+        parts.append(_html_days(section.daily))
+    if section.periods:
+        parts.append(_html_table(section.periods))
+    if section.note:
+        parts.append(
+            f'<p class="gb-muted" style="margin:6px 0;font-size:12px;{HTML_MUTED}">'
+            f"{escape(section.note)}</p>"
+        )
+    parts += _html_charts(HTML_CHARTS_AFTER.get(section.key, ()), charts)
+    return "".join(parts)
+
+
+def _html_charts(
+    names: collections.abc.Iterable[str], charts: collections.abc.Mapping[str, str]
+) -> list[str]:
+    """the charts of these names that exist; the SVG is made by gruenbeck.charts"""
+    return [
+        f'<div style="margin:8px 0 12px;">{charts[name]}</div>' for name in names if name in charts
+    ]
+
+
+def _html_days(week: Period) -> str:
+    heads = []
+    cells = []
+    for day in week.days:
+        name = WEEKDAYS[day.date.weekday()]
+        heads.append(
+            f'<th class="gb-head gb-rule" align="center" style="{_th_style("center")}">'
+            f"{name}<br>{_muted(f'{day.date:%m-%d}', weight=400)}</th>"
+        )
+        if day.liters is None:
+            reason = "missing" if day.status is DayStatus.MISSING else "no data"
+            value = f"\N{EN DASH}<br>{_muted(reason, size=11)}"
+        else:
+            value = f"{day.liters}{'*' if day.status is DayStatus.INTERPOLATED else ''}"
+        cells.append(
+            f'<td class="gb-rule" align="center" style="{_td_style("center")}">{value}</td>'
+        )
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0"'
+        ' style="border-collapse:collapse;margin:4px 0 12px;table-layout:fixed;">'
+        f"<tr>{''.join(heads)}</tr><tr>{''.join(cells)}</tr></table>"
+    )
+
+
+def _html_table(periods: collections.abc.Sequence[Period]) -> str:
+    heads = "".join(
+        f'<th class="gb-head gb-rule" align="{align}" style="{_th_style(align)}">{name}</th>'
+        for name, align in TABLE_COLUMNS
+    )
+    rows = []
+    for index, period in enumerate(periods):
+        note = _incomplete_note(period)
+        # the period of the run is bold; the note of an incomplete one sits right below it
+        weight = "font-weight:600;" if index == 0 else ""
+        rule = "" if note else HTML_RULE
+        total = mean = "\N{EN DASH}"
+        if period.total is not None and period.mean is not None:
+            total = f"{period.total}{'*' if period.interpolated else ''}"
+            mean = f"{period.mean:.0f}"
+        values = [
+            str(period.year),
+            f"{period.start:%m-%d}{NBSP}\N{EN DASH}{NBSP}{period.end:%m-%d}",
+            total,
+            mean,
+            _html_extreme(period.minimum),
+            _html_extreme(period.maximum),
+        ]
+        cells = "".join(
+            f'<td class="gb-rule" align="{align}" style="{_td_style(align)}{weight}{rule}">'
+            f"{value}</td>"
+            for (_, align), value in zip(TABLE_COLUMNS, values, strict=True)
+        )
+        rows.append(f"<tr>{cells}</tr>")
+        if note:
+            rows.append(
+                f'<tr><td class="gb-rule gb-warn" colspan="{len(TABLE_COLUMNS)}"'
+                f' style="padding:0 4px 6px;font-size:12px;color:#b45309;{HTML_RULE}">'
+                f"{escape(note)}</td></tr>"
+            )
+    return (
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0"'
+        f' style="border-collapse:collapse;margin:4px 0;"><tr>{heads}</tr>{"".join(rows)}</table>'
+    )
+
+
+def _html_extreme(day: Day | None) -> str:
+    if day is None or day.liters is None:
+        return "\N{EN DASH}"
+    return f"{day.liters} {_muted(f'{day.date:%m-%d}', size=11)}"
+
+
+def _muted(text: str, size: int | None = None, weight: int | None = None) -> str:
+    """text (already escaped) in the muted color"""
+    style = (f"font-size:{size}px;" if size else "") + (f"font-weight:{weight};" if weight else "")
+    return f'<span class="gb-muted" style="{style}{HTML_MUTED}">{text}</span>'
+
+
+def _th_style(align: str) -> str:
+    return (
+        f"padding:6px 4px;font-size:12px;font-weight:600;text-align:{align};"
+        f"background:#f9fafb;{HTML_RULE}"
+    )
+
+
+def _td_style(align: str) -> str:
+    return f"padding:6px 4px;font-size:13px;line-height:1.3;text-align:{align};{HTML_RULE}"

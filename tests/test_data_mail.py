@@ -1,23 +1,27 @@
 """
-the data mail with the statistics (P007-S2): text and attachments over a fake SMTP server,
-and the run when the statistics cannot be calculated
+the data mail with the statistics (P007-S2, P007-S4): text, HTML with the charts and
+attachments over a fake SMTP server, and the run when a part of it cannot be made
 """
 
+import collections.abc
 import datetime
 import email.message
 import logging
 import pathlib
+import re
 import typing
 
 import pytest
 
-from gruenbeck import cli, config, report, storage
+from gruenbeck import charts, cli, config, report, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
 
 TODAY = datetime.date(2026, 11, 23)
 STATISTICS_FAILED = "The statistics could not be calculated: "
+# the charts in the order of the HTML
+CHART_CLASSES = ["gb-week", "gb-weekly", "gb-monthly", "gb-cumulative"]
 
 
 def write_year(
@@ -44,6 +48,17 @@ def sent(smtp: "FakeSMTP") -> tuple[str, list[str]]:
     body = message.get_body(preferencelist=("plain",))
     assert isinstance(body, email.message.EmailMessage)
     return body.get_content(), [part.get_filename() or "" for part in message.iter_attachments()]
+
+
+def html_of(smtp: "FakeSMTP") -> str:
+    """the HTML part of the only mail sent"""
+    (message,) = smtp.messages()
+    body = message.get_body(preferencelist=("html",))
+    assert isinstance(body, email.message.EmailMessage)
+    assert body.get_content_type() == "text/html"
+    content = body.get_content()
+    assert isinstance(content, str)
+    return content
 
 
 @pytest.fixture
@@ -209,3 +224,235 @@ def test_run_calculates_the_statistics_for_the_day_of_the_run(
     text, _ = sent(smtp)
     assert "Water consumption in liters, run on 2026-11-26\n" in text
     assert "Last week: week 47/2026, 2026-11-16 .. 2026-11-22" in text.splitlines()
+
+
+# --- HTML part and charts (P007-S4) -----------------------------------------------------
+
+
+def test_data_mail_is_text_and_html_with_the_four_charts_and_the_csv_files(
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    prefix = loaded_config.data_file.prefix
+    write_year(loaded_config, 2025, week_rows(50, 50, 50, 50, 50, 50, 50, first="2025-11-17"))
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "multipart/mixed"
+    alternative, *attachments = message.iter_parts()
+    assert alternative.get_content_type() == "multipart/alternative"
+    assert [part.get_content_type() for part in alternative.iter_parts()] == [
+        "text/plain",
+        "text/html",
+    ]
+    text, document = (part.get_content() for part in alternative.iter_parts())
+    # the text as before; the HTML has the same tables and the four charts
+    assert text.startswith("your stored data\n\nWater consumption in liters, run on 2026-11-23\n")
+    assert "2026  11-16..11-22     1100     157     90 11-21    300 11-20" in text.splitlines()
+    assert document.startswith("<!DOCTYPE html>")
+    assert re.findall(r"<td [^>]*>1100</td>", document)
+    assert re.findall(r'class="gb-chart (gb-\w+)"', document) == CHART_CLASSES
+    assert document.count("<svg") == document.count("</svg>") == 4
+    # no external resource: the only addresses are the namespaces of the four SVGs
+    assert document.count("http") == 4
+    assert [part.get_filename() for part in attachments] == [
+        f"{prefix}_2025.csv",
+        f"{prefix}_2026.csv",
+    ]
+    assert warnings() == []
+
+
+def test_failed_statistics_give_a_note_in_the_html_too(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    def fail(
+        data_path: pathlib.Path, data_file: config.DataFile, today: datetime.date
+    ) -> typing.NoReturn:
+        raise storage.StorageError('bad <file> & "x"')
+
+    monkeypatch.setattr(report, "build_report", fail)
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "multipart/mixed"
+    text, _ = (part.get_content() for part in next(message.iter_parts()).iter_parts())
+    document = html_of(smtp)
+    failed = f'{STATISTICS_FAILED}bad <file> & "x"\nDetails are in the log file.'
+    assert text == f"your stored data\n\n{failed}\n"
+    # in the HTML the special characters of the message are escaped, and there is no statistics
+    assert "bad &lt;file&gt; &amp; &quot;x&quot;<br>Details are in the log file." in document
+    assert "<file>" not in document
+    assert "<svg" not in document
+    assert "<h2" not in document
+    assert len(list(message.iter_attachments())) == 1
+    (record,) = warnings()
+    assert record.getMessage() == 'statistics for the data mail failed: bad <file> & "x"'
+    assert record.exc_info is not None
+    assert record.exc_info[0] is storage.StorageError
+
+
+def test_special_characters_of_a_data_file_name_are_escaped_in_the_html(
+    smtp: "FakeSMTP",
+    tmp_path: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    config_data["dataFile"]["prefix"] = "w&<b>"
+    configuration = config.load_configuration(write_config(config_data))
+    write_year(configuration, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+    bad_file = storage.get_data_file(configuration.data_path, "w&<b>", 2024)
+    bad_file.write_text("day,litres\n2024-11-18,5\n", encoding="utf-8")
+
+    assert cli.get_mail(configuration, configuration.data_path, TODAY) is True
+
+    text, _ = sent(smtp)
+    document = html_of(smtp)
+    assert f"{bad_file} has no column" in text
+    assert str(bad_file).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") in document
+    assert "w&<b>" not in document
+
+
+def test_failed_chart_is_left_out_of_the_html(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    def fail(stats: report.Report) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(charts.CHARTS, "monthly", fail)
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    text, _ = sent(smtp)
+    document = html_of(smtp)
+    assert re.findall(r'class="gb-chart (gb-\w+)"', document) == [
+        "gb-week",
+        "gb-weekly",
+        "gb-cumulative",
+    ]
+    # the tables and the text are complete
+    assert "Last month: " in document
+    assert "Water consumption in liters" in text
+    assert STATISTICS_FAILED not in text
+    (record,) = warnings()
+    assert record.getMessage() == "chart 'monthly' for the data mail failed: boom"
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+
+
+def test_without_any_chart_the_html_has_the_tables(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    def fail(stats: report.Report) -> str:
+        raise ValueError("no chart")
+
+    for name in list(charts.CHARTS):
+        monkeypatch.setitem(charts.CHARTS, name, fail)
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    document = html_of(smtp)
+    assert "<svg" not in document
+    assert re.findall(r"<td [^>]*>1100</td>", document)
+    assert [record.getMessage() for record in warnings()] == [
+        f"chart {name!r} for the data mail failed: no chart" for name in CHART_NAMES
+    ]
+
+
+CHART_NAMES = ("week", "monthly", "cumulative", "weekly")
+
+
+def test_failed_html_leaves_the_mail_with_the_text(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    def fail(*arguments: object) -> str:
+        raise RuntimeError("no html")
+
+    monkeypatch.setattr(report, "format_html", fail)
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    (message,) = smtp.messages()
+    # the text and the attachment, without a multipart/alternative
+    assert message.get_content_type() == "multipart/mixed"
+    first, attachment = message.iter_parts()
+    assert first.get_content_type() == "text/plain"
+    assert first.get_content().startswith("your stored data\n\nWater consumption in liters")
+    assert attachment.get_filename() == f"{loaded_config.data_file.prefix}_2026.csv"
+    (record,) = warnings()
+    assert record.getMessage() == "HTML part of the data mail failed: no html"
+    assert record.exc_info is not None
+
+
+def test_failed_statistics_and_failed_note_leave_the_note_in_the_text(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    def fail(*arguments: object) -> typing.NoReturn:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(report, "build_report", fail)
+    monkeypatch.setattr(report, "format_failure_html", fail)
+    storage.check_data_folder(loaded_config.data_path)
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    (message,) = smtp.messages()
+    # no csv file and no HTML: a plain text mail
+    assert message.get_content_type() == "text/plain"
+    assert message.get_content() == (
+        "your stored data\n\nNo data files found to attach.\n\n"
+        f"{STATISTICS_FAILED}boom\nDetails are in the log file.\n"
+    )
+    assert [record.getMessage() for record in warnings()] == [
+        "statistics for the data mail failed: boom",
+        "HTML part of the data mail failed: boom",
+    ]
+
+
+def test_run_with_a_failed_chart_still_exits_with_0(
+    monkeypatch: pytest.MonkeyPatch, smtp: "FakeSMTP", loaded_config: config.Configuration
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+
+    def fail(stats: report.Report) -> str:
+        raise RuntimeError("boom")
+
+    monkeypatch.setitem(charts.CHARTS, "cumulative", fail)
+    monkeypatch.setattr(cli, "collect_and_store", lambda config: loaded_config.data_path)
+    monkeypatch.setattr(
+        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+    )
+
+    assert cli.main(str(loaded_config.file)) == 0
+
+    assert re.findall(r'class="gb-chart (gb-\w+)"', html_of(smtp)) == [
+        "gb-week",
+        "gb-weekly",
+        "gb-monthly",
+    ]

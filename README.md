@@ -141,7 +141,9 @@ Warnings and errors are written to the rotating file `./log/gruenbeck_error.log`
 
 ### data mail
 
-Every run ends with the data mail to the `recipients`: the subject is `mail.subject`, every CSV file directly in the data folder is attached, and the text holds the statistics of the stored consumption. They are calculated after the yearly files have been written, so they include the values of the run. All figures are whole liters, the text is plain ASCII with tables of a fixed column width (at most 78 characters per line).
+Every run ends with the data mail to the `recipients`: the subject is `mail.subject`, every CSV file directly in the data folder is attached, and the mail holds the statistics of the stored consumption as text and as HTML. They are calculated after the yearly files have been written, so they include the values of the run. All figures are whole liters.
+
+The mail is `multipart/alternative` (text and HTML, the mail program shows the HTML) inside `multipart/mixed` with the CSV files. The **text** is plain ASCII with tables of a fixed column width (at most 78 characters per line). The **HTML** has the same tables, a table layout of at most 640 px with inline CSS that fits a phone, and four charts. There is no configuration key for it: the data mail always has both parts.
 
 The statistics cover, for the day of the run:
 
@@ -169,7 +171,28 @@ A day is **missing** if no value is stored for it (no row, or a value that is no
 - A gap of up to 3 missing days with a measured day on both sides is **interpolated**: a straight line between the two values, in whole liters. The value counts for the total and the mean, is marked with `*` (in the list of days and at the total of the period) and is not used for the minimum and maximum, which are measured days only. Interpolated values exist for the statistics only; they are never written to the data files.
 - Longer gaps and gaps at the edge of the data (for example no value for yesterday, which has no measured day after it) stay missing: total and mean cover the days with a value, and the period is marked below its row as `incomplete: 4 days missing` and, if it starts before the first stored day, `n days without data`.
 
-If the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`), the data mail still goes out, with a note instead of the statistics, and the log file gets a warning with the traceback. The run is not a failure then: the exit code stays `0`.
+#### charts
+
+The HTML part has four charts, drawn as SVG directly in the HTML (no image, script, font or other external resource, and no extra package):
+
+| chart | content |
+|-------|---------|
+| Daily consumption | the liters of every day of the last week as bars |
+| Weekly consumption | the liters of the last 52 calendar weeks as a line with points |
+| Monthly consumption by year | grouped bars per month for the current year and up to 3 earlier years |
+| Cumulative consumption | a line per year from 1 January, with the day of the run marked |
+
+The current year has the strong color, the earlier years muted ones, the same color for a year in every chart. Text and axes take the text color of the mail, so the charts are readable on a light and on a dark background (the HTML switches its own colors with `prefers-color-scheme`). Marks: an interpolated day is a light bar with `*` (a ring in the lines), a missing day is a gap with a dash, a month with missing days is only an outline, a week with missing days is a hollow point.
+
+**Gmail and Outlook do not show SVG in mails.** There the charts are simply not displayed, and the tables of the HTML part (or the text) still hold every figure. Thunderbird and Apple Mail show the charts.
+
+#### if a part cannot be made
+
+The data is stored before the mail is made, so the mail goes out whatever happens to its parts; the exit code stays `0` and the log file gets a warning with the traceback:
+
+- the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`): a note takes the place of the statistics in the text and in the HTML, without charts
+- a chart cannot be drawn: the HTML is made without that chart
+- the HTML cannot be made: the mail has the text only
 
 ### analysis
 
@@ -187,8 +210,9 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/config.py` | reading the configuration file |
 | `src/gruenbeck/device.py` | web server of the soft water system: parameter file, request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |
-| `src/gruenbeck/mail.py` | data mail and error mail |
-| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text) |
+| `src/gruenbeck/mail.py` | data mail (text, HTML, CSV attachments) and error mail |
+| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text and HTML tables) |
+| `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
 | `deploy/systemd/` | systemd units and their setup |

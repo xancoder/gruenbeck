@@ -7,15 +7,16 @@ the logging handlers.
 """
 
 import argparse
+import dataclasses
 import datetime
 import logging.handlers
 import os
 import pathlib
 import sys
 import traceback
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
-from gruenbeck import analysis, device, errors, mail, report, storage
+from gruenbeck import analysis, charts, device, errors, mail, report, storage
 from gruenbeck import config as configuration
 
 # the handlers of setup_logging() sit on the logger of the package, so they also get the
@@ -294,17 +295,16 @@ def get_mail(
     config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
 ) -> bool:
     """
-    send the csv files of the data folder as data mail, with the statistics as text
+    send the csv files of the data folder as data mail, with the statistics as text and HTML
     :param today: day of the run, for the statistics
     :return: True if the mail was sent; a failure is logged and gives False
     """
     try:
         files = storage.list_csv_files(data_path)
-        parts = [DATA_MAIL_TEXT]
-        if not files:
-            parts.append(NO_DATA_FILES_TEXT)
-        parts.append(get_statistics_text(config, data_path, today))
-        mail.send_mail(config.mail, config.mail.subject, "\n\n".join(parts), files)
+        notes = [] if files else [NO_DATA_FILES_TEXT]
+        statistics = get_statistics(config, data_path, today, notes)
+        text = "\n\n".join([DATA_MAIL_TEXT, *notes, statistics.text])
+        mail.send_mail(config.mail, config.mail.subject, text, files, html=statistics.html)
         logger.info("mail sent successfully")
         return True
     except errors.GruenbeckError as error:
@@ -315,21 +315,56 @@ def get_mail(
         return False
 
 
-def get_statistics_text(
-    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
-) -> str:
-    """
-    the statistics of the stored data as text for the data mail
+@dataclasses.dataclass(frozen=True)
+class Statistics:
+    """the statistics for the data mail: the text, and the HTML document (None if not made)"""
 
-    The data is stored already and the data mail has to go out, so a failure of the
-    statistics (an unusable data file, a bug) only gives a note instead of the statistics,
-    and a warning with the traceback in the log. It never fails the run.
+    text: str
+    html: str | None
+
+
+def get_statistics(
+    config: configuration.Configuration,
+    data_path: pathlib.Path,
+    today: datetime.date,
+    notes: Sequence[str] = (),
+) -> Statistics:
+    """
+    the statistics of the stored data for the data mail, as text and as HTML with the charts
+
+    The data is stored already and the data mail has to go out, so nothing here fails the
+    run; every failure is logged as a warning with its traceback:
+
+    - the statistics cannot be calculated (an unusable data file, a bug): a note takes
+      their place in the text and in the HTML
+    - a chart cannot be drawn: the HTML is made without it
+    - the HTML cannot be made: the mail has the text only
+
+    :param notes: texts for the top of the HTML (the text gets them from the caller)
     """
     try:
-        return report.format_text(report.build_report(data_path, config.data_file, today))
+        stats = report.build_report(data_path, config.data_file, today)
+        text = report.format_text(stats)
     except Exception as error:
         logger.warning("statistics for the data mail failed: %s", error, exc_info=True)
-        return STATISTICS_FAILED_TEXT.format(error=error)
+        note = STATISTICS_FAILED_TEXT.format(error=error)
+        return Statistics(note, _make_html(lambda: report.format_failure_html(note, notes)))
+
+    svgs = {}
+    for name, chart in charts.CHARTS.items():
+        try:
+            svgs[name] = chart(stats)
+        except Exception as error:
+            logger.warning("chart %r for the data mail failed: %s", name, error, exc_info=True)
+    return Statistics(text, _make_html(lambda: report.format_html(stats, svgs, notes)))
+
+
+def _make_html(build: Callable[[], str]) -> str | None:
+    try:
+        return build()
+    except Exception as error:
+        logger.warning("HTML part of the data mail failed: %s", error, exc_info=True)
+        return None
 
 
 def collect(argv: Sequence[str] | None = None) -> int:
