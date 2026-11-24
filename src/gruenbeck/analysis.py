@@ -1,11 +1,9 @@
 """monthly statistics of the collected water consumption (extra "analysis")"""
 
 import os
-import pathlib
-import re
 
 from gruenbeck import config as configuration
-from gruenbeck import errors
+from gruenbeck import errors, storage
 
 print_pattern_headline = "{:<4} {:<5} {:<4} {:<3} {:<3} {:<3} {:<5}"
 print_pattern = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
@@ -13,20 +11,6 @@ print_pattern = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
 
 class AnalysisError(errors.GruenbeckError):
     """nothing to analyse"""
-
-
-def get_data_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:
-    """
-    find the yearly data files written by the data collector
-    :param data_path: data folder (dataPath)
-    :param prefix: dataFile.prefix
-    :return: sorted list of pathlib.Path of '<prefix>_<year>.csv' in the data folder
-    """
-    data_path = pathlib.Path(data_path)
-    year_file = re.compile(rf"{re.escape(prefix)}_\d{{4}}\.csv")
-    return sorted(
-        input_file for input_file in data_path.glob("*.csv") if year_file.fullmatch(input_file.name)
-    )
 
 
 def main(config_file: str | os.PathLike[str]) -> None:
@@ -38,7 +22,7 @@ def main(config_file: str | os.PathLike[str]) -> None:
     # FileNotFoundError and ConfigurationError go to the caller (gruenbeck.cli.analyse)
     config = configuration.load_configuration(config_file)
     data_file = config.data_file
-    data_files = get_data_files(config.data_path, data_file.prefix)
+    data_files = storage.list_year_files(config.data_path, data_file.prefix)
     if not data_files:
         raise AnalysisError(f"no data files '{data_file.prefix}_<year>.csv' in {config.data_path}")
 

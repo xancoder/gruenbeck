@@ -35,7 +35,7 @@ import re
 import textwrap
 from html import escape
 
-from gruenbeck import analysis, config, storage
+from gruenbeck import config, storage
 
 ONE_DAY = datetime.timedelta(days=1)
 ONE_WEEK = datetime.timedelta(days=7)
@@ -178,7 +178,7 @@ def read_stored_days(
     """
     stored: dict[datetime.date, int | str] = {}
     # a missing data folder is no file either
-    for file in analysis.get_data_files(data_path, data_file.prefix):
+    for file in storage.list_year_files(data_path, data_file.prefix):
         rows = storage.read_data_file(file, data_file.fieldnames, data_file.date_pattern)
         for text, value in rows.items():
             stored[storage.date_of(text, data_file.date_pattern)] = value

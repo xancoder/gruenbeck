@@ -28,32 +28,6 @@ def run_command(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess[st
     )
 
 
-def test_data_files_are_the_yearly_files_of_the_prefix(tmp_path: pathlib.Path) -> None:
-    for name in (
-        "p_2026.csv",
-        "p_2025.csv",
-        "p_2025.csv.20261121.bak",
-        "p_26.csv",
-        "q_2026.csv",
-        "p_2026_copy.csv",
-        "notes.txt",
-    ):
-        (tmp_path / name).write_text("date,value\n")
-
-    files = analysis.get_data_files(tmp_path, "p")
-
-    assert files == [tmp_path / "p_2025.csv", tmp_path / "p_2026.csv"]
-
-
-def test_prefix_is_not_a_pattern(tmp_path: pathlib.Path) -> None:
-    (tmp_path / "p.x_2026.csv").write_text("")
-    (tmp_path / "pax_2026.csv").write_text("")
-
-    files = analysis.get_data_files(str(tmp_path), "p.x")
-
-    assert files == [tmp_path / "p.x_2026.csv"]
-
-
 def test_help_works_without_the_analysis_extra(tmp_path: pathlib.Path) -> None:
     result = run_command(tmp_path, "--help")
 

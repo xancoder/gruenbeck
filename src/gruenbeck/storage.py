@@ -6,6 +6,7 @@ import datetime
 import logging
 import os
 import pathlib
+import re
 import shutil
 
 from gruenbeck import config, errors
@@ -43,6 +44,20 @@ def check_data_folder(data_folder: str | os.PathLike[str]) -> pathlib.Path:
 def get_data_file(data_path: str | os.PathLike[str], prefix: str, year: int | str) -> pathlib.Path:
     """path of the yearly data file"""
     return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
+
+
+def list_year_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:
+    """
+    find the yearly data files written by the data collector
+    :param data_path: data folder (dataPath)
+    :param prefix: dataFile.prefix
+    :return: sorted list of pathlib.Path of '<prefix>_<year>.csv' in the data folder
+    """
+    data_path = pathlib.Path(data_path)
+    year_file = re.compile(rf"{re.escape(prefix)}_\d{{4}}\.csv")
+    return sorted(
+        input_file for input_file in data_path.glob("*.csv") if year_file.fullmatch(input_file.name)
+    )
 
 
 def list_csv_files(data_folder: pathlib.Path) -> list[pathlib.Path]:
