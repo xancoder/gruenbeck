@@ -1,5 +1,6 @@
 """yearly data files <prefix>_<year>.csv in the data folder"""
 
+import collections.abc
 import csv
 import datetime
 import logging
@@ -27,10 +28,10 @@ def date_of(text: str, date_pattern: str) -> datetime.date:
     return day
 
 
-def check_data_folder(data_folder: str) -> pathlib.Path:
+def check_data_folder(data_folder: str | os.PathLike[str]) -> pathlib.Path:
     """
     create an output folder if not exists
-    :param data_folder: string of folder to store data
+    :param data_folder: folder to store data
     :return: object: pathlib.Path of the given string
     """
     path_object = pathlib.Path(data_folder)
@@ -39,7 +40,7 @@ def check_data_folder(data_folder: str) -> pathlib.Path:
     return path_object
 
 
-def get_data_file(data_path, prefix: str, year) -> pathlib.Path:
+def get_data_file(data_path: str | os.PathLike[str], prefix: str, year: int | str) -> pathlib.Path:
     """path of the yearly data file"""
     return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
 
@@ -54,7 +55,9 @@ def list_csv_files(data_folder: pathlib.Path) -> list[pathlib.Path]:
     return sorted(data_folder.glob("*.csv"))
 
 
-def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -> dict:
+def read_data_file(
+    file_obj: pathlib.Path, fieldnames: config.FieldNames, date_pattern: str
+) -> dict[str, int | str]:
     """
     stored values of one yearly file
     :param fieldnames: column names of date and value (dataFile.fieldnames)
@@ -62,7 +65,7 @@ def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -
     :return: dictionary of date text and value (int if numeric), empty without file
     :raises StorageError: a column is missing, or a date does not match date_pattern
     """
-    data = {}
+    data: dict[str, int | str] = {}
     if file_obj.exists():
         with file_obj.open(mode="r", newline="", encoding="utf-8") as csv_file:
             reader = csv.DictReader(csv_file)
@@ -89,7 +92,10 @@ def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -
 
 
 def write_data(
-    file_object: pathlib.Path, fieldnames: config.FieldNames, data: dict, date_pattern: str
+    file_object: pathlib.Path,
+    fieldnames: config.FieldNames,
+    data: collections.abc.Mapping[str, int | str],
+    date_pattern: str,
 ) -> None:
     """
     write data to csv file, sorted by date

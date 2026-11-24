@@ -1,10 +1,14 @@
+import collections.abc
 import copy
 import email
+import email.message
 import email.policy
 import json
 import logging
+import os
 import pathlib
 import smtplib
+import ssl
 import time
 import typing
 
@@ -25,13 +29,13 @@ def repo_root() -> pathlib.Path:
 
 
 @pytest.fixture(scope="session")
-def config_example_file(repo_root) -> pathlib.Path:
+def config_example_file(repo_root: pathlib.Path) -> pathlib.Path:
     """example configuration; the real src/config.json is not versioned"""
     return repo_root / "src" / "config.example.json"
 
 
 @pytest.fixture(scope="session")
-def parameter_file(repo_root) -> pathlib.Path:
+def parameter_file(repo_root: pathlib.Path) -> pathlib.Path:
     return repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
 
 
@@ -48,7 +52,7 @@ MAIL_SECTION = {
 
 
 @pytest.fixture
-def config_data(tmp_path, parameter_file) -> dict:
+def config_data(tmp_path: pathlib.Path, parameter_file: pathlib.Path) -> dict[str, typing.Any]:
     """a complete and valid configuration as in the JSON file; data folder in tmp_path"""
     return {
         "dataFile": {
@@ -64,10 +68,12 @@ def config_data(tmp_path, parameter_file) -> dict:
 
 
 @pytest.fixture
-def write_config(tmp_path):
+def write_config(tmp_path: pathlib.Path) -> collections.abc.Callable[..., pathlib.Path]:
     """writes a configuration (dictionary) as JSON; returns the path of the file"""
 
-    def write(data, path=None) -> pathlib.Path:
+    def write(
+        data: dict[str, typing.Any], path: str | os.PathLike[str] | None = None
+    ) -> pathlib.Path:
         path = pathlib.Path(path) if path is not None else tmp_path / "config.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data), encoding="utf-8")
@@ -77,7 +83,9 @@ def write_config(tmp_path):
 
 
 @pytest.fixture
-def loaded_config(config_data, write_config) -> config.Configuration:
+def loaded_config(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> config.Configuration:
     """config_data, loaded and checked"""
     return config.load_configuration(write_config(config_data))
 
@@ -94,21 +102,21 @@ class FakeSMTP:
     serializes the mail, so the recorded sendmail() call is what a server would get.
     """
 
-    def __init__(self):
-        self.connections: list[dict] = []
+    def __init__(self) -> None:
+        self.connections: list[dict[str, typing.Any]] = []
         self.errors: list[tuple[str, BaseException]] = []
 
-    def step(self, name):
+    def step(self, name: str) -> None:
         if self.errors and self.errors[0][0] == name:
             raise self.errors.pop(0)[1]
 
-    def factory(self, kind):
+    def factory(self, kind: str) -> type:
         fake = self
 
         class Server:
-            def __init__(self, host, port, **kwargs):
+            def __init__(self, host: str, port: int, **kwargs: typing.Any) -> None:
                 fake.step("connect")
-                self.calls: list[tuple] = []
+                self.calls: list[tuple[typing.Any, ...]] = []
                 fake.connections.append(
                     {
                         "kind": kind,
@@ -119,37 +127,49 @@ class FakeSMTP:
                     }
                 )
 
-            def __enter__(self):
+            def __enter__(self) -> typing.Self:
                 return self
 
-            def __exit__(self, *exc_info):
+            def __exit__(self, *exc_info: object) -> typing.Literal[False]:
                 self.calls.append(("exit",))
                 return False
 
-            def starttls(self, context=None):
+            def starttls(self, context: ssl.SSLContext | None = None) -> None:
                 fake.step("starttls")
                 self.calls.append(("starttls", context))
 
-            def login(self, user, password):
+            def login(self, user: str, password: str) -> None:
                 fake.step("login")
                 self.calls.append(("login", user, password))
 
-            def send_message(self, msg, from_addr=None, to_addrs=None):
+            def send_message(
+                self,
+                msg: email.message.EmailMessage,
+                from_addr: str | None = None,
+                to_addrs: list[str] | None = None,
+            ) -> typing.Any:
                 self.calls.append(("send_message", msg))
                 return REAL_SEND_MESSAGE(self, msg, from_addr, to_addrs)
 
             # used by smtplib.SMTP.send_message(): no EHLO, no SMTPUTF8 on the fake server
-            def ehlo_or_helo_if_needed(self):
+            def ehlo_or_helo_if_needed(self) -> None:
                 pass
 
-            def has_extn(self, opt):
+            def has_extn(self, opt: str) -> bool:
                 return False
 
-            def sendmail(self, from_addr, to_addrs, msg, mail_options=(), rcpt_options=()):
+            def sendmail(
+                self,
+                from_addr: str,
+                to_addrs: list[str],
+                msg: bytes,
+                mail_options: collections.abc.Sequence[str] = (),
+                rcpt_options: collections.abc.Sequence[str] = (),
+            ) -> None:
                 fake.step("sendmail")
                 self.calls.append(("sendmail", from_addr, to_addrs, msg))
 
-            def quit(self):
+            def quit(self) -> None:
                 fake.step("quit")
                 self.calls.append(("quit",))
 
@@ -164,7 +184,7 @@ class FakeSMTP:
             if call[0] == "sendmail"
         ]
 
-    def messages(self):
+    def messages(self) -> list[email.message.EmailMessage]:
         """sent mails, parsed (the line ends CRLF of the transmission are read as LF)"""
         return [
             email.message_from_bytes(raw.replace(b"\r\n", b"\n"), policy=email.policy.default)
@@ -173,7 +193,7 @@ class FakeSMTP:
 
 
 @pytest.fixture(autouse=True)
-def restore_package_logger():
+def restore_package_logger() -> collections.abc.Iterator[None]:
     """removes the handlers and the level that setup_logging() gives the package logger"""
     logger = logging.getLogger("gruenbeck")
     level, handlers = logger.level, list(logger.handlers)
@@ -185,7 +205,7 @@ def restore_package_logger():
 
 
 @pytest.fixture
-def smtp(monkeypatch):
+def smtp(monkeypatch: pytest.MonkeyPatch) -> FakeSMTP:
     """fake SMTP server in place of smtplib.SMTP and smtplib.SMTP_SSL"""
     fake = FakeSMTP()
     monkeypatch.setattr(smtplib, "SMTP", fake.factory("SMTP"))
@@ -194,7 +214,7 @@ def smtp(monkeypatch):
 
 
 @pytest.fixture
-def sleeps(monkeypatch):
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """records the waiting time between attempts (time.sleep) instead of waiting"""
     waited: list[float] = []
     monkeypatch.setattr(time, "sleep", waited.append)

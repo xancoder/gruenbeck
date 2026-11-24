@@ -1,11 +1,14 @@
+import collections.abc
 import copy
 import csv
 import datetime
 import logging
 import pathlib
+import typing
 
 import pytest
 
+import gruenbeck.config
 from gruenbeck import cli, device, mail
 
 PREFIX = "gruenbeck_water_consumption"
@@ -13,16 +16,37 @@ TODAY = datetime.date(2026, 11, 23)
 PARAMETERS = [f"D_Y_2_{n}" for n in range(1, 15)]
 
 
-def day(text):
+class Run(typing.Protocol):
+    """the fixture run: main() with a fake device response; returns the exit code"""
+
+    # the parameters of every device request
+    requests: list[list[str]]
+
+    def __call__(
+        self,
+        response: collections.abc.Mapping[str, str | None],
+        today: datetime.date = ...,
+        local_time: str = ...,
+        device_clock: str | None = ...,
+        **data_file: typing.Any,
+    ) -> int: ...
+
+
+def day(text: str) -> datetime.date:
     return datetime.date.fromisoformat(text)
 
 
 @pytest.fixture
-def mails(monkeypatch):
+def mails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, typing.Any]]:
     """records data and error mails instead of sending them"""
-    sent = []
+    sent: list[tuple[str, typing.Any]] = []
 
-    def record(settings, subject, text, attachments=()):
+    def record(
+        settings: gruenbeck.config.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append(("error", text))
         else:
@@ -36,7 +60,7 @@ def mails(monkeypatch):
 # --- mapping of the parameter name to the day ---------------------------------------
 
 
-def test_parameter_name_gives_the_day():
+def test_parameter_name_gives_the_day() -> None:
     response = {name: str(100 + n) for n, name in enumerate(PARAMETERS, start=1)}
 
     result = device.add_timestamp_as_key_device_data(response, today=TODAY)
@@ -46,7 +70,7 @@ def test_parameter_name_gives_the_day():
     assert result[day("2026-11-09")] == "114"  # D_Y_2_14: 14 days ago
 
 
-def test_order_of_the_response_does_not_matter():
+def test_order_of_the_response_does_not_matter() -> None:
     in_order = {name: str(n) for n, name in enumerate(PARAMETERS, start=1)}
     shuffled = {name: in_order[name] for name in [*PARAMETERS[7:], *PARAMETERS[:7]]}
     reversed_order = dict(reversed(list(in_order.items())))
@@ -57,7 +81,7 @@ def test_order_of_the_response_does_not_matter():
         assert device.add_timestamp_as_key_device_data(response, today=TODAY) == expected
 
 
-def test_days_are_calendar_dates_of_the_current_day():
+def test_days_are_calendar_dates_of_the_current_day() -> None:
     before = datetime.date.today()
     result = device.add_timestamp_as_key_device_data({"D_Y_2_1": "93"})
     after = datetime.date.today()
@@ -67,7 +91,7 @@ def test_days_are_calendar_dates_of_the_current_day():
     assert key in {before - datetime.timedelta(days=1), after - datetime.timedelta(days=1)}
 
 
-def test_run_time_is_the_local_time_without_time_zone():
+def test_run_time_is_the_local_time_without_time_zone() -> None:
     before = datetime.datetime.now()
     now = cli.local_now()
     after = datetime.datetime.now()
@@ -77,7 +101,7 @@ def test_run_time_is_the_local_time_without_time_zone():
     assert before <= now <= after
 
 
-def test_year_change():
+def test_year_change() -> None:
     response = {"D_Y_2_1": "1", "D_Y_2_2": "2", "D_Y_2_3": "3", "D_Y_2_14": "14"}
 
     result = device.add_timestamp_as_key_device_data(response, today=day("2026-01-02"))
@@ -90,7 +114,7 @@ def test_year_change():
     }
 
 
-def test_more_than_14_days_ago():
+def test_more_than_14_days_ago() -> None:
     result = device.add_timestamp_as_key_device_data({"D_Y_2_27": "80"}, today=TODAY)
 
     assert result == {day("2026-10-27"): "80"}
@@ -99,7 +123,7 @@ def test_more_than_14_days_ago():
 @pytest.mark.parametrize(
     "name", ["D_Y_1", "D_Y_2_0", "D_Y_2_01", "D_Y_2_x", "D_Y_2_1x", "d_y_2_1", "code"]
 )
-def test_unknown_parameter_is_an_error(name):
+def test_unknown_parameter_is_an_error(name: str) -> None:
     response = {"D_Y_2_1": "93", name: "33"}
 
     with pytest.raises(device.DeviceError) as err:
@@ -113,7 +137,9 @@ def test_unknown_parameter_is_an_error(name):
 # --- dataFile.firstDate (checked when loading the configuration: tests/test_config.py)
 
 
-def test_first_date_filters_earlier_days(caplog, loaded_config):
+def test_first_date_filters_earlier_days(
+    caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
+) -> None:
     caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {
         day("2026-11-22"): "101",
@@ -128,7 +154,9 @@ def test_first_date_filters_earlier_days(caplog, loaded_config):
     assert "2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
-def test_without_first_date_nothing_is_filtered(caplog, loaded_config):
+def test_without_first_date_nothing_is_filtered(
+    caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
+) -> None:
     caplog.set_level(logging.INFO, logger=cli.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
@@ -137,7 +165,11 @@ def test_without_first_date_nothing_is_filtered(caplog, loaded_config):
     assert "firstDate" not in caplog.text
 
 
-def test_all_values_before_first_date_fail_the_run(mails, caplog, loaded_config):
+def test_all_values_before_first_date_fail_the_run(
+    mails: list[tuple[str, typing.Any]],
+    caplog: pytest.LogCaptureFixture,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
     with pytest.raises(cli.CollectError) as err:
@@ -153,7 +185,12 @@ def test_all_values_before_first_date_fail_the_run(mails, caplog, loaded_config)
 
 
 @pytest.fixture
-def run(mails, monkeypatch, config_data, write_config):
+def run(
+    mails: list[tuple[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> Run:
     """
     run main() on `today` at `local_time` with a fake device response
     :return: function(response, today, local_time, device_clock, **data_file); the
@@ -161,14 +198,25 @@ def run(mails, monkeypatch, config_data, write_config):
         data_file replaces keys of dataFile. Its attribute `requests` lists the
         parameters of every device request.
     """
-    requests = []
+    requests: list[list[str]] = []
 
-    def run_main(response, today=TODAY, local_time="16:00", device_clock="16:00", **data_file):
+    def run_main(
+        response: collections.abc.Mapping[str, str | None],
+        today: datetime.date = TODAY,
+        local_time: str = "16:00",
+        device_clock: str | None = "16:00",
+        **data_file: typing.Any,
+    ) -> int:
         config = copy.deepcopy(config_data)
         config["dataFile"].update(prefix=PREFIX, **data_file)
         config_file = write_config(config)
 
-        def fetch(host, parameters, timeout, session=None):
+        def fetch(
+            host: str,
+            parameters: collections.abc.Iterable[str],
+            timeout: float,
+            session: object = None,
+        ) -> dict[str, str | None]:
             requests.append(list(parameters))
             clock = {} if device_clock is None else {"D_C_4_2": device_clock}
             return {**clock, **response}
@@ -179,10 +227,15 @@ def run(mails, monkeypatch, config_data, write_config):
         return cli.main(str(config_file))
 
     run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
-    return run_main
+    return typing.cast(Run, run_main)
 
 
-def write_year(tmp_path, year, rows, header=("date", "value")):
+def write_year(
+    tmp_path: pathlib.Path,
+    year: int,
+    rows: collections.abc.Iterable[collections.abc.Sequence[str]],
+    header: collections.abc.Sequence[str] = ("date", "value"),
+) -> None:
     path = tmp_path / "data" / f"{PREFIX}_{year}.csv"
     path.parent.mkdir(exist_ok=True)
     with path.open(mode="w", newline="", encoding="utf-8") as csv_file:
@@ -191,7 +244,7 @@ def write_year(tmp_path, year, rows, header=("date", "value")):
         writer.writerows(rows)
 
 
-def read_year(tmp_path, year):
+def read_year(tmp_path: pathlib.Path, year: int) -> dict[str, str]:
     path = tmp_path / "data" / f"{PREFIX}_{year}.csv"
     with path.open(newline="", encoding="utf-8") as csv_file:
         return {row["date"]: row["value"] for row in csv.DictReader(csv_file)}
@@ -227,7 +280,9 @@ MIGRATED_2026 = [
 ]
 
 
-def test_run_stores_today_minus_n_in_any_response_order(run, tmp_path, mails):
+def test_run_stores_today_minus_n_in_any_response_order(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     response = dict(reversed(list(DEVICE_2026_11_23.items())))
 
     run(response)
@@ -240,7 +295,9 @@ def test_run_stores_today_minus_n_in_any_response_order(run, tmp_path, mails):
     assert mails == [("data", tmp_path / "data")]
 
 
-def test_run_with_first_date_keeps_the_migrated_values(run, tmp_path, caplog):
+def test_run_with_first_date_keeps_the_migrated_values(
+    run: Run, tmp_path: pathlib.Path, caplog: pytest.LogCaptureFixture
+) -> None:
     caplog.set_level(logging.INFO, logger="gruenbeck")
     write_year(tmp_path, 2026, MIGRATED_2026)
 
@@ -255,7 +312,7 @@ def test_run_with_first_date_keeps_the_migrated_values(run, tmp_path, caplog):
     assert "11 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
 
 
-def test_run_over_the_year_change_writes_both_files(run, tmp_path):
+def test_run_over_the_year_change_writes_both_files(run: Run, tmp_path: pathlib.Path) -> None:
     response = {name: str(n) for n, name in enumerate(PARAMETERS, start=1)}
 
     run(response, today=day("2026-01-03"))
@@ -267,7 +324,9 @@ def test_run_over_the_year_change_writes_both_files(run, tmp_path):
     assert len(stored_2025) == 12
 
 
-def test_run_with_unknown_parameter_fails_without_writing(run, tmp_path, mails):
+def test_run_with_unknown_parameter_fails_without_writing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     response = {**DEVICE_2026_11_23, "D_Y_1": "101"}
 
     assert run(response) == 1
@@ -280,7 +339,9 @@ def test_run_with_unknown_parameter_fails_without_writing(run, tmp_path, mails):
     ]
 
 
-def test_run_with_invalid_first_date_fails_before_asking_the_device(run, mails):
+def test_run_with_invalid_first_date_fails_before_asking_the_device(
+    run: Run, mails: list[tuple[str, typing.Any]]
+) -> None:
     assert run(DEVICE_2026_11_23, firstDate="2026-11-31") == 1
     assert run.requests == []
     assert mails[0][0] == "error"
@@ -290,7 +351,7 @@ def test_run_with_invalid_first_date_fails_before_asking_the_device(run, mails):
 # --- device clock: only a warning (P004-S8, S9, S10) --------------------------------
 
 
-def clock_warnings(caplog):
+def clock_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
 
 
@@ -304,8 +365,12 @@ def clock_warnings(caplog):
     ],
 )
 def test_device_clock_within_tolerance_gives_no_warning(
-    run, tmp_path, caplog, local_time, device_clock
-):
+    run: Run,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+    local_time: str,
+    device_clock: str,
+) -> None:
     run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
@@ -323,8 +388,13 @@ def test_device_clock_within_tolerance_gives_no_warning(
     ],
 )
 def test_device_clock_off_is_only_a_warning(
-    run, tmp_path, caplog, local_time, device_clock, deviation
-):
+    run: Run,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+    local_time: str,
+    device_clock: str,
+    deviation: str,
+) -> None:
     run(DEVICE_2026_11_23, local_time=local_time, device_clock=device_clock)
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
@@ -345,8 +415,13 @@ def test_device_clock_off_is_only_a_warning(
     ],
 )
 def test_missing_or_invalid_device_clock_is_only_a_warning(
-    run, tmp_path, caplog, mails, device_clock, warning
-):
+    run: Run,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+    mails: list[tuple[str, typing.Any]],
+    device_clock: str | None,
+    warning: str,
+) -> None:
     run(DEVICE_2026_11_23, device_clock=device_clock)
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == "101"
@@ -354,7 +429,7 @@ def test_missing_or_invalid_device_clock_is_only_a_warning(
     assert [kind for kind, _ in mails] == ["data"]
 
 
-def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
+def test_run_maps_the_days_from_the_local_date_of_the_run(run: Run, tmp_path: pathlib.Path) -> None:
     # 2026-11-24 16:30: yesterday is 2026-11-23
     run(DEVICE_2026_11_23, today=day("2026-11-24"), local_time="16:30", device_clock="16:30")
 
@@ -375,8 +450,8 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run, tmp_path):
     ],
 )
 def test_deviation_is_device_minus_local_time_within_half_a_day(
-    device_clock, local_time, deviation
-):
+    device_clock: str, local_time: str, deviation: int
+) -> None:
     now = datetime.datetime.combine(TODAY, datetime.time.fromisoformat(local_time))
 
     assert device.check_device_clock(device_clock, now) == deviation
@@ -385,7 +460,11 @@ def test_deviation_is_device_minus_local_time_within_half_a_day(
 # --- comparison with the stored values (P004-S10) -----------------------------------
 
 
-def memory(value_of, today=TODAY, shift=0):
+def memory(
+    value_of: collections.abc.Callable[[datetime.date], int],
+    today: datetime.date = TODAY,
+    shift: int = 0,
+) -> dict[str, str]:
     """
     device memory D_Y_2_1 ... 14 for `today` from the true values of the days
     :param value_of: function(datetime.date) -> consumption of that day
@@ -397,20 +476,23 @@ def memory(value_of, today=TODAY, shift=0):
     }
 
 
-def true_value(day_):
+def true_value(day_: datetime.date) -> int:
     """consumption of a day, different for every day"""
     return 50 + day_.toordinal() % 97
 
 
-def stored_rows(first, last):
-    rows, current = [], first
+def stored_rows(first: datetime.date, last: datetime.date) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    current = first
     while current <= last:
         rows.append((current.isoformat(), str(true_value(current))))
         current += datetime.timedelta(days=1)
     return rows
 
 
-def test_overlap_with_the_same_values_is_written(run, tmp_path, mails):
+def test_overlap_with_the_same_values_is_written(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     # the run a week ago stored 2026-11-02 ... 2026-11-15
     write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
 
@@ -422,7 +504,9 @@ def test_overlap_with_the_same_values_is_written(run, tmp_path, mails):
     assert [kind for kind, _ in mails] == ["data"]
 
 
-def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(run, tmp_path, mails):
+def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(tmp_path, 2026, stored_rows(day("2026-11-02"), day("2026-11-15")))
     before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
 
@@ -439,7 +523,9 @@ def test_run_before_the_rollover_is_one_day_late_and_writes_nothing(run, tmp_pat
     ]
 
 
-def test_run_before_the_rollover_over_the_year_change_writes_no_file(run, tmp_path, mails):
+def test_run_before_the_rollover_over_the_year_change_writes_no_file(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(tmp_path, 2025, stored_rows(day("2025-12-20"), day("2025-12-31")))
     write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-03")))
     files = sorted((tmp_path / "data").glob("*.csv"))
@@ -459,7 +545,9 @@ def test_run_before_the_rollover_over_the_year_change_writes_no_file(run, tmp_pa
     assert mails[0][1].startswith("one day late:")
 
 
-def test_overlap_with_other_values_writes_nothing_and_names_the_days(run, tmp_path, mails):
+def test_overlap_with_other_values_writes_nothing_and_names_the_days(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
     rows[-1] = ("2026-11-15", "999")
     rows[-3] = ("2026-11-13", "0")
@@ -479,7 +567,9 @@ def test_overlap_with_other_values_writes_nothing_and_names_the_days(run, tmp_pa
     ]
 
 
-def test_overlap_over_the_year_change_is_checked_and_written(run, tmp_path):
+def test_overlap_over_the_year_change_is_checked_and_written(
+    run: Run, tmp_path: pathlib.Path
+) -> None:
     write_year(tmp_path, 2025, stored_rows(day("2025-12-25"), day("2025-12-31")))
     write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-02")))
 
@@ -489,7 +579,9 @@ def test_overlap_over_the_year_change_is_checked_and_written(run, tmp_path):
     assert read_year(tmp_path, 2025)["2025-12-25"] == str(true_value(day("2025-12-25")))
 
 
-def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
+def test_values_before_first_date_are_not_compared(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     # migrated values up to 2026-11-19; the device memory on 2026-11-23 maps other
     # values to these days (double place of 2026-11-19), but firstDate drops them
     write_year(tmp_path, 2026, MIGRATED_2026)
@@ -501,7 +593,7 @@ def test_values_before_first_date_are_not_compared(run, tmp_path, mails):
 
 
 @pytest.fixture
-def logging_handlers():
+def logging_handlers() -> collections.abc.Iterator[list[logging.Handler]]:
     """removes and closes the handlers that setup_logging() adds"""
     added: list[logging.Handler] = []
     yield added
@@ -510,7 +602,11 @@ def logging_handlers():
         handler.close()
 
 
-def test_log_file_takes_warnings_and_errors_but_no_infos(logging_handlers, tmp_path, capsys):
+def test_log_file_takes_warnings_and_errors_but_no_infos(
+    logging_handlers: list[logging.Handler],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     log_file = tmp_path / "collector.log"
     logging_handlers += cli.setup_logging(False, log_file)
 
@@ -526,7 +622,11 @@ def test_log_file_takes_warnings_and_errors_but_no_infos(logging_handlers, tmp_p
     assert capsys.readouterr().err == ""
 
 
-def test_console_logging_with_option_l_starts_at_info(logging_handlers, tmp_path, capsys):
+def test_console_logging_with_option_l_starts_at_info(
+    logging_handlers: list[logging.Handler],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     logging_handlers += cli.setup_logging(True, tmp_path / "collector.log")
 
     cli.logger.info("an info")
@@ -538,11 +638,13 @@ def test_console_logging_with_option_l_starts_at_info(logging_handlers, tmp_path
 # --- merging new and stored values (P006-S1) ----------------------------------------
 
 
-def stored_lines(tmp_path, year):
+def stored_lines(tmp_path: pathlib.Path, year: int) -> list[str]:
     return (tmp_path / "data" / f"{PREFIX}_{year}.csv").read_text(encoding="utf-8").splitlines()
 
 
-def test_run_keeps_the_other_stored_days_and_sorts_the_file(run, tmp_path, mails):
+def test_run_keeps_the_other_stored_days_and_sorts_the_file(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(
         tmp_path,
         2026,
@@ -564,7 +666,9 @@ def test_run_keeps_the_other_stored_days_and_sorts_the_file(run, tmp_path, mails
 @pytest.mark.parametrize(
     "device_value, stored", [(" 93 ", "93"), ("007", "7"), ("+5", "5"), ("-5", "-5"), ("0", "0")]
 )
-def test_run_stores_the_device_values_as_int(run, tmp_path, device_value, stored):
+def test_run_stores_the_device_values_as_int(
+    run: Run, tmp_path: pathlib.Path, device_value: str, stored: str
+) -> None:
     run({**DEVICE_2026_11_23, "D_Y_2_1": device_value})
 
     assert read_year(tmp_path, 2026)["2026-11-22"] == stored
@@ -586,8 +690,13 @@ def test_run_stores_the_device_values_as_int(run, tmp_path, device_value, stored
     ids=repr,
 )
 def test_run_with_a_value_that_is_no_int_fails_with_error_mail(
-    run, tmp_path, mails, caplog, device_value, error
-):
+    run: Run,
+    tmp_path: pathlib.Path,
+    mails: list[tuple[str, typing.Any]],
+    caplog: pytest.LogCaptureFixture,
+    device_value: str | None,
+    error: str,
+) -> None:
     # up to P006-S4 a traceback without error mail; P006-S9 checks the values itself
     assert run({**DEVICE_2026_11_23, "D_Y_2_5": device_value}) == 1
 
@@ -601,7 +710,9 @@ def test_run_with_a_value_that_is_no_int_fails_with_error_mail(
     assert record.exc_info is not None
 
 
-def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one(run, tmp_path):
+def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one(
+    run: Run, tmp_path: pathlib.Path
+) -> None:
     write_year(tmp_path, 2025, stored_rows(day("2025-12-01"), day("2025-12-19")))
     today = day("2026-01-03")
 
@@ -612,7 +723,9 @@ def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one
     assert read_year(tmp_path, 2026) == dict(stored_rows(day("2026-01-01"), day("2026-01-02")))
 
 
-def test_run_reads_the_file_of_the_last_year_without_writing_it(run, tmp_path, mails):
+def test_run_reads_the_file_of_the_last_year_without_writing_it(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     # D_Y_2_14 on 2026-01-15 is 2026-01-01; 2025-12-31 is read for the overlap check
     write_year(tmp_path, 2025, stored_rows(day("2025-12-20"), day("2025-12-31")))
     file_2025 = tmp_path / "data" / f"{PREFIX}_2025.csv"
@@ -626,7 +739,9 @@ def test_run_reads_the_file_of_the_last_year_without_writing_it(run, tmp_path, m
     assert [kind for kind, _ in mails] == ["data"]
 
 
-def test_run_before_the_rollover_compares_with_the_last_day_of_the_last_year(run, tmp_path, mails):
+def test_run_before_the_rollover_compares_with_the_last_day_of_the_last_year(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(tmp_path, 2025, stored_rows(day("2025-12-31"), day("2025-12-31")))
     write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-01")))
     files = sorted((tmp_path / "data").glob("*.csv"))
@@ -646,7 +761,9 @@ def test_run_before_the_rollover_compares_with_the_last_day_of_the_last_year(run
     ]
 
 
-def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(run, tmp_path, mails):
+def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
     rows[-1] = ("2026-11-15", "-")
     write_year(tmp_path, 2026, rows)
@@ -663,7 +780,9 @@ def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(run, tmp_path
     ]
 
 
-def test_run_with_another_date_pattern_writes_and_compares_in_that_format(run, tmp_path):
+def test_run_with_another_date_pattern_writes_and_compares_in_that_format(
+    run: Run, tmp_path: pathlib.Path
+) -> None:
     today = day("2026-12-05")
     write_year(
         tmp_path,
@@ -698,7 +817,9 @@ def test_run_with_another_date_pattern_writes_and_compares_in_that_format(run, t
     assert read_year(tmp_path, 2026)["04.12.2026"] == str(true_value(day("2026-12-04")))
 
 
-def test_run_with_another_date_pattern_detects_differing_values(run, tmp_path, mails):
+def test_run_with_another_date_pattern_detects_differing_values(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     today = day("2026-12-05")
     write_year(tmp_path, 2026, [("21.11.2026", "999")])
 
@@ -713,7 +834,9 @@ def test_run_with_another_date_pattern_detects_differing_values(run, tmp_path, m
 # --- configuration of the data files (P006-S3) ---------------------------------------
 
 
-def test_run_with_other_column_names_reads_and_writes_them(run, tmp_path, mails):
+def test_run_with_other_column_names_reads_and_writes_them(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(
         tmp_path,
         2026,
@@ -731,7 +854,9 @@ def test_run_with_other_column_names_reads_and_writes_them(run, tmp_path, mails)
     assert [kind for kind, _ in mails] == ["data"]
 
 
-def test_run_with_other_column_names_starts_a_new_file_with_them(run, tmp_path):
+def test_run_with_other_column_names_starts_a_new_file_with_them(
+    run: Run, tmp_path: pathlib.Path
+) -> None:
     run(
         memory(true_value, today=day("2026-01-03")),
         today=day("2026-01-03"),
@@ -746,7 +871,9 @@ def test_run_with_other_column_names_starts_a_new_file_with_them(run, tmp_path):
     ]
 
 
-def test_stored_file_without_the_configured_columns_writes_nothing(run, tmp_path, mails):
+def test_stored_file_without_the_configured_columns_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     write_year(tmp_path, 2026, stored_rows(day("2026-11-09"), day("2026-11-10")))
     path = tmp_path / "data" / f"{PREFIX}_2026.csv"
     before = path.read_bytes()
@@ -762,7 +889,9 @@ def test_stored_file_without_the_configured_columns_writes_nothing(run, tmp_path
     ]
 
 
-def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(run, tmp_path, mails):
+def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
     today = day("2026-12-05")
     write_year(tmp_path, 2025, [("31.12.2025", "1")])
     write_year(tmp_path, 2026, [("19.11.2026", "1"), ("2026-11-20", "2")])
@@ -781,7 +910,9 @@ def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(run, tm
 
 
 @pytest.mark.parametrize("text", ["1.12.2026", "01.12.26", "01.12.2026 ", "2026-12-01"])
-def test_date_text_has_to_be_exactly_what_the_pattern_writes(run, tmp_path, mails, text):
+def test_date_text_has_to_be_exactly_what_the_pattern_writes(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]], text: str
+) -> None:
     write_year(tmp_path, 2026, [(text, "1")])
 
     assert (
@@ -799,8 +930,12 @@ def test_date_text_has_to_be_exactly_what_the_pattern_writes(run, tmp_path, mail
 
 
 def test_relative_paths_start_at_the_folder_of_the_configuration(
-    tmp_path, monkeypatch, mails, config_data, write_config
-):
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mails: list[tuple[str, typing.Any]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
     (tmp_path / "repo" / "assets").mkdir(parents=True)
     parameters = tmp_path / "repo" / "assets" / "parameters.csv"
     parameters.write_bytes(pathlib.Path(config_data["parameterFile"]).read_bytes())

@@ -1,3 +1,6 @@
+import collections.abc
+import pathlib
+
 import pytest
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
@@ -8,11 +11,16 @@ MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 
 
 @pytest.fixture
-def device(monkeypatch):
+def device(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """fake device; records the parameters of every request"""
-    requests = []
+    requests: list[list[str]] = []
 
-    def fetch(host, parameters, timeout, session=None):
+    def fetch(
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
         requests.append(list(parameters))
         return {name: "1" for name in parameters}
 
@@ -21,8 +29,8 @@ def device(monkeypatch):
 
 
 @pytest.fixture
-def error_mails(monkeypatch):
-    sent = []
+def error_mails(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    sent: list[str] = []
     monkeypatch.setattr(
         mail,
         "send_mail",
@@ -31,7 +39,7 @@ def error_mails(monkeypatch):
     return sent
 
 
-def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file):
+def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file: pathlib.Path) -> None:
     parameter = gruenbeck.device.Parameter(str(parameter_file))
 
     assert parameter.get_parameter_by_note("Wasserverbrauch") == [
@@ -41,7 +49,7 @@ def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file):
     ]
 
 
-def test_parameter_file_has_no_commented_rows(parameter_file):
+def test_parameter_file_has_no_commented_rows(parameter_file: pathlib.Path) -> None:
     lines = parameter_file.read_text(encoding="utf-8").splitlines()
 
     assert not [line for line in lines if line.startswith("#")]
@@ -49,7 +57,9 @@ def test_parameter_file_has_no_commented_rows(parameter_file):
     assert "D_Y_2_27,read" in "\n".join(lines)
 
 
-def test_only_the_14_day_memory_is_requested(device, parameter_file):
+def test_only_the_14_day_memory_is_requested(
+    device: list[list[str]], parameter_file: pathlib.Path
+) -> None:
     parameter = gruenbeck.device.Parameter(str(parameter_file))
 
     result = gruenbeck.device.get_device_data("device.lan", parameter, 30, 5, 5)
@@ -60,8 +70,12 @@ def test_only_the_14_day_memory_is_requested(device, parameter_file):
 
 
 def test_missing_memory_parameter_fails_before_asking_the_device(
-    device, error_mails, parameter_file, tmp_path, caplog
-):
+    device: list[list[str]],
+    error_mails: list[str],
+    parameter_file: pathlib.Path,
+    tmp_path: pathlib.Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     rows = parameter_file.read_text(encoding="utf-8").splitlines(keepends=True)
     without = [row for row in rows if not row.startswith(("D_Y_2_5,", "D_Y_2_12,"))]
     assert len(without) == len(rows) - 2

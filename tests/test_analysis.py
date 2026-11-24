@@ -5,10 +5,12 @@ pandas and matplotlib belong to the extra "analysis" and are not part of the dev
 environment, so only the parts without them are tested here.
 """
 
+import collections.abc
 import importlib.util
 import pathlib
 import subprocess
 import sys
+import typing
 
 import pytest
 
@@ -18,7 +20,7 @@ BIN = pathlib.Path(sys.executable).parent
 HAS_ANALYSIS_EXTRA = importlib.util.find_spec("pandas") is not None
 
 
-def run_command(cwd, *args):
+def run_command(cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str]:
     path = BIN / "gruenbeck-analyse"
     assert path.exists(), f"{path} is missing: install the package with uv sync"
     return subprocess.run(
@@ -26,7 +28,7 @@ def run_command(cwd, *args):
     )
 
 
-def test_data_files_are_the_yearly_files_of_the_prefix(tmp_path):
+def test_data_files_are_the_yearly_files_of_the_prefix(tmp_path: pathlib.Path) -> None:
     for name in (
         "p_2026.csv",
         "p_2025.csv",
@@ -43,7 +45,7 @@ def test_data_files_are_the_yearly_files_of_the_prefix(tmp_path):
     assert files == [tmp_path / "p_2025.csv", tmp_path / "p_2026.csv"]
 
 
-def test_prefix_is_not_a_pattern(tmp_path):
+def test_prefix_is_not_a_pattern(tmp_path: pathlib.Path) -> None:
     (tmp_path / "p.x_2026.csv").write_text("")
     (tmp_path / "pax_2026.csv").write_text("")
 
@@ -52,7 +54,7 @@ def test_prefix_is_not_a_pattern(tmp_path):
     assert files == [tmp_path / "p.x_2026.csv"]
 
 
-def test_help_works_without_the_analysis_extra(tmp_path):
+def test_help_works_without_the_analysis_extra(tmp_path: pathlib.Path) -> None:
     result = run_command(tmp_path, "--help")
 
     assert result.returncode == 0
@@ -62,7 +64,7 @@ def test_help_works_without_the_analysis_extra(tmp_path):
 
 
 @pytest.mark.skipif(HAS_ANALYSIS_EXTRA, reason="the extra analysis is installed")
-def test_run_without_the_analysis_extra_fails(tmp_path):
+def test_run_without_the_analysis_extra_fails(tmp_path: pathlib.Path) -> None:
     result = run_command(tmp_path)
 
     assert result.returncode == 1
@@ -73,7 +75,9 @@ def test_run_without_the_analysis_extra_fails(tmp_path):
     "argv, config_file",
     [([], "./src/config.json"), (["-c", "other.json"], "other.json")],
 )
-def test_command_passes_the_config_file_to_the_analysis(monkeypatch, argv, config_file):
+def test_command_passes_the_config_file_to_the_analysis(
+    monkeypatch: pytest.MonkeyPatch, argv: typing.Any, config_file: str
+) -> None:
     calls: list[str] = []
     monkeypatch.setattr(analysis, "main", calls.append)
 
@@ -83,14 +87,16 @@ def test_command_passes_the_config_file_to_the_analysis(monkeypatch, argv, confi
 
 
 @pytest.fixture
-def plots(monkeypatch):
+def plots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[list[typing.Any], list[typing.Any], str]]:
     """matplotlib without a window; records the plotted lines"""
     matplotlib = pytest.importorskip("matplotlib")
     pytest.importorskip("pandas")
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    lines = []
+    lines: list[tuple[list[typing.Any], list[typing.Any], str]] = []
     monkeypatch.setattr(plt, "plot", lambda x, y, label: lines.append((list(x), list(y), label)))
     monkeypatch.setattr(plt, "show", lambda: None)
     monkeypatch.setattr(plt, "legend", lambda: None)
@@ -98,8 +104,12 @@ def plots(monkeypatch):
 
 
 def test_statistics_use_the_columns_and_the_date_pattern_of_the_configuration(
-    plots, config_data, write_config, tmp_path, capsys
-):
+    plots: list[tuple[list[typing.Any], list[typing.Any], str]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     # only with the extra "analysis" (uv sync --extra analysis)
     config_data["dataFile"].update(
         prefix="p", datePattern="%d.%m.%Y", fieldnames={"date": "day", "value": "litres"}

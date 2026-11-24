@@ -5,10 +5,14 @@ Only gruenbeck.cli catches the errors of the package: every failure of a run end
 exit code 1, and with an error mail if the mail section of the configuration is valid.
 """
 
+import collections.abc
 import datetime
 import logging
+import os
+import pathlib
 import subprocess
 import sys
+import typing
 
 import pytest
 import requests
@@ -20,11 +24,16 @@ TODAY = datetime.date(2026, 11, 23)
 
 
 @pytest.fixture
-def mails(monkeypatch):
+def mails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, typing.Any]]:
     """records data and error mails instead of sending them"""
-    sent = []
+    sent: list[tuple[str, typing.Any]] = []
 
-    def record(settings, subject, text, attachments=()):
+    def record(
+        settings: config.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append((subject, text))
         else:
@@ -36,14 +45,21 @@ def mails(monkeypatch):
 
 
 @pytest.fixture
-def answers(monkeypatch, sleeps):
+def answers(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> list[dict[str, str | None] | BaseException]:
     """
     fake device: answers the items of the list in turn (an exception is raised); without
     items it answers with D_C_4_2 = 16:00 and 1 litre per day
     """
-    queue: list = []
+    queue: list[dict[str, str | None] | BaseException] = []
 
-    def fetch(host, parameters, timeout, session=None):
+    def fetch(
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
         if queue:
             item = queue.pop(0)
             if isinstance(item, BaseException):
@@ -58,14 +74,20 @@ def answers(monkeypatch, sleeps):
 
 
 @pytest.fixture
-def collect(tmp_path, write_config, config_data, answers, mails):
+def collect(
+    tmp_path: pathlib.Path,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+    answers: list[dict[str, str | None] | BaseException],
+    mails: list[tuple[str, typing.Any]],
+) -> collections.abc.Iterator[collections.abc.Callable[..., int]]:
     """
     gruenbeck-collect with -c and -e in tmp_path; the handlers are removed afterwards
     :return: function(config=config_data) -> exit code
     """
     existing = list(cli.package_logger.handlers)
 
-    def run(data=None):
+    def run(data: dict[str, typing.Any] | None = None) -> int:
         config_file = write_config(config_data if data is None else data)
         return cli.collect(["-c", str(config_file), "-e", str(tmp_path / "errors.log")])
 
@@ -75,24 +97,36 @@ def collect(tmp_path, write_config, config_data, answers, mails):
         handler.close()
 
 
-def error_mails(mails):
+def error_mails(mails: list[tuple[str, typing.Any]]) -> list[typing.Any]:
     return [text for kind, text in mails if kind == cli.ERROR_MAIL_SUBJECT]
 
 
-def test_successful_run_exits_with_0(collect, mails, tmp_path):
+def test_successful_run_exits_with_0(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     assert collect() == 0
 
     assert mails == [("data", tmp_path / "data")]
 
 
-def test_missing_configuration_exits_with_1_without_mail(collect, mails, tmp_path):
+def test_missing_configuration_exits_with_1_without_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     assert cli.collect(["-c", str(tmp_path / "missing.json"), "-e", str(tmp_path / "e.log")]) == 1
 
     assert mails == []
     assert "no configuration: [Errno 2]" in (tmp_path / "e.log").read_text()
 
 
-def test_invalid_configuration_exits_with_1_and_error_mail(collect, mails, config_data):
+def test_invalid_configuration_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    config_data: dict[str, typing.Any],
+) -> None:
     del config_data["dataPath"]
 
     assert collect() == 1
@@ -100,7 +134,11 @@ def test_invalid_configuration_exits_with_1_and_error_mail(collect, mails, confi
     assert error_mails(mails) == ["no config parameter: 'dataPath'"]
 
 
-def test_invalid_mail_section_exits_with_1_without_mail(collect, mails, config_data):
+def test_invalid_mail_section_exits_with_1_without_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    config_data: dict[str, typing.Any],
+) -> None:
     del config_data["mail"]
 
     assert collect() == 1
@@ -108,7 +146,11 @@ def test_invalid_mail_section_exits_with_1_without_mail(collect, mails, config_d
     assert mails == []
 
 
-def test_device_error_exits_with_1_and_error_mail(collect, mails, answers):
+def test_device_error_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+) -> None:
     # the session of the device query repeated the request already (tests/test_device_query.py)
     answers.append(requests.exceptions.ConnectTimeout("connect timed out"))
 
@@ -117,7 +159,12 @@ def test_device_error_exits_with_1_and_error_mail(collect, mails, answers):
     assert error_mails(mails) == ["failed to get device data: connect timed out"]
 
 
-def test_invalid_device_answer_exits_with_1_after_all_attempts(collect, mails, answers, sleeps):
+def test_invalid_device_answer_exits_with_1_after_all_attempts(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+    sleeps: list[float],
+) -> None:
     answers.extend([ValueError("device response contains no values")] * 6)
 
     assert collect() == 1
@@ -129,7 +176,13 @@ def test_invalid_device_answer_exits_with_1_after_all_attempts(collect, mails, a
     assert sleeps == [5.0] * 5
 
 
-def test_retries_of_the_configuration_are_used(collect, mails, answers, sleeps, config_data):
+def test_retries_of_the_configuration_are_used(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+    sleeps: list[float],
+    config_data: dict[str, typing.Any],
+) -> None:
     config_data["softWaterSystem"].update(retries=1, retryDelay=0.5)
     answers.extend([ValueError("bad answer")] * 2)
 
@@ -139,7 +192,11 @@ def test_retries_of_the_configuration_are_used(collect, mails, answers, sleeps, 
     assert sleeps == [0.5]
 
 
-def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(collect, mails, answers):
+def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+) -> None:
     answers.append({"D_Y_2_1": "1", "D_Y_1": "5"})
 
     assert collect() == 1
@@ -149,7 +206,12 @@ def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(collect, ma
     ]
 
 
-def test_missing_parameter_file_exits_with_1_and_error_mail(collect, mails, config_data, tmp_path):
+def test_missing_parameter_file_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    config_data: dict[str, typing.Any],
+    tmp_path: pathlib.Path,
+) -> None:
     config_data["parameterFile"] = str(tmp_path / "missing.csv")
 
     assert collect() == 1
@@ -160,8 +222,11 @@ def test_missing_parameter_file_exits_with_1_and_error_mail(collect, mails, conf
 
 
 def test_data_folder_that_cannot_be_created_exits_with_1_and_error_mail(
-    collect, mails, config_data, tmp_path
-):
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    config_data: dict[str, typing.Any],
+    tmp_path: pathlib.Path,
+) -> None:
     config_data["dataPath"] = str(tmp_path / "missing" / "data")
 
     assert collect() == 1
@@ -170,7 +235,11 @@ def test_data_folder_that_cannot_be_created_exits_with_1_and_error_mail(
     assert text.startswith("creation data folder failed: [Errno 2] No such file or directory")
 
 
-def test_invalid_data_file_exits_with_1_and_error_mail(collect, mails, tmp_path):
+def test_invalid_data_file_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     (tmp_path / "data").mkdir()
     path = tmp_path / "data" / "gruenbeck_water_consumption_2026.csv"
     path.write_text("day,litres\n2026-11-01,1\n")
@@ -184,7 +253,11 @@ def test_invalid_data_file_exits_with_1_and_error_mail(collect, mails, tmp_path)
     assert path.read_text() == "day,litres\n2026-11-01,1\n"
 
 
-def test_differing_stored_value_exits_with_1_and_error_mail(collect, mails, tmp_path):
+def test_differing_stored_value_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     (tmp_path / "data").mkdir()
     path = tmp_path / "data" / "gruenbeck_water_consumption_2026.csv"
     path.write_text("date,value\n2026-11-09,7\n")
@@ -196,12 +269,16 @@ def test_differing_stored_value_exits_with_1_and_error_mail(collect, mails, tmp_
 
 
 def test_unexpected_error_exits_with_1_and_error_mail_with_traceback(
-    collect, mails, monkeypatch, tmp_path
-):
-    def disk_full(source, target):
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    def disk_full(source: object, target: object) -> typing.NoReturn:
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(storage.os, "replace", disk_full)
+    # storage uses os.replace: the module os is the same object
+    monkeypatch.setattr(os, "replace", disk_full)
 
     assert collect() == 1
 
@@ -214,8 +291,18 @@ def test_unexpected_error_exits_with_1_and_error_mail_with_traceback(
     assert "Traceback (most recent call last):" in log
 
 
-def test_failed_data_mail_exits_with_1_without_error_mail(collect, mails, monkeypatch, tmp_path):
-    def refused(settings, subject, text, attachments=()):
+def test_failed_data_mail_exits_with_1_without_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    def refused(
+        settings: config.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> typing.NoReturn:
         raise mail.MailError("Authentication failed: refused")
 
     monkeypatch.setattr(mail, "send_mail", refused)
@@ -226,8 +313,18 @@ def test_failed_data_mail_exits_with_1_without_error_mail(collect, mails, monkey
     assert (tmp_path / "data" / "gruenbeck_water_consumption_2026.csv").exists()
 
 
-def test_failed_error_mail_keeps_exit_code_1(collect, monkeypatch, config_data, tmp_path):
-    def refused(settings, subject, text, attachments=()):
+def test_failed_error_mail_keeps_exit_code_1(
+    collect: collections.abc.Callable[..., int],
+    monkeypatch: pytest.MonkeyPatch,
+    config_data: dict[str, typing.Any],
+    tmp_path: pathlib.Path,
+) -> None:
+    def refused(
+        settings: config.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> typing.NoReturn:
         raise mail.MailError("Authentication failed: refused")
 
     monkeypatch.setattr(mail, "send_mail", refused)
@@ -240,7 +337,12 @@ def test_failed_error_mail_keeps_exit_code_1(collect, monkeypatch, config_data, 
     )
 
 
-def test_missing_log_folder_exits_with_1_without_mail(mails, tmp_path, capsys, answers):
+def test_missing_log_folder_exits_with_1_without_mail(
+    mails: list[tuple[str, typing.Any]],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    answers: list[dict[str, str | None] | BaseException],
+) -> None:
     log_file = tmp_path / "missing" / "errors.log"
 
     assert cli.collect(["-c", str(tmp_path / "config.json"), "-e", str(log_file)]) == 1
@@ -252,7 +354,10 @@ def test_missing_log_folder_exits_with_1_without_mail(mails, tmp_path, capsys, a
     assert mails == []
 
 
-def test_keyboard_interrupt_is_not_caught(collect, answers):
+def test_keyboard_interrupt_is_not_caught(
+    collect: collections.abc.Callable[..., int],
+    answers: list[dict[str, str | None] | BaseException],
+) -> None:
     answers.append(KeyboardInterrupt())
 
     # BaseException, not an error of the run: no error mail, the interpreter stops
@@ -260,7 +365,7 @@ def test_keyboard_interrupt_is_not_caught(collect, answers):
         collect()
 
 
-def test_errors_of_the_package_have_a_common_base_class():
+def test_errors_of_the_package_have_a_common_base_class() -> None:
     for error in (
         config.ConfigurationError,
         device.DeviceError,
@@ -285,8 +390,13 @@ def test_errors_of_the_package_have_a_common_base_class():
     ],
     ids=lambda value: type(value).__name__ if isinstance(value, Exception) else repr(value),
 )
-def test_analyse_exits_with_1_and_the_message(monkeypatch, capsys, error, message):
-    def fail(config_file):
+def test_analyse_exits_with_1_and_the_message(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: Exception,
+    message: str,
+) -> None:
+    def fail(config_file: object) -> typing.NoReturn:
         raise error
 
     monkeypatch.setattr(analysis, "main", fail)
@@ -296,7 +406,7 @@ def test_analyse_exits_with_1_and_the_message(monkeypatch, capsys, error, messag
     assert capsys.readouterr().err == f"gruenbeck-analyse: {message}{error}\n"
 
 
-def test_analyse_exits_with_0(monkeypatch):
+def test_analyse_exits_with_0(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(analysis, "main", lambda config_file: None)
 
     assert cli.analyse([]) == 0
@@ -305,7 +415,7 @@ def test_analyse_exits_with_0(monkeypatch):
 # --- logging ------------------------------------------------------------------------
 
 
-def test_every_module_logs_with_its_own_name():
+def test_every_module_logs_with_its_own_name() -> None:
     assert cli.logger.name == "gruenbeck.cli"
     assert config.logger.name == "gruenbeck.config"
     assert device.logger.name == "gruenbeck.device"
@@ -314,7 +424,7 @@ def test_every_module_logs_with_its_own_name():
     assert cli.package_logger.name == "gruenbeck"
 
 
-def test_importing_the_package_configures_no_logging():
+def test_importing_the_package_configures_no_logging() -> None:
     # a new interpreter: the tests of this process call setup_logging()
     code = (
         "import logging, gruenbeck.analysis, gruenbeck.cli, gruenbeck.config,"
@@ -329,7 +439,7 @@ def test_importing_the_package_configures_no_logging():
     assert result.stdout == "0 [] []\n"
 
 
-def test_setup_logging_configures_the_package_logger(tmp_path):
+def test_setup_logging_configures_the_package_logger(tmp_path: pathlib.Path) -> None:
     cli.setup_logging(True, tmp_path / "errors.log")
 
     assert cli.package_logger.level == logging.INFO

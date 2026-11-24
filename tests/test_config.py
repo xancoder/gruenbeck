@@ -1,19 +1,25 @@
 """configuration file: loading, checking and the paths (P006-S3)"""
 
+import collections.abc
 import copy
 import datetime
 import json
 import logging
+import os
 import pathlib
+import typing
 
 import pytest
 
+import gruenbeck.config
 from gruenbeck import config as configuration
 
 # --- valid configurations -----------------------------------------------------------
 
 
-def test_example_configuration_is_valid(config_example_file, repo_root, caplog):
+def test_example_configuration_is_valid(
+    config_example_file: pathlib.Path, repo_root: pathlib.Path, caplog: pytest.LogCaptureFixture
+) -> None:
     loaded = configuration.load_configuration(config_example_file)
 
     assert loaded.file == config_example_file
@@ -37,7 +43,12 @@ def test_example_configuration_is_valid(config_example_file, repo_root, caplog):
     assert caplog.records == []
 
 
-def test_values_are_typed(config_data, write_config, tmp_path, parameter_file):
+def test_values_are_typed(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    parameter_file: pathlib.Path,
+) -> None:
     config_data["mail"].update(
         smtpPort=" 465 ", smtpSecurity=" SSL ", subject="", retries=2, retryDelay=1.5
     )
@@ -73,14 +84,14 @@ def test_values_are_typed(config_data, write_config, tmp_path, parameter_file):
     )
 
 
-def test_optional_keys_have_defaults(loaded_config):
+def test_optional_keys_have_defaults(loaded_config: gruenbeck.config.Configuration) -> None:
     assert loaded_config.data_file.first_date is None
     assert loaded_config.mail.smtp_security is None
     assert loaded_config.soft_water_system.timeout == 30.0
     assert type(loaded_config.soft_water_system.timeout) is float
 
 
-def test_retry_defaults(loaded_config):
+def test_retry_defaults(loaded_config: gruenbeck.config.Configuration) -> None:
     # the device is asked again for about 2.5 minutes, the mail for about 15 seconds
     water, mail = loaded_config.soft_water_system, loaded_config.mail
     assert (water.retries, water.retry_delay) == (5, 5.0)
@@ -101,7 +112,15 @@ def test_retry_defaults(loaded_config):
         ("retryDelay", 30, 30.0),
     ],
 )
-def test_retries_and_retry_delay(config_data, write_config, caplog, section, key, value, expected):
+def test_retries_and_retry_delay(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+    section: str,
+    key: str,
+    value: float | int,
+    expected: float | int,
+) -> None:
     config_data[section][key] = value
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -114,7 +133,9 @@ def test_retries_and_retry_delay(config_data, write_config, caplog, section, key
     assert caplog.records == []
 
 
-def test_retries_of_the_sections_are_independent(config_data, write_config):
+def test_retries_of_the_sections_are_independent(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> None:
     config_data["softWaterSystem"].update(retries=1, retryDelay=2)
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -131,7 +152,13 @@ def test_retries_of_the_sections_are_independent(config_data, write_config):
         ("timeout", "2.5", 2.5),
     ],
 )
-def test_device_timeout(config_data, write_config, key, value, expected):
+def test_device_timeout(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    key: str,
+    value: float | int | str,
+    expected: float,
+) -> None:
     config_data["softWaterSystem"][key] = value
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -140,7 +167,11 @@ def test_device_timeout(config_data, write_config, key, value, expected):
 
 
 @pytest.mark.parametrize("pattern", ["%Y-%m-%d", "%d.%m.%Y", "%Y%m%d", "%d/%m/%Y", "%Y-%j"])
-def test_date_patterns_with_year_month_and_day(config_data, write_config, pattern):
+def test_date_patterns_with_year_month_and_day(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    pattern: str,
+) -> None:
     config_data["dataFile"]["datePattern"] = pattern
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -148,7 +179,9 @@ def test_date_patterns_with_year_month_and_day(config_data, write_config, patter
     assert loaded.data_file.date_pattern == pattern
 
 
-def test_smtp_security_null_is_derived_from_the_port(config_data, write_config):
+def test_smtp_security_null_is_derived_from_the_port(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> None:
     config_data["mail"]["smtpSecurity"] = None
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -156,7 +189,9 @@ def test_smtp_security_null_is_derived_from_the_port(config_data, write_config):
     assert loaded.mail.smtp_security is None
 
 
-def test_mail_port_and_security_are_normalized(config_data, write_config):
+def test_mail_port_and_security_are_normalized(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> None:
     config_data["mail"].update(smtpPort="465", smtpSecurity=" SSL ")
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -164,11 +199,15 @@ def test_mail_port_and_security_are_normalized(config_data, write_config):
     assert (loaded.mail.smtp_port, loaded.mail.smtp_security) == (465, "ssl")
 
 
-def test_password_is_not_in_the_repr(loaded_config):
+def test_password_is_not_in_the_repr(loaded_config: gruenbeck.config.Configuration) -> None:
     assert "test-password" not in repr(loaded_config)
 
 
-def test_unknown_keys_are_ignored_with_a_warning(config_data, write_config, caplog):
+def test_unknown_keys_are_ignored_with_a_warning(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     config_data["comment"] = "my soft water system"
     config_data["mail"]["smtpSecurty"] = "ssl"
 
@@ -184,7 +223,9 @@ def test_unknown_keys_are_ignored_with_a_warning(config_data, write_config, capl
 # --- invalid configurations ---------------------------------------------------------
 
 
-def problems(config_data, write_config):
+def problems(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> list[str]:
     """problems of config_data; the configuration must be invalid"""
     with pytest.raises(configuration.ConfigurationError) as err:
         configuration.load_configuration(write_config(config_data))
@@ -192,7 +233,7 @@ def problems(config_data, write_config):
     return err.value.problems
 
 
-def test_missing_file_raises_file_not_found_error(tmp_path):
+def test_missing_file_raises_file_not_found_error(tmp_path: pathlib.Path) -> None:
     with pytest.raises(FileNotFoundError):
         configuration.load_configuration(tmp_path / "missing.json")
 
@@ -206,7 +247,7 @@ def test_missing_file_raises_file_not_found_error(tmp_path):
         ('"config"', "must contain a JSON object"),
     ],
 )
-def test_file_has_to_be_a_json_object(tmp_path, text, problem):
+def test_file_has_to_be_a_json_object(tmp_path: pathlib.Path, text: str, problem: str) -> None:
     path = tmp_path / "config.json"
     path.write_text(text)
 
@@ -239,7 +280,11 @@ def test_file_has_to_be_a_json_object(tmp_path, text, problem):
         "softWaterSystem.host",
     ],
 )
-def test_missing_required_key_is_a_problem(config_data, write_config, key):
+def test_missing_required_key_is_a_problem(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    key: str,
+) -> None:
     *sections, name = key.split(".")
     part = config_data
     for section in sections:
@@ -320,7 +365,13 @@ def test_missing_required_key_is_a_problem(config_data, write_config, key):
     ],
     ids=repr,
 )
-def test_invalid_value_is_a_problem(config_data, write_config, key, value, reason):
+def test_invalid_value_is_a_problem(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    key: str,
+    value: typing.Any,
+    reason: str,
+) -> None:
     *sections, name = key.split(".")
     part = config_data
     for section in sections:
@@ -348,7 +399,12 @@ def test_invalid_value_is_a_problem(config_data, write_config, key, value, reaso
     ],
     ids=repr,
 )
-def test_invalid_first_date_is_a_problem(config_data, write_config, value, reason):
+def test_invalid_first_date_is_a_problem(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    value: int | str | None,
+    reason: str,
+) -> None:
     # the values of the former tests of get_first_date() (P004-S3, P006-S1)
     config_data["dataFile"]["firstDate"] = value
 
@@ -356,7 +412,9 @@ def test_invalid_first_date_is_a_problem(config_data, write_config, value, reaso
     assert found.startswith(f"invalid config parameter dataFile.firstDate {value!r}: {reason}")
 
 
-def test_every_problem_is_reported(config_data, write_config):
+def test_every_problem_is_reported(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> None:
     del config_data["dataPath"]
     config_data["mail"]["recipients"] = []
     config_data["dataFile"]["fieldnames"] = {"date": "day"}
@@ -370,7 +428,11 @@ def test_every_problem_is_reported(config_data, write_config):
     ]
 
 
-def test_error_has_the_mail_section_if_it_is_valid(config_data, write_config, loaded_config):
+def test_error_has_the_mail_section_if_it_is_valid(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     invalid = copy.deepcopy(config_data)
     del invalid["parameterFile"]
 
@@ -380,7 +442,9 @@ def test_error_has_the_mail_section_if_it_is_valid(config_data, write_config, lo
     assert err.value.mail == loaded_config.mail
 
 
-def test_error_has_no_mail_section_if_it_is_invalid(config_data, write_config):
+def test_error_has_no_mail_section_if_it_is_invalid(
+    config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
+) -> None:
     del config_data["parameterFile"]
     del config_data["mail"]["subject"]
 
@@ -402,8 +466,13 @@ def test_error_has_no_mail_section_if_it_is_invalid(config_data, write_config):
     [("data", "repo/src/data"), ("./data", "repo/src/data"), ("../data", "repo/data")],
 )
 def test_relative_paths_start_at_the_folder_of_the_configuration(
-    config_data, write_config, tmp_path, monkeypatch, data_path, expected
-):
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    data_path: str,
+    expected: str,
+) -> None:
     (tmp_path / "repo" / "assets").mkdir(parents=True)
     (tmp_path / "repo" / "assets" / "parameters.csv").write_text("")
     config_data.update(dataPath=data_path, parameterFile="../assets/parameters.csv")
@@ -418,7 +487,11 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     assert loaded.parameter_file == tmp_path / "repo" / "assets" / "parameters.csv"
 
 
-def test_absolute_paths_stay(config_data, write_config, tmp_path):
+def test_absolute_paths_stay(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+) -> None:
     config_data.update(dataPath="/srv/gruenbeck/data", parameterFile="/srv/gruenbeck/p.csv")
 
     loaded = configuration.load_configuration(write_config(config_data, tmp_path / "c.json"))
@@ -428,8 +501,11 @@ def test_absolute_paths_stay(config_data, write_config, tmp_path):
 
 
 def test_path_written_for_the_working_directory_is_an_error(
-    config_data, write_config, tmp_path, monkeypatch
-):
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # the configuration of P006-S2 and earlier: src/config.json, run from the repository
     (tmp_path / "repo" / "data").mkdir(parents=True)
     config_data["dataPath"] = "./data"
@@ -447,8 +523,11 @@ def test_path_written_for_the_working_directory_is_an_error(
 
 
 def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
-    config_data, write_config, tmp_path, monkeypatch
-):
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     (tmp_path / "repo" / "data").mkdir(parents=True)
     (tmp_path / "repo" / "src" / "data").mkdir(parents=True)
     config_data["dataPath"] = "./data"
@@ -461,8 +540,11 @@ def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
 
 
 def test_path_that_exists_nowhere_is_taken_from_the_configuration(
-    config_data, write_config, tmp_path, monkeypatch
-):
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # the first run: the data folder is created later
     config_data["dataPath"] = "data"
     write_config(config_data, tmp_path / "repo" / "src" / "config.json")
@@ -473,7 +555,7 @@ def test_path_that_exists_nowhere_is_taken_from_the_configuration(
     assert loaded.data_path == tmp_path / "repo" / "src" / "data"
 
 
-def problems_of(path):
+def problems_of(path: str | os.PathLike[str]) -> list[str]:
     with pytest.raises(configuration.ConfigurationError) as err:
         configuration.load_configuration(path)
     return err.value.problems
@@ -482,7 +564,7 @@ def problems_of(path):
 # --- the file without checks --------------------------------------------------------
 
 
-def test_read_configuration_file_returns_the_json_object(tmp_path):
+def test_read_configuration_file_returns_the_json_object(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
 

@@ -49,7 +49,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
 python_version = "3.12"
 files = ["src", "tests"]
 mypy_path = "src"
-check_untyped_defs = true
+strict = true
 
 # pandas and matplotlib only belong to the optional "analysis" extra, which is not part of
 # the dev environment, and pandas ships no type information

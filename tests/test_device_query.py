@@ -6,15 +6,19 @@ are not repeated) and with a local web server that answers following a script (w
 session of urllib3 repeats). The waiting time (time.sleep) is recorded, not waited.
 """
 
+import collections.abc
 import http.server
 import logging
+import pathlib
 import socket
 import threading
+import typing
 
 import pytest
 import requests
 import urllib3.exceptions
 
+import gruenbeck.device
 from gruenbeck import device
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
@@ -25,16 +29,18 @@ VALID_XML = (
 
 
 @pytest.fixture
-def parameter(parameter_file):
+def parameter(parameter_file: pathlib.Path) -> device.Parameter:
     return device.Parameter(str(parameter_file))
 
 
 @pytest.fixture
-def logs(caplog):
+def logs(
+    caplog: pytest.LogCaptureFixture,
+) -> collections.abc.Callable[[], list[tuple[str, str]]]:
     """(level, message) of the records of the device module, INFO and above"""
     caplog.set_level(logging.INFO, logger="gruenbeck")
 
-    def records():
+    def records() -> list[tuple[str, str]]:
         return [
             (record.levelname, record.getMessage())
             for record in caplog.records
@@ -47,30 +53,39 @@ def logs(caplog):
 # --- a fake request function --------------------------------------------------------
 
 
+class Fake:
+    """
+    fake get_data_from_mux_http: `errors` are raised by the next requests, then it answers
+    ANSWER; `calls` records (host, parameters, timeout, session)
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str], float, requests.Session | None]] = []
+        self.errors: list[BaseException] = []
+
+    def fetch(
+        self,
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: requests.Session | None = None,
+    ) -> dict[str, str | None]:
+        self.calls.append((host, list(parameters), timeout, session))
+        if self.errors:
+            raise self.errors.pop(0)
+        return dict(ANSWER)
+
+
 @pytest.fixture
-def fake(monkeypatch):
-    """
-    fake get_data_from_mux_http: `fake.errors` are raised by the next requests, then it
-    answers ANSWER; `fake.calls` records (host, parameters, timeout, session)
-    """
-
-    class Fake:
-        def __init__(self):
-            self.calls: list[tuple] = []
-            self.errors: list[BaseException] = []
-
-        def fetch(self, host, parameters, timeout, session=None):
-            self.calls.append((host, list(parameters), timeout, session))
-            if self.errors:
-                raise self.errors.pop(0)
-            return dict(ANSWER)
-
+def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
     result = Fake()
     monkeypatch.setattr(device, "get_data_from_mux_http", result.fetch)
     return result
 
 
-def test_the_device_is_asked_for_the_clock_and_the_memory_with_a_session(fake, parameter, sleeps):
+def test_the_device_is_asked_for_the_clock_and_the_memory_with_a_session(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     result = device.get_device_data("device.lan", parameter, 7.0, 5, 5.0)
 
     assert result == ANSWER
@@ -85,7 +100,13 @@ def test_the_device_is_asked_for_the_clock_and_the_memory_with_a_session(fake, p
     [ValueError("failed to parse xml: x"), ValueError("device response contains no values")],
     ids=["invalid xml", "no values"],
 )
-def test_invalid_response_is_asked_again(fake, parameter, sleeps, logs, error):
+def test_invalid_response_is_asked_again(
+    fake: Fake,
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    error: Exception,
+) -> None:
     fake.errors = [error, error]
 
     result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
@@ -101,7 +122,9 @@ def test_invalid_response_is_asked_again(fake, parameter, sleeps, logs, error):
     ]
 
 
-def test_invalid_response_fails_after_all_attempts(fake, parameter, sleeps):
+def test_invalid_response_fails_after_all_attempts(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     errors = [ValueError(f"bad {n}") for n in range(5)]
     fake.errors = list(errors)
 
@@ -115,7 +138,9 @@ def test_invalid_response_fails_after_all_attempts(fake, parameter, sleeps):
     assert err.value.__cause__ is errors[3]
 
 
-def test_number_of_retries_and_delay_are_parameters(fake, parameter, sleeps):
+def test_number_of_retries_and_delay_are_parameters(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     fake.errors = [ValueError("bad")] * 2
 
     with pytest.raises(device.DeviceError, match=r"^failed to get device data after 2 attempts"):
@@ -125,7 +150,9 @@ def test_number_of_retries_and_delay_are_parameters(fake, parameter, sleeps):
     assert sleeps == [0.5]
 
 
-def test_no_retry_with_retries_zero(fake, parameter, sleeps):
+def test_no_retry_with_retries_zero(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     fake.errors = [ValueError("bad")]
 
     with pytest.raises(device.DeviceError, match=r"^failed to get device data after 1 attempts"):
@@ -145,7 +172,13 @@ def test_no_retry_with_retries_zero(fake, parameter, sleeps):
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
-def test_request_error_is_not_asked_again_by_the_query(fake, parameter, sleeps, error, text):
+def test_request_error_is_not_asked_again_by_the_query(
+    fake: Fake,
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    error: typing.Any,
+    text: str,
+) -> None:
     # the session repeated what is temporary already; InvalidURL is a ValueError as well
     fake.errors = [error]
 
@@ -158,7 +191,9 @@ def test_request_error_is_not_asked_again_by_the_query(fake, parameter, sleeps, 
     assert sleeps == []
 
 
-def test_unexpected_error_is_not_asked_again(fake, parameter, sleeps):
+def test_unexpected_error_is_not_asked_again(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     # up to P006-S6 any error was repeated; now only cli.main() reports it
     fake.errors = [KeyError("text")]
 
@@ -169,7 +204,7 @@ def test_unexpected_error_is_not_asked_again(fake, parameter, sleeps):
     assert sleeps == []
 
 
-def test_error_text_of_the_last_attempt_has_no_pool_and_url():
+def test_error_text_of_the_last_attempt_has_no_pool_and_url() -> None:
     pool = urllib3.HTTPConnectionPool("device.lan")
     reason = urllib3.exceptions.ReadTimeoutError(pool, "/mux_http", "Read timed out.")
     wrapped = requests.exceptions.ConnectionError(
@@ -186,7 +221,7 @@ def test_error_text_of_the_last_attempt_has_no_pool_and_url():
 # --- the session ---------------------------------------------------------------------
 
 
-def test_the_session_repeats_post_after_temporary_errors():
+def test_the_session_repeats_post_after_temporary_errors() -> None:
     session = device.create_session(4, 2.5)
 
     adapter = session.get_adapter("http://device.lan/mux_http")
@@ -207,14 +242,14 @@ def test_the_session_repeats_post_after_temporary_errors():
 class Script:
     """answers of the local web server, one item per request; "ok" after the last one"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.items: list[str] = []
         self.bodies: list[bytes] = []
         self.release = threading.Event()  # ends the answers "slow"
 
 
 @pytest.fixture
-def server():
+def server() -> collections.abc.Iterator[tuple[str, Script]]:
     """
     local web server for POST /mux_http; items of `script.items`:
     "ok" valid answer, "reset" close the connection, "slow" no answer until the end of the
@@ -224,7 +259,7 @@ def server():
     script = Script()
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
+        def do_POST(self) -> None:
             script.bodies.append(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             item = script.items.pop(0) if script.items else "ok"
             if item == "reset":
@@ -240,7 +275,7 @@ def server():
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: typing.Any) -> None:
             pass
 
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -256,7 +291,12 @@ def server():
     thread.join()
 
 
-def test_success_needs_one_request(server, parameter, sleeps, logs):
+def test_success_needs_one_request(
+    server: tuple[str, Script],
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+) -> None:
     host, script = server
 
     assert device.get_device_data(host, parameter, 5, 5, 5.0) == {
@@ -270,8 +310,11 @@ def test_success_needs_one_request(server, parameter, sleeps, logs):
 
 
 def test_aborted_connection_is_asked_again_at_once_then_with_growing_waits(
-    server, parameter, sleeps, logs
-):
+    server: tuple[str, Script],
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+) -> None:
     host, script = server
     script.items = ["reset", "reset", "reset", "reset"]
 
@@ -291,7 +334,9 @@ def test_aborted_connection_is_asked_again_at_once_then_with_growing_waits(
     assert "Remote end closed connection without response" in logs()[0][1]
 
 
-def test_repeated_requests_are_the_same_post(server, parameter, sleeps):
+def test_repeated_requests_are_the_same_post(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["reset", "503"]
 
@@ -303,7 +348,12 @@ def test_repeated_requests_are_the_same_post(server, parameter, sleeps):
     assert len(shows) == 1
 
 
-def test_server_error_is_asked_again(server, parameter, sleeps, logs):
+def test_server_error_is_asked_again(
+    server: tuple[str, Script],
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+) -> None:
     host, script = server
     script.items = ["503", "503"]
 
@@ -317,7 +367,9 @@ def test_server_error_is_asked_again(server, parameter, sleeps, logs):
     ]
 
 
-def test_server_error_fails_after_all_attempts(server, parameter, sleeps):
+def test_server_error_fails_after_all_attempts(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["503"] * 10
 
@@ -332,7 +384,9 @@ def test_server_error_fails_after_all_attempts(server, parameter, sleeps):
     assert sleeps == [10.0]
 
 
-def test_client_error_is_not_asked_again(server, parameter, sleeps):
+def test_client_error_is_not_asked_again(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["404"]
 
@@ -344,7 +398,9 @@ def test_client_error_is_not_asked_again(server, parameter, sleeps):
     assert sleeps == []
 
 
-def test_aborted_connection_fails_after_all_attempts(server, parameter, sleeps):
+def test_aborted_connection_fails_after_all_attempts(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["reset"] * 10
 
@@ -360,7 +416,12 @@ def test_aborted_connection_fails_after_all_attempts(server, parameter, sleeps):
     assert sleeps == [10.0]
 
 
-def test_no_answer_in_time_is_asked_again(server, parameter, sleeps, logs):
+def test_no_answer_in_time_is_asked_again(
+    server: tuple[str, Script],
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+) -> None:
     host, script = server
     script.items = ["slow"]
 
@@ -371,7 +432,9 @@ def test_no_answer_in_time_is_asked_again(server, parameter, sleeps, logs):
     assert sleeps == []
 
 
-def test_unreachable_device_fails_after_all_attempts(parameter, sleeps):
+def test_unreachable_device_fails_after_all_attempts(
+    parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     # a port nothing listens on
     with socket.socket() as unused:
         unused.bind(("127.0.0.1", 0))
@@ -387,7 +450,12 @@ def test_unreachable_device_fails_after_all_attempts(parameter, sleeps):
 
 
 @pytest.mark.parametrize("item", ["xml", "empty"])
-def test_invalid_answer_is_asked_again_over_the_network(server, parameter, sleeps, item):
+def test_invalid_answer_is_asked_again_over_the_network(
+    server: tuple[str, Script],
+    parameter: gruenbeck.device.Parameter,
+    sleeps: list[float],
+    item: str,
+) -> None:
     host, script = server
     script.items = [item, item]
 
@@ -398,7 +466,9 @@ def test_invalid_answer_is_asked_again_over_the_network(server, parameter, sleep
     assert sleeps == [5.0, 5.0]
 
 
-def test_invalid_answer_fails_after_all_attempts_over_the_network(server, parameter, sleeps):
+def test_invalid_answer_fails_after_all_attempts_over_the_network(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["xml"] * 10
 
@@ -409,7 +479,9 @@ def test_invalid_answer_fails_after_all_attempts_over_the_network(server, parame
     assert len(script.bodies) == 3
 
 
-def test_no_retry_with_retries_zero_over_the_network(server, parameter, sleeps):
+def test_no_retry_with_retries_zero_over_the_network(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
     host, script = server
     script.items = ["reset", "ok"]
 

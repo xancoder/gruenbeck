@@ -1,5 +1,6 @@
 """monthly statistics of the collected water consumption (extra "analysis")"""
 
+import os
 import pathlib
 import re
 
@@ -14,7 +15,7 @@ class AnalysisError(errors.GruenbeckError):
     """nothing to analyse"""
 
 
-def get_data_files(data_path, prefix):
+def get_data_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:
     """
     find the yearly data files written by the data collector
     :param data_path: data folder (dataPath)
@@ -28,7 +29,7 @@ def get_data_files(data_path, prefix):
     )
 
 
-def main(config_file):
+def main(config_file: str | os.PathLike[str]) -> None:
     # pandas and matplotlib belong to the extra "analysis"; importing them here
     # keeps the module and the help of gruenbeck-analyse usable without it
     import matplotlib.pyplot as plt

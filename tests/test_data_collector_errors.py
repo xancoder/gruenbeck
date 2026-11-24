@@ -5,18 +5,27 @@ configuration and the data folder, the retries of the device request, get_mail a
 Since P006-S3 the configuration is checked when it is loaded (tests/test_config.py).
 """
 
+import collections.abc
 import copy
 import datetime
+import email.message
 import logging
+import pathlib
 import smtplib
 import sys
+import typing
 
 import pytest
+
+import gruenbeck.config
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
 from gruenbeck import cli, mail, storage
 from gruenbeck import config as configuration
+
+if typing.TYPE_CHECKING:
+    from conftest import FakeSMTP
 
 PREFIX = "p"
 TODAY = datetime.date(2026, 11, 23)
@@ -24,11 +33,18 @@ MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 
 
 @pytest.fixture
-def mails(monkeypatch):
+def mails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, configuration.Mail, typing.Any]]:
     """records data and error mails instead of sending them"""
-    sent = []
+    sent: list[tuple[str, configuration.Mail, typing.Any]] = []
 
-    def record(settings, subject, text, attachments=()):
+    def record(
+        settings: configuration.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append((subject, settings, text))
         else:
@@ -39,7 +55,7 @@ def mails(monkeypatch):
     return sent
 
 
-def mail_settings(config_data):
+def mail_settings(config_data: dict[str, typing.Any]) -> configuration.Mail:
     """the mail section of config_data as the loaded configuration has it"""
     section = config_data["mail"]
     return configuration.Mail(
@@ -56,11 +72,13 @@ def mail_settings(config_data):
 
 
 @pytest.fixture
-def logs(caplog):
+def logs(
+    caplog: pytest.LogCaptureFixture,
+) -> collections.abc.Callable[[], list[tuple[str, str]]]:
     """(level, message) of the records of the data collector, INFO and above"""
     caplog.set_level(logging.INFO, logger=cli.package_logger.name)
 
-    def records():
+    def records() -> list[tuple[str, str]]:
         return [
             (record.levelname, record.getMessage())
             for record in caplog.records
@@ -73,7 +91,11 @@ def logs(caplog):
 # --- report_error: log and error mail ------------------------------------------------
 
 
-def test_report_error_logs_and_sends_the_error_mail(mails, logs, loaded_config):
+def test_report_error_logs_and_sends_the_error_mail(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     # no exit (no SystemExit): since P006-S4 main() sets the exit code
     cli.report_error(loaded_config.mail, "something failed")
 
@@ -90,7 +112,9 @@ def test_report_error_logs_and_sends_the_error_mail(mails, logs, loaded_config):
     ]
 
 
-def test_report_error_sends_a_text_mail_over_smtp(smtp, sleeps, loaded_config):
+def test_report_error_sends_a_text_mail_over_smtp(
+    smtp: "FakeSMTP", sleeps: list[float], loaded_config: gruenbeck.config.Configuration
+) -> None:
     cli.report_error(loaded_config.mail, "something failed")
 
     (message,) = smtp.messages()
@@ -99,7 +123,12 @@ def test_report_error_sends_a_text_mail_over_smtp(smtp, sleeps, loaded_config):
     assert message.get_content() == "something failed\n"
 
 
-def test_failed_error_mail_is_logged(smtp, sleeps, logs, loaded_config):
+def test_failed_error_mail_is_logged(
+    smtp: "FakeSMTP",
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
     cli.report_error(loaded_config.mail, "something failed")
@@ -114,7 +143,9 @@ def test_failed_error_mail_is_logged(smtp, sleeps, logs, loaded_config):
     ]
 
 
-def test_error_mail_without_mail_configuration_is_logged(smtp, logs):
+def test_error_mail_without_mail_configuration_is_logged(
+    smtp: "FakeSMTP", logs: collections.abc.Callable[[], list[tuple[str, str]]]
+) -> None:
     # None: the mail section of the configuration is missing or invalid
     cli.report_error(None, "something failed")
 
@@ -125,7 +156,11 @@ def test_error_mail_without_mail_configuration_is_logged(smtp, logs):
     assert smtp.connections == []
 
 
-def test_texts_with_percent_signs_are_logged_unchanged(mails, logs, loaded_config):
+def test_texts_with_percent_signs_are_logged_unchanged(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     cli.report_error(loaded_config.mail, "the date does not match '%d.%m.%Y'")
 
     assert logs()[0] == ("ERROR", "the date does not match '%d.%m.%Y'")
@@ -134,7 +169,11 @@ def test_texts_with_percent_signs_are_logged_unchanged(mails, logs, loaded_confi
 # --- configuration and data folder ---------------------------------------------------
 
 
-def test_missing_configuration_exits_with_1_without_mail(mails, logs, tmp_path):
+def test_missing_configuration_exits_with_1_without_mail(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+) -> None:
     config_file = tmp_path / "missing.json"
 
     assert cli.main(str(config_file)) == 1
@@ -145,7 +184,11 @@ def test_missing_configuration_exits_with_1_without_mail(mails, logs, tmp_path):
     assert mails == []
 
 
-def test_invalid_json_exits_with_1_without_mail(mails, logs, tmp_path):
+def test_invalid_json_exits_with_1_without_mail(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+) -> None:
     config_file = tmp_path / "config.json"
     config_file.write_text("{not json")
 
@@ -162,7 +205,12 @@ def test_invalid_json_exits_with_1_without_mail(mails, logs, tmp_path):
     assert mails == []
 
 
-def test_invalid_configuration_sends_every_problem_by_mail(mails, logs, config_data, write_config):
+def test_invalid_configuration_sends_every_problem_by_mail(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
     del config_data["parameterFile"]
     config_data["softWaterSystem"]["timeout"] = 0
 
@@ -176,7 +224,12 @@ def test_invalid_configuration_sends_every_problem_by_mail(mails, logs, config_d
     assert mails == [("gruenbeck data collector failure", mail_settings(config_data), message)]
 
 
-def test_invalid_mail_section_exits_with_1_without_mail(mails, logs, config_data, write_config):
+def test_invalid_mail_section_exits_with_1_without_mail(
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
     config_data["mail"]["smtpPort"] = "smtp"
 
     assert cli.main(str(write_config(config_data))) == 1
@@ -191,15 +244,21 @@ def test_invalid_mail_section_exits_with_1_without_mail(mails, logs, config_data
     assert mails == []
 
 
-def test_data_folder_is_created(tmp_path, loaded_config):
+def test_data_folder_is_created(
+    tmp_path: pathlib.Path, loaded_config: gruenbeck.config.Configuration
+) -> None:
     folder = tmp_path / "data"
 
     assert cli.get_data_folder(loaded_config) == folder
     assert folder.is_dir()
 
 
-def test_data_folder_without_permission_is_an_error(monkeypatch, tmp_path, loaded_config):
-    def denied(data_folder):
+def test_data_folder_without_permission_is_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
+    def denied(data_folder: object) -> typing.NoReturn:
         raise PermissionError(13, "Permission denied", str(data_folder))
 
     monkeypatch.setattr(storage, "check_data_folder", denied)
@@ -212,7 +271,11 @@ def test_data_folder_without_permission_is_an_error(monkeypatch, tmp_path, loade
     )
 
 
-def test_data_folder_in_a_missing_folder_is_an_error(tmp_path, config_data, write_config):
+def test_data_folder_in_a_missing_folder_is_an_error(
+    tmp_path: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
     config_data["dataPath"] = str(tmp_path / "a" / "data")
     loaded = gruenbeck.config.load_configuration(write_config(config_data))
 
@@ -226,13 +289,19 @@ def test_data_folder_in_a_missing_folder_is_an_error(tmp_path, config_data, writ
     )
 
 
-def test_device_parameter_is_read_from_the_parameter_file(loaded_config):
+def test_device_parameter_is_read_from_the_parameter_file(
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     parameter = cli.get_device_parameter(loaded_config)
 
     assert "D_Y_2_14" in parameter.get_parameter_list()
 
 
-def test_missing_parameter_file_is_an_error(tmp_path, config_data, write_config):
+def test_missing_parameter_file_is_an_error(
+    tmp_path: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
     path = tmp_path / "missing.csv"
     config_data["parameterFile"] = str(path)
     loaded = gruenbeck.config.load_configuration(write_config(config_data))
@@ -247,26 +316,37 @@ def test_missing_parameter_file_is_an_error(tmp_path, config_data, write_config)
 # --- fake device ----------------------------------------------------------------------
 
 
+class FakeDevice:
+    """
+    fake device: `errors` are raised by the next requests, then it answers `answer`;
+    `calls` records (host, parameters, timeout)
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str], float]] = []
+        self.errors: list[BaseException] = []
+        self.answer: dict[str, str | None] = {
+            "D_C_4_2": "16:00",
+            **{name: "1" for name in MEMORY},
+        }
+
+    def fetch(
+        self,
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
+        self.calls.append((host, list(parameters), timeout))
+        if self.errors:
+            raise self.errors.pop(0)
+        return dict(self.answer)
+
+
 @pytest.fixture
-def device(monkeypatch):
-    """
-    fake device: `device.errors` are raised by the next requests, then it answers
-    `device.answer`; `device.calls` records (host, parameters, timeout)
-    """
-
-    class Device:
-        def __init__(self):
-            self.calls: list[tuple] = []
-            self.errors: list[BaseException] = []
-            self.answer = {"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}}
-
-        def fetch(self, host, parameters, timeout, session=None):
-            self.calls.append((host, list(parameters), timeout))
-            if self.errors:
-                raise self.errors.pop(0)
-            return dict(self.answer)
-
-    fake = Device()
+def device(monkeypatch: pytest.MonkeyPatch) -> FakeDevice:
+    """fake device, see FakeDevice"""
+    fake = FakeDevice()
     monkeypatch.setattr(gruenbeck.device, "get_data_from_mux_http", fake.fetch)
     return fake
 
@@ -274,7 +354,7 @@ def device(monkeypatch):
 # --- data mail: get_mail ------------------------------------------------------------
 
 
-def parts(message):
+def parts(message: email.message.EmailMessage) -> list[tuple[str, str | None, typing.Any]]:
     """(content type, filename, content) of every part of a multipart mail"""
     return [
         (part.get_content_type(), part.get_filename(), part.get_content())
@@ -282,7 +362,12 @@ def parts(message):
     ]
 
 
-def test_get_mail_sends_the_csv_files_of_the_data_folder(smtp, logs, tmp_path, loaded_config):
+def test_get_mail_sends_the_csv_files_of_the_data_folder(
+    smtp: "FakeSMTP",
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     (tmp_path / "gruenbeck_2026.csv").write_text("date,value\n2026-11-22,101\n")
     (tmp_path / "gruenbeck_2025.csv").write_bytes(b"date,value\r\n2025-12-31,3\r\n")
     (tmp_path / "notes.txt").write_text("not attached")
@@ -304,7 +389,12 @@ def test_get_mail_sends_the_csv_files_of_the_data_folder(smtp, logs, tmp_path, l
     assert logs() == [("INFO", "mail sent successfully")]
 
 
-def test_get_mail_without_csv_files_says_so(smtp, logs, tmp_path, loaded_config):
+def test_get_mail_without_csv_files_says_so(
+    smtp: "FakeSMTP",
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     (tmp_path / "notes.txt").write_text("not attached")
 
     assert cli.get_mail(loaded_config, tmp_path) is True
@@ -315,7 +405,12 @@ def test_get_mail_without_csv_files_says_so(smtp, logs, tmp_path, loaded_config)
     assert logs() == [("INFO", "mail sent successfully")]
 
 
-def test_get_mail_without_data_folder_returns_false(smtp, logs, tmp_path, loaded_config):
+def test_get_mail_without_data_folder_returns_false(
+    smtp: "FakeSMTP",
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     folder = tmp_path / "missing"
 
     assert cli.get_mail(loaded_config, folder) is False
@@ -340,8 +435,20 @@ def test_get_mail_without_data_folder_returns_false(smtp, logs, tmp_path, loaded
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
-def test_failed_data_mail_returns_false(monkeypatch, logs, tmp_path, loaded_config, error, message):
-    def fail(settings, subject, text, attachments=()):
+def test_failed_data_mail_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+    error: Exception,
+    message: str,
+) -> None:
+    def fail(
+        settings: configuration.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> typing.NoReturn:
         raise error
 
     monkeypatch.setattr(mail, "send_mail", fail)
@@ -351,8 +458,12 @@ def test_failed_data_mail_returns_false(monkeypatch, logs, tmp_path, loaded_conf
 
 
 def test_data_mail_over_smtp_with_rejected_login_returns_false(
-    smtp, sleeps, logs, tmp_path, loaded_config
-):
+    smtp: "FakeSMTP",
+    sleeps: list[float],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    loaded_config: gruenbeck.config.Configuration,
+) -> None:
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
     assert cli.get_mail(loaded_config, tmp_path) is False
@@ -365,7 +476,13 @@ def test_data_mail_over_smtp_with_rejected_login_returns_false(
 
 
 @pytest.fixture
-def run(device, mails, monkeypatch, config_data, write_config):
+def run(
+    device: FakeDevice,
+    mails: list[tuple[str, configuration.Mail, typing.Any]],
+    monkeypatch: pytest.MonkeyPatch,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> collections.abc.Callable[..., int]:
     """
     run main() on TODAY 16:00 with the fake device
     :return: function(**changes); a change replaces a top-level key of the
@@ -374,7 +491,7 @@ def run(device, mails, monkeypatch, config_data, write_config):
     now = datetime.datetime.combine(TODAY, datetime.time(16, 0))
     monkeypatch.setattr(cli, "local_now", lambda: now)
 
-    def run_main(**changes):
+    def run_main(**changes: typing.Any) -> int:
         config = copy.deepcopy(config_data)
         config["dataFile"]["prefix"] = PREFIX
         config.update(changes)
@@ -386,7 +503,14 @@ def run(device, mails, monkeypatch, config_data, write_config):
     return run_main
 
 
-def test_successful_run_logs_start_and_end(run, device, mails, logs, tmp_path, config_data):
+def test_successful_run_logs_start_and_end(
+    run: collections.abc.Callable[..., int],
+    device: FakeDevice,
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+    config_data: dict[str, typing.Any],
+) -> None:
     assert run() == 0
 
     assert logs()[0] == ("INFO", f"run script: {sys.argv[0]}")
@@ -399,11 +523,20 @@ def test_successful_run_logs_start_and_end(run, device, mails, logs, tmp_path, c
 
 
 def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
-    run, device, monkeypatch, logs, tmp_path
-):
+    run: collections.abc.Callable[..., int],
+    device: FakeDevice,
+    monkeypatch: pytest.MonkeyPatch,
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+) -> None:
     subjects = []
 
-    def fail(settings, subject, text, attachments=()):
+    def fail(
+        settings: configuration.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+    ) -> typing.NoReturn:
         subjects.append(subject)
         raise mail.MailError("Authentication failed: refused")
 
@@ -419,7 +552,12 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
     assert subjects == ["[data collector] - gruenbeck"]
 
 
-def test_run_without_consumption_values_is_an_error(run, device, mails, tmp_path):
+def test_run_without_consumption_values_is_an_error(
+    run: collections.abc.Callable[..., int],
+    device: FakeDevice,
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     device.answer = {"D_C_4_2": "16:00"}
 
     assert run() == 1
@@ -427,7 +565,11 @@ def test_run_without_consumption_values_is_an_error(run, device, mails, tmp_path
     assert list((tmp_path / "data").iterdir()) == []
 
 
-def test_run_without_configuration_file_asks_nobody(device, mails, tmp_path):
+def test_run_without_configuration_file_asks_nobody(
+    device: FakeDevice,
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    tmp_path: pathlib.Path,
+) -> None:
     assert cli.main(str(tmp_path / "missing.json")) == 1
     assert device.calls == []
     assert mails == []
@@ -450,15 +592,26 @@ def test_run_without_configuration_file_asks_nobody(device, mails, tmp_path):
     ids=lambda value: value if isinstance(value, str) else str(value),
 )
 def test_run_with_incomplete_configuration_fails_before_asking_the_device(
-    run, device, mails, tmp_path, changes, message
-):
+    run: collections.abc.Callable[..., int],
+    device: FakeDevice,
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    tmp_path: pathlib.Path,
+    changes: typing.Any,
+    message: str,
+) -> None:
     assert run(**changes) == 1
     assert device.calls == []
     assert [text for _, _, text in mails] == [message]
     assert not list(tmp_path.glob("data/*.csv"))
 
 
-def test_run_without_valid_mail_section_fails_without_mail(run, device, mails, logs, tmp_path):
+def test_run_without_valid_mail_section_fails_without_mail(
+    run: collections.abc.Callable[..., int],
+    device: FakeDevice,
+    mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
+    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    tmp_path: pathlib.Path,
+) -> None:
     assert run(mail=None, dataPath=None) == 1
     assert device.calls == []
     assert mails == []

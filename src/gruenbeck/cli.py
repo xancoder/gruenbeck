@@ -9,8 +9,11 @@ the logging handlers.
 import argparse
 import datetime
 import logging.handlers
+import os
+import pathlib
 import sys
 import traceback
+from collections.abc import Sequence
 
 from gruenbeck import analysis, device, errors, mail, storage
 from gruenbeck import config as configuration
@@ -35,7 +38,9 @@ class CollectError(errors.GruenbeckError):
     """the new values are not stored (none left, or they differ from the stored ones)"""
 
 
-def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
+def setup_logging(
+    log_console: bool = False, log_file: str | os.PathLike[str] = "./log/gruenbeck_error.log"
+) -> list[logging.Handler]:
     """
     attach the handlers to the logger of the package and let it pass INFO and above
 
@@ -63,7 +68,7 @@ def setup_logging(log_console=False, log_file="./log/gruenbeck_error.log"):
     return handlers
 
 
-def main(config_file) -> int:
+def main(config_file: str | os.PathLike[str]) -> int:
     """
     run the data collector once
     :return: exit code, 0 if the data was collected, stored and sent by mail, else 1
@@ -104,7 +109,7 @@ def main(config_file) -> int:
     return 0
 
 
-def collect_and_store(config: configuration.Configuration):
+def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
     """
     request the device and store the new values in the yearly files
     :return: pathlib.Path of the data folder
@@ -123,9 +128,14 @@ def collect_and_store(config: configuration.Configuration):
     )
     now = local_now()
     device.check_device_clock(device_data.pop(device.DEVICE_CLOCK_PARAMETER, None), now)
-    device_data = device.add_timestamp_as_key_device_data(device_data, today=now.date())
-    device_data = filter_first_date(device_data, data_file.first_date)
-    new_values = {day: int(value) for day, value in device_data.items()}
+    values_by_day = device.add_timestamp_as_key_device_data(device_data, today=now.date())
+    values_by_day = filter_first_date(values_by_day, data_file.first_date)
+    # a value without text is None: int() raises TypeError, reported as unexpected error
+    # until P006-S9 checks the values
+    new_values = {
+        day: int(value)  # type: ignore[arg-type]  # a value may be None, see above
+        for day, value in values_by_day.items()
+    }
 
     # read every yearly file involved (also the one of the day before the oldest new
     # value, see check_stored_overlap) before anything is written
@@ -177,7 +187,7 @@ def collect_and_store(config: configuration.Configuration):
     return data_path
 
 
-def get_data_folder(config):
+def get_data_folder(config: configuration.Configuration) -> pathlib.Path:
     """
     :raises storage.StorageError: the data folder cannot be created
     """
@@ -187,7 +197,7 @@ def get_data_folder(config):
         raise storage.StorageError(f"creation data folder failed: {err}") from err
 
 
-def get_device_parameter(config):
+def get_device_parameter(config: configuration.Configuration) -> device.Parameter:
     """
     :raises device.DeviceError: the parameter file is missing
     """
@@ -221,12 +231,14 @@ def report_error(
         logger.error("Failed to send error notification email: %s", mail_error)
 
 
-def local_now():
+def local_now() -> datetime.datetime:
     """current local time of the run"""
     return datetime.datetime.now()
 
 
-def filter_first_date(device_data, first_date):
+def filter_first_date[V](
+    device_data: dict[datetime.date, V], first_date: datetime.date | None
+) -> dict[datetime.date, V]:
     """
     drop the values of days before dataFile.firstDate
     :param device_data: dictionary of datetime.date and value
@@ -248,7 +260,9 @@ def filter_first_date(device_data, first_date):
     return result
 
 
-def check_stored_overlap(new_values, stored, date_pattern):
+def check_stored_overlap(
+    new_values: dict[datetime.date, int], stored: dict[str, int | str], date_pattern: str
+) -> None:
     """
     compare the new values with the days that are stored already
 
@@ -285,7 +299,7 @@ def check_stored_overlap(new_values, stored, date_pattern):
     )
 
 
-def get_mail(config, data_path) -> bool:
+def get_mail(config: configuration.Configuration, data_path: pathlib.Path) -> bool:
     """
     send the csv files of the data folder as data mail
     :return: True if the mail was sent; a failure is logged and gives False
@@ -304,7 +318,7 @@ def get_mail(config, data_path) -> bool:
         return False
 
 
-def collect(argv=None) -> int:
+def collect(argv: Sequence[str] | None = None) -> int:
     """
     command gruenbeck-collect: the options of the former src/data-collector.py
     :return: exit code (the console script passes it to sys.exit)
@@ -340,7 +354,7 @@ def collect(argv=None) -> int:
     return main(args.config_file)
 
 
-def analyse(argv=None) -> int:
+def analyse(argv: Sequence[str] | None = None) -> int:
     """
     command gruenbeck-analyse: the options of the former src/data-analyse.py
     :return: exit code (the console script passes it to sys.exit)

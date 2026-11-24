@@ -109,7 +109,7 @@ class Configuration:
 class _Section:
     """reads the keys of one object of the JSON file and records the problems"""
 
-    def __init__(self, data: dict, prefix: str, problems: list[str]):
+    def __init__(self, data: dict[str, typing.Any], prefix: str, problems: list[str]):
         self.data = data
         self.prefix = prefix
         self.problems = problems
@@ -118,10 +118,10 @@ class _Section:
     def name(self, key: str) -> str:
         return f"{self.prefix}.{key}" if self.prefix else key
 
-    def problem(self, key: str, value, reason: str) -> None:
+    def problem(self, key: str, value: object, reason: str) -> None:
         self.problems.append(f"invalid config parameter {self.name(key)} {value!r}: {reason}")
 
-    def value(self, key: str, required: bool = True):
+    def value(self, key: str, required: bool = True) -> typing.Any:
         self.read.add(key)
         if key not in self.data:
             if required:
@@ -155,7 +155,7 @@ class _Section:
                 logger.warning("unknown config parameter %r is ignored", self.name(key))
 
 
-def read_configuration_file(configuration_file) -> dict:
+def read_configuration_file(configuration_file: str | os.PathLike[str]) -> dict[str, typing.Any]:
     """
     the JSON object of the configuration file, not checked
     :raises FileNotFoundError: the file does not exist
@@ -174,7 +174,7 @@ def read_configuration_file(configuration_file) -> dict:
     return data
 
 
-def load_configuration(configuration_file) -> Configuration:
+def load_configuration(configuration_file: str | os.PathLike[str]) -> Configuration:
     """
     read and check the configuration file
     :param configuration_file: path of the JSON file
@@ -259,7 +259,7 @@ def _read_mail(section: _Section | None) -> Mail | None:
         smtp_security=smtp_security,
         sender_email=typing.cast(str, sender_email),
         sender_password=typing.cast(str, sender_password),
-        recipients=typing.cast(tuple, recipients),
+        recipients=typing.cast(tuple[str, ...], recipients),
         subject=typing.cast(str, subject),
         retries=typing.cast(int, retries),
         retry_delay=typing.cast(float, retry_delay),

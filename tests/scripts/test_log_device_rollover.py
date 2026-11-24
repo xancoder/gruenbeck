@@ -1,3 +1,4 @@
+import collections.abc
 import csv
 import datetime
 import importlib.util
@@ -24,44 +25,56 @@ START = datetime.datetime(2026, 11, 18, 9, 30, tzinfo=CET)
 class FakeClock:
     """replaces now() and sleep(); a request takes `request_seconds`"""
 
-    def __init__(self, request_seconds=0.0):
+    def __init__(self, request_seconds: float = 0.0) -> None:
         self.current = START
         self.request_seconds = request_seconds
-        self.sleeps = []
+        self.sleeps: list[float] = []
 
-    def now(self):
+    def now(self) -> datetime.datetime:
         return self.current
 
-    def sleep(self, seconds):
+    def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
         self.current += datetime.timedelta(seconds=seconds)
 
 
-def device(clock, responses):
-    """fake fetch: returns or raises the given responses in order"""
-    calls = []
+Response = dict[str, str] | Exception
 
-    def fetch(host, parameters, timeout):
-        calls.append((host, list(parameters), timeout))
-        clock.current += datetime.timedelta(seconds=clock.request_seconds)
-        response = responses[len(calls) - 1]
+
+class FakeFetch:
+    """fake fetch: returns or raises the given responses in order; `calls` records them"""
+
+    def __init__(self, clock: FakeClock, responses: collections.abc.Sequence[Response]) -> None:
+        self.clock = clock
+        self.responses = responses
+        self.calls: list[tuple[str, list[str], float]] = []
+
+    def __call__(
+        self, host: str, parameters: collections.abc.Iterable[str], timeout: float
+    ) -> dict[str, str]:
+        self.calls.append((host, list(parameters), timeout))
+        self.clock.current += datetime.timedelta(seconds=self.clock.request_seconds)
+        response = self.responses[len(self.calls) - 1]
         if isinstance(response, Exception):
             raise response
         return response
 
-    fetch.calls = calls  # type: ignore[attr-defined]  # read by the tests
-    return fetch
 
-
-def values(d1, d2, d3="170", clock="01:05"):
+def values(d1: str, d2: str, d3: str = "170", clock: str = "01:05") -> dict[str, str]:
     return {"D_C_4_2": clock, "D_Y_2_1": d1, "D_Y_2_2": d2, "D_Y_2_3": d3}
 
 
-def run(tmp_path, responses, interval=300, hours=None, clock=None):
+def run(
+    tmp_path: pathlib.Path,
+    responses: collections.abc.Sequence[Response],
+    interval: float = 300,
+    hours: float | None = None,
+    clock: FakeClock | None = None,
+) -> tuple[int, list[dict[str, str]], FakeFetch, FakeClock]:
     clock = clock or FakeClock()
     if hours is None:
         hours = (len(responses) - 1) * interval / 3600
-    fetch = device(clock, responses)
+    fetch = FakeFetch(clock, responses)
     output = tmp_path / "log" / "device_rollover.csv"
     # like main(): continue the comparison of an earlier run in the same file
     count = rollover.run(
@@ -78,16 +91,16 @@ def run(tmp_path, responses, interval=300, hours=None, clock=None):
     return count, read_rows(output), fetch, clock
 
 
-def read_rows(output):
+def read_rows(output: pathlib.Path) -> list[dict[str, str]]:
     with output.open(newline="", encoding="utf-8") as csv_file:
         return list(csv.DictReader(csv_file))
 
 
-def test_script_is_executable():
+def test_script_is_executable() -> None:
     assert os.access(SCRIPT, os.X_OK)
 
 
-def test_row_format_with_local_time_offset_and_device_values(tmp_path):
+def test_row_format_with_local_time_offset_and_device_values(tmp_path: pathlib.Path) -> None:
     count, rows, fetch, _ = run(tmp_path, [values("93", "33")])
 
     assert count == 1
@@ -105,7 +118,7 @@ def test_row_format_with_local_time_offset_and_device_values(tmp_path):
     assert fetch.calls == [("device.lan", ["D_C_4_2", "D_Y_2_1", "D_Y_2_2", "D_Y_2_3"], 12.5)]
 
 
-def test_header_is_written_only_once_across_runs(tmp_path):
+def test_header_is_written_only_once_across_runs(tmp_path: pathlib.Path) -> None:
     run(tmp_path, [values("93", "33")])
     run(tmp_path, [values("93", "33")])
 
@@ -115,8 +128,8 @@ def test_header_is_written_only_once_across_runs(tmp_path):
     assert lines.count(lines[0]) == 1
 
 
-def test_failed_request_is_logged_and_logging_continues(tmp_path):
-    responses = [
+def test_failed_request_is_logged_and_logging_continues(tmp_path: pathlib.Path) -> None:
+    responses: list[Response] = [
         requests.exceptions.ConnectionError("Remote end closed connection"),
         ValueError("[-] device response contains no values"),
         values("93", "33"),
@@ -130,16 +143,16 @@ def test_failed_request_is_logged_and_logging_continues(tmp_path):
     assert rows[0]["D_Y_2_1"] == ""
 
 
-def test_rollover_is_detected_when_values_move_on(tmp_path):
-    responses = [values("93", "33"), values("93", "33"), values("41", "93", "33")]
+def test_rollover_is_detected_when_values_move_on(tmp_path: pathlib.Path) -> None:
+    responses: list[Response] = [values("93", "33"), values("93", "33"), values("41", "93", "33")]
     _, rows, _, _ = run(tmp_path, responses)
 
     assert [row["status"] for row in rows] == ["ok", "ok", "rollover"]
     assert rows[2]["message"] == "D_Y_2_1 93 -> 41, D_Y_2_2 33 -> 93"
 
 
-def test_incomplete_response_is_no_rollover(tmp_path):
-    responses = [
+def test_incomplete_response_is_no_rollover(tmp_path: pathlib.Path) -> None:
+    responses: list[Response] = [
         values("93", "33"),
         {"D_C_4_2": "01:10", "D_Y_2_1": "93"},
         values("-", "33"),
@@ -162,16 +175,16 @@ def test_incomplete_response_is_no_rollover(tmp_path):
     assert rows[1]["device_clock"] == "01:10"
 
 
-def test_first_complete_response_after_errors_is_no_rollover(tmp_path):
-    responses = [requests.exceptions.ConnectionError("refused"), values("93", "33")]
+def test_first_complete_response_after_errors_is_no_rollover(tmp_path: pathlib.Path) -> None:
+    responses: list[Response] = [requests.exceptions.ConnectionError("refused"), values("93", "33")]
     _, rows, _, _ = run(tmp_path, responses)
 
     assert [row["status"] for row in rows] == ["error", "ok"]
 
 
-def test_run_ends_after_hours_and_keeps_the_schedule(tmp_path):
+def test_run_ends_after_hours_and_keeps_the_schedule(tmp_path: pathlib.Path) -> None:
     clock = FakeClock(request_seconds=20)
-    responses = [values("93", "33")] * 10
+    responses: list[Response] = [values("93", "33")] * 10
     count, rows, _, clock = run(tmp_path, responses, interval=600, hours=1, clock=clock)
 
     # polls at 0, 10, ..., 60 minutes: slow requests do not shift the schedule
@@ -180,11 +193,13 @@ def test_run_ends_after_hours_and_keeps_the_schedule(tmp_path):
     assert rows[-1]["time"] == "2026-11-18T10:30:20+01:00"
 
 
-def test_keyboard_interrupt_stops_cleanly(tmp_path, monkeypatch, capsys):
+def test_keyboard_interrupt_stops_cleanly(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
 
-    def interrupted(*args, **kwargs):
+    def interrupted(*args: object, **kwargs: object) -> typing.NoReturn:
         raise KeyboardInterrupt
 
     monkeypatch.setattr(rollover, "run", interrupted)
@@ -193,12 +208,21 @@ def test_keyboard_interrupt_stops_cleanly(tmp_path, monkeypatch, capsys):
     assert "[*] stopped" in capsys.readouterr().out
 
 
-def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
+def test_main_passes_device_config_and_options_to_run(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan", "timeout": 7}}))
     seen: dict[str, typing.Any] = {}
 
-    def fake_run(host, timeout, output, interval, hours, previous_row):
+    def fake_run(
+        host: str,
+        timeout: float,
+        output: pathlib.Path,
+        interval: float,
+        hours: float,
+        previous_row: dict[str, str] | None,
+    ) -> int:
         seen.update(
             host=host,
             timeout=timeout,
@@ -224,7 +248,9 @@ def test_main_passes_device_config_and_options_to_run(tmp_path, monkeypatch):
     }
 
 
-def test_main_continues_from_last_complete_row(tmp_path, monkeypatch, capsys):
+def test_main_continues_from_last_complete_row(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
     output = tmp_path / "out.csv"
@@ -242,7 +268,7 @@ def test_main_continues_from_last_complete_row(tmp_path, monkeypatch, capsys):
     )
 
 
-def test_rollover_between_two_runs_is_detected(tmp_path):
+def test_rollover_between_two_runs_is_detected(tmp_path: pathlib.Path) -> None:
     run(tmp_path, [values("105", "93")])
     _, rows, _, _ = run(tmp_path, [values("9", "105", "93"), values("9", "105", "93")])
 
@@ -252,16 +278,16 @@ def test_rollover_between_two_runs_is_detected(tmp_path):
     )
 
 
-def test_no_rollover_between_two_runs_with_same_values(tmp_path):
+def test_no_rollover_between_two_runs_with_same_values(tmp_path: pathlib.Path) -> None:
     run(tmp_path, [values("105", "93")])
     _, rows, _, _ = run(tmp_path, [values("105", "93")])
 
     assert [row["status"] for row in rows] == ["ok", "ok"]
 
 
-def test_errors_at_the_end_of_the_earlier_run_are_skipped(tmp_path):
+def test_errors_at_the_end_of_the_earlier_run_are_skipped(tmp_path: pathlib.Path) -> None:
     run(tmp_path, [values("105", "93"), requests.exceptions.ConnectionError("refused")])
-    responses = [
+    responses: list[Response] = [
         ValueError("[-] device response contains no values"),
         values("9", "105", "93"),
         values("41", "9", "105"),
@@ -275,7 +301,7 @@ def test_errors_at_the_end_of_the_earlier_run_are_skipped(tmp_path):
     assert "since" not in rows[4]["message"]
 
 
-def test_empty_file_gets_a_header(tmp_path):
+def test_empty_file_gets_a_header(tmp_path: pathlib.Path) -> None:
     output = tmp_path / "log" / "device_rollover.csv"
     output.parent.mkdir()
     output.touch()
@@ -285,13 +311,15 @@ def test_empty_file_gets_a_header(tmp_path):
     assert [row["status"] for row in rows] == ["ok"]
 
 
-def test_foreign_file_is_not_appended_to(tmp_path, monkeypatch, capsys):
+def test_foreign_file_is_not_appended_to(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
     output = tmp_path / "gruenbeck_water_consumption_2026.csv"
     output.write_text("date,value\n2026-11-16,170\n")
 
-    def unexpected(*args, **kwargs):
+    def unexpected(*args: object, **kwargs: object) -> typing.NoReturn:
         raise AssertionError("run must not start")
 
     monkeypatch.setattr(rollover, "run", unexpected)
@@ -301,7 +329,7 @@ def test_foreign_file_is_not_appended_to(tmp_path, monkeypatch, capsys):
     assert output.read_text() == "date,value\n2026-11-16,170\n"
 
 
-def test_default_timeout_comes_from_gruenbeck(tmp_path):
+def test_default_timeout_comes_from_gruenbeck(tmp_path: pathlib.Path) -> None:
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}}))
 
@@ -321,7 +349,9 @@ def test_default_timeout_comes_from_gruenbeck(tmp_path):
         ({"softWaterSystem": {"host": "h", "timeout": "x"}}, "[-] invalid configuration"),
     ],
 )
-def test_invalid_configuration_exits_with_1(tmp_path, capsys, config, message):
+def test_invalid_configuration_exits_with_1(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], config: typing.Any, message: str
+) -> None:
     config_file = tmp_path / "config.json"
     if config is not None:
         config_file.write_text(json.dumps(config))
@@ -332,6 +362,6 @@ def test_invalid_configuration_exits_with_1(tmp_path, capsys, config, message):
 
 @pytest.mark.parametrize("option", ["--interval", "--hours"])
 @pytest.mark.parametrize("value", ["0", "-5"])
-def test_interval_and_hours_must_be_positive(option, value):
+def test_interval_and_hours_must_be_positive(option: str, value: str) -> None:
     with pytest.raises(SystemExit):
         rollover.parse_args([option, value])

@@ -5,20 +5,22 @@ import pytest
 from gruenbeck import storage
 
 
-def test_check_data_folder_not_exists(tmp_path):
+def test_check_data_folder_not_exists(tmp_path: pathlib.Path) -> None:
     data_folder = tmp_path / "folderName"
     data_path = storage.check_data_folder(str(data_folder))
     assert data_path.exists()
     assert data_path == data_folder
 
 
-def test_check_data_folder_exists(tmp_path):
+def test_check_data_folder_exists(tmp_path: pathlib.Path) -> None:
     data_path = storage.check_data_folder(str(tmp_path))
     assert isinstance(data_path, pathlib.Path)
     assert data_path.exists()
 
 
-def test_list_csv_files_gives_the_csv_files_of_the_folder_sorted_by_name(tmp_path):
+def test_list_csv_files_gives_the_csv_files_of_the_folder_sorted_by_name(
+    tmp_path: pathlib.Path,
+) -> None:
     (tmp_path / "b_2026.csv").write_text("b")
     (tmp_path / "a_2026.csv").write_text("a")
     (tmp_path / "a_2025.csv").write_text("a")
@@ -34,12 +36,14 @@ def test_list_csv_files_gives_the_csv_files_of_the_folder_sorted_by_name(tmp_pat
     ]
 
 
-def test_list_csv_files_of_an_empty_folder_is_empty(tmp_path):
+def test_list_csv_files_of_an_empty_folder_is_empty(tmp_path: pathlib.Path) -> None:
     assert storage.list_csv_files(tmp_path) == []
 
 
 @pytest.mark.parametrize("kind", ["missing", "file"])
-def test_list_csv_files_without_a_data_folder_is_an_error(tmp_path, kind):
+def test_list_csv_files_without_a_data_folder_is_an_error(
+    tmp_path: pathlib.Path, kind: str
+) -> None:
     folder = tmp_path / "data"
     if kind == "file":
         folder.write_text("")

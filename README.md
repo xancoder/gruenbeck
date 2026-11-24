@@ -163,7 +163,7 @@ The dev tools (`uv sync`) include ruff, mypy and pre-commit; their settings are 
 ```shell script
 uv run ruff format   # format the code (double quotes, line length 100)
 uv run ruff check    # lint
-uv run mypy          # check the types of src and tests
+uv run mypy          # check the types of src and tests (strict)
 ```
 
 #### pre-commit

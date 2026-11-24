@@ -3,6 +3,7 @@
 import csv
 import datetime
 import logging
+import os
 import pathlib
 import random
 import re
@@ -10,6 +11,7 @@ import time
 import types
 import typing
 import xml.etree.ElementTree
+from collections.abc import Iterable, KeysView
 
 import requests
 import urllib3.exceptions
@@ -72,12 +74,12 @@ class _LoggingRetry(urllib3.util.Retry):
 class Parameter:
     count = 0
 
-    def __init__(self, path):
+    def __init__(self, path: str | os.PathLike[str]):
         self.path_file = path
-        self.parameters = {}
+        self.parameters: dict[str, dict[str, str]] = {}
         self.read()
 
-    def read(self):
+    def read(self) -> None:
         file_path = pathlib.Path(self.path_file)
         with file_path.open() as input_file:
             reader = csv.DictReader(input_file)
@@ -99,20 +101,20 @@ class Parameter:
                     }
                 )
 
-    def get_count(self):
+    def get_count(self) -> int:
         return len(self.parameters)
 
-    def get_parameter_list(self):
+    def get_parameter_list(self) -> KeysView[str]:
         return self.parameters.keys()
 
-    def get_parameter_by_note(self, note):
+    def get_parameter_by_note(self, note: str) -> list[str]:
         result = []
         for _ in self.get_parameter_list():
             if note in self.get_parameter(_)["note"]:
                 result.append(_)
         return result
 
-    def get_parameter(self, name):
+    def get_parameter(self, name: str) -> dict[str, str]:
         return self.parameters[name]
 
 
@@ -140,7 +142,12 @@ def create_session(retries: int, retry_delay: float) -> requests.Session:
     return session
 
 
-def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT, session=None):
+def get_data_from_mux_http(
+    host: str,
+    parameters: Iterable[str],
+    timeout: float = DEFAULT_TIMEOUT,
+    session: requests.Session | None = None,
+) -> dict[str, str | None]:
     """
     request values from the web server of the device
     :param host: host name (optionally with port) of the device
@@ -151,7 +158,7 @@ def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT, session=No
     :raises requests.exceptions.RequestException: no connection, timeout or HTTP error
     :raises ValueError: response is not valid xml or contains no values
     """
-    result_data = {}
+    result_data: dict[str, str | None] = {}
 
     url = f"http://{host}/mux_http"
 
@@ -182,7 +189,7 @@ def get_data_from_mux_http(host, parameters, timeout=DEFAULT_TIMEOUT, session=No
     return result_data
 
 
-def get_consumption_parameters(parameter):
+def get_consumption_parameters(parameter: Parameter) -> list[str]:
     """
     parameter codes of the 14-day memory: D_Y_2_1 ... D_Y_2_14 in this order
 
@@ -211,7 +218,9 @@ def _describe(error: requests.exceptions.RequestException) -> str:
     return str(error)
 
 
-def get_device_data(host, parameter, timeout, retries, retry_delay):
+def get_device_data(
+    host: str, parameter: Parameter, timeout: float, retries: int, retry_delay: float
+) -> dict[str, str | None]:
     """
     ask the device for the 14-day memory and its clock
 
@@ -253,14 +262,14 @@ def get_device_data(host, parameter, timeout, retries, retry_delay):
             return result
 
 
-def format_minutes(minutes):
+def format_minutes(minutes: int) -> str:
     """signed duration in minutes as +H:MM / -H:MM"""
     sign = "-" if minutes < 0 else "+"
     hours, rest = divmod(abs(minutes), 60)
     return f"{sign}{hours}:{rest:02d}"
 
 
-def check_device_clock(device_clock, now):
+def check_device_clock(device_clock: str | None, now: datetime.datetime) -> int | None:
     """
     log a warning if the device clock is off; it does not decide on the run
 
@@ -297,7 +306,9 @@ def check_device_clock(device_clock, now):
     return deviation
 
 
-def add_timestamp_as_key_device_data(device_data, today=None):
+def add_timestamp_as_key_device_data[V](
+    device_data: dict[str, V], today: datetime.date | None = None
+) -> dict[datetime.date, V]:
     """
     replace the parameter codes with the day each value belongs to
 
