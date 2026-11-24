@@ -21,7 +21,7 @@ import gruenbeck.config
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
-from gruenbeck import cli, collector, mail, storage
+from gruenbeck import cli, collector, mail, storage, version
 from gruenbeck import config as configuration
 
 if typing.TYPE_CHECKING:
@@ -510,7 +510,7 @@ def test_successful_run_logs_start_and_end(
 ) -> None:
     assert run() == 0
 
-    assert logs()[0] == ("INFO", f"run script: {sys.argv[0]}")
+    assert logs()[0] == ("INFO", f"run script: {sys.argv[0]}, version {version.get_version()}")
     assert logs()[-2:] == [
         ("INFO", "mail sent successfully"),
         ("INFO", "Data collection completed"),

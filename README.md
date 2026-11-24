@@ -309,6 +309,21 @@ Another Python version can be tried without touching `.venv`, e.g. `uv run --iso
 
 The actions in `ci.yml` are pinned to the full commit SHA (with the version as a comment), not to a tag, because a tag can be moved. Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv, including ruff), the GitHub Actions (it updates SHA and comment) and the hook versions in `.pre-commit-config.yaml` (ecosystem `pre-commit`; the local ruff hooks have no version there) once a week and opens one pull request per ecosystem. Version updates wait 7 days after a release (`cooldown`); security updates are not delayed. `uv run pre-commit autoupdate` updates the hook versions by hand.
 
+### release
+
+The version is in `pyproject.toml` (`version`); every command prints it with `--version` (for example `gruenbeck-collect 0.2.0`), and the data collector writes it into the first line of every run in `log/gruenbeck_error.log` (`run script: …, version 0.2.0`). `CHANGELOG.md` is generated from the commit messages (Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `style`, `chore`, `build`, `ci`, `perf`) with [git-cliff](https://git-cliff.org); its settings are in `pyproject.toml` (`[tool.git-cliff.*]`). Do not edit the file by hand. To release a version:
+
+1. Commit all changes (the changelog lists commits only) and raise the version, e.g. `uv version --bump minor` (or `uv version 0.3.0`); it changes `pyproject.toml` and `uv.lock`.
+2. Generate the changelog for the new version, which has no tag yet:
+
+   ```shell script
+   uv run git-cliff --tag v0.3.0 --output CHANGELOG.md
+   ```
+
+3. Commit `pyproject.toml`, `uv.lock` and `CHANGELOG.md` as `chore(release): v0.3.0` (git-cliff leaves such commits out), merge into `master`, and set the tag there (`git tag v0.3.0`, then push the tag to `origin`).
+
+On the Raspberry Pi, `./.venv/bin/gruenbeck-collect --version` shows the installed version. After an update (`git pull`, `uv sync --no-dev`) it is the new one; the log file shows the version of every run.
+
 ## Scheduling
 
 The script should run once a week. Three ways are described in [deploy/systemd/README.md](deploy/systemd/README.md):

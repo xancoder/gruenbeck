@@ -6,5 +6,5 @@ storage (yearly data files), collector (the run of the data collector), mail (da
 error mails), report, report_sections, report_text, report_html and charts (statistics of
 the data mail), analysis (monthly statistics), cli (the commands gruenbeck-collect and
 gruenbeck-analyse), preview (the command gruenbeck-preview-mail) and rollover (the command
-gruenbeck-log-rollover).
+gruenbeck-log-rollover) and version (the version of the installed package).
 """

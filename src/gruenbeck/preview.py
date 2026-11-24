@@ -36,6 +36,7 @@ import gruenbeck.collector
 import gruenbeck.config
 import gruenbeck.errors
 import gruenbeck.mail
+import gruenbeck.version
 
 TEXT_FILE = "data-mail.txt"
 HTML_FILE = "data-mail.html"
@@ -68,6 +69,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="build the data mail from the stored data without asking the device"
     )
     gruenbeck.config.add_config_file_option(parser)
+    gruenbeck.version.add_version_option(parser)
     parser.add_argument(
         "--today",
         type=day_of,

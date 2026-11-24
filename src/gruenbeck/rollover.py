@@ -37,6 +37,7 @@ import typing
 
 import gruenbeck.config
 import gruenbeck.device
+import gruenbeck.version
 
 CLOCK_PARAMETER = "D_C_4_2"
 VALUE_PARAMETERS = ("D_Y_2_1", "D_Y_2_2", "D_Y_2_3")
@@ -200,6 +201,7 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
         description="log the daily rollover of the consumption values (read-only)"
     )
     gruenbeck.config.add_config_file_option(parser)
+    gruenbeck.version.add_version_option(parser)
     parser.add_argument(
         "--interval",
         type=positive_float,

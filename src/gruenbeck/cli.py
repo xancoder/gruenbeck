@@ -13,7 +13,7 @@ import sys
 import traceback
 from collections.abc import Sequence
 
-from gruenbeck import analysis, collector, errors, mail
+from gruenbeck import analysis, collector, errors, mail, version
 from gruenbeck import config as configuration
 
 # the handlers of setup_logging() sit on the logger of the package, so they also get the
@@ -64,7 +64,7 @@ def main(config_file: str | os.PathLike[str]) -> int:
     run the data collector once
     :return: exit code, 0 if the data was collected, stored and sent by mail, else 1
     """
-    logger.info("run script: %s", sys.argv[0])
+    logger.info("run script: %s, version %s", sys.argv[0], version.get_version())
 
     try:
         config = configuration.load_configuration(config_file)
@@ -142,6 +142,7 @@ def collect(argv: Sequence[str] | None = None) -> int:
         description="collect the water consumption of the soft water system, store it and mail it",
     )
     configuration.add_config_file_option(parser)
+    version.add_version_option(parser)
     parser.add_argument("--log-console", "-l", help="activate console logging", action="store_true")
     parser.add_argument(
         "--log-error",
@@ -172,6 +173,7 @@ def analyse(argv: Sequence[str] | None = None) -> int:
         description="monthly statistics of the collected water consumption",
     )
     configuration.add_config_file_option(parser)
+    version.add_version_option(parser)
     args = parser.parse_args(argv)
 
     try:
