@@ -250,7 +250,7 @@ uv run --extra analysis gruenbeck-analyse
 ### tests
 
 ```shell script
-uv run pytest
+uv run just test   # with coverage; plain: uv run pytest
 ```
 
 The tests run from any directory and write nothing into the repository, except the folder `.hypothesis/` of the property tests in the current directory (it is ignored by git).
@@ -269,14 +269,19 @@ Two dev tools shape the run:
 
 ### code quality
 
-The dev tools (`uv sync`) include ruff, mypy and pre-commit; their settings are in `pyproject.toml` and `.pre-commit-config.yaml`:
+The dev tools (`uv sync`) include ruff, mypy, pre-commit and [just](https://just.systems), a command runner; the settings of the tools are in `pyproject.toml` and `.pre-commit-config.yaml`, the commands in the `justfile`. `uv run just check` runs all checks in the order of the CI, the other recipes run one check each (`uv run just --list` describes them):
 
 ```shell script
-uv run ruff format   # format the code (double quotes, line length 100)
-uv run ruff check    # lint
-uv run mypy          # check the types of src, tests and deploy (strict)
-uv run pytest --cov  # tests with line and branch coverage of the code (src, deploy)
+uv run just check          # all of the following, in the order of the CI
+uv run just format         # format the code (double quotes, line length 100); `just format --check` only checks
+uv run just lint           # ruff check
+uv run just types          # mypy: the types of src, tests and deploy (strict)
+uv run just test           # pytest with line and branch coverage of the code (src, deploy)
+uv run just hooks          # all pre-commit hooks on all files (ruff, file checks, spelling, zizmor)
+uv run just secrets        # gitleaks scan of the whole git history
 ```
+
+Further arguments go to the tool: `uv run just test -k mail`, `uv run just format --check`.
 
 The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
 #### pre-commit
@@ -295,30 +300,27 @@ The hook type `commit-msg` checks the first word of the commit message ([convent
 Hooks that already exist in `.git/hooks` are kept as `<hook>.legacy` and still run first. To check all files at any time:
 
 ```shell script
-uv run pre-commit run --all-files
+uv run just hooks   # same as: uv run pre-commit run --all-files --show-diff-on-failure
 ```
 
 The first run needs network access to set up the hook environments (gitleaks is built with a Go toolchain that pre-commit fetches). The gitleaks hook looks at the staged changes only, so `--all-files` does not scan files that are not staged. The separate hook `gitleaks-history` (manual stage) scans the whole git history instead:
 
 ```shell script
-uv run pre-commit run --hook-stage manual --all-files gitleaks-history
+uv run just secrets
 ```
 
 #### continuous integration
 
 `.github/workflows/ci.yml` runs on every pull request and on every push to `master` and `development` (a branch with an open pull request does not run twice; a newer run for the same branch or pull request cancels the older one). It always uses `uv sync --locked --all-extras`, so that the extra `analysis` (pandas, matplotlib) is installed and tested:
 
-- job `checks` (Python 3.12): pre-commit (ruff, the file checks and zizmor), the gitleaks scan of the git history and mypy;
-- job `tests`: pytest with coverage on Python 3.12 (lowest supported version), 3.14 and 3.15 (the version on the Raspberry Pi).
+- job `checks` (Python 3.12): the recipes `hooks` (ruff, the file checks, spelling and zizmor; as separate steps the log of every check stays apart), `secrets` (the gitleaks scan of the git history) and `types` (mypy);
+- job `tests`: the recipe `test` (pytest with coverage) on Python 3.12 (lowest supported version), 3.14 and 3.15 (the version on the Raspberry Pi).
 
-Run the same checks locally before pushing:
+The steps call the recipes of the `justfile` (`uv run just hooks`, …), so no check is spelled out in `ci.yml`. Run the same checks locally before pushing:
 
 ```shell script
 uv sync --locked --all-extras
-uv run pre-commit run --all-files
-uv run pre-commit run --hook-stage manual --all-files gitleaks-history
-uv run mypy
-uv run pytest -rs --cov
+uv run just check
 ```
 
 Another Python version can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest`.

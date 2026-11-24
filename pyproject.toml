@@ -36,6 +36,7 @@ dev = [
     "pytest-randomly>=5.1.0",
     "responses>=0.26.3",
     "ruff>=0.17.6",
+    "rust-just>=1.59.0",
     "types-requests>=2.33.0.20261030",
 ]
 
