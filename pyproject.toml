@@ -45,7 +45,18 @@ quote-style = "double"
 
 [tool.ruff.lint]
 # G (flake8-logging-format): %-style arguments instead of f-strings in logging calls
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
+# PT (flake8-pytest-style): parametrize names as tuple, one condition per assert, a match for
+#   pytest.raises
+# C4 (flake8-comprehensions), PIE (flake8-pie): needless comprehensions, ranges and the like
+# PTH (flake8-use-pathlib): pathlib instead of the os functions
+# PERF (perflint): needless work in loops
+# LOG (flake8-logging): correct use of the logging functions
+# A (flake8-builtins): no names that shadow a builtin
+# TRY400: logger.error in an except block where logger.exception would add the traceback
+select = [
+    "E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G",
+    "PT", "C4", "PIE", "PTH", "PERF", "LOG", "A", "TRY400",
+]
 
 [tool.mypy]
 python_version = "3.12"

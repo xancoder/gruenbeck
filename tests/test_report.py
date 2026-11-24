@@ -405,8 +405,10 @@ def test_periods_without_enough_values_are_counted_as_left_out_not_shown() -> No
     result = report.compute_report(stored, MONDAY)
 
     # June 2025 has values, but the periods of the run do not reach them: only the year does
-    assert result.week.previous == () and result.week.omitted == 0
-    assert result.previous_years == () and result.omitted_previous_years == 1
+    assert result.week.previous == ()
+    assert result.week.omitted == 0
+    assert result.previous_years == ()
+    assert result.omitted_previous_years == 1
 
 
 # --- month and year -------------------------------------------------------------------------

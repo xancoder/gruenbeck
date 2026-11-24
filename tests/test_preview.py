@@ -144,7 +144,8 @@ def test_nothing_is_written_and_no_mail_is_sent_by_default(
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"[*] data mail for the run on {TODAY} from {stored.data_path}"
     assert out[1].startswith("[*] text: ")
-    assert out[2].startswith("[*] html: ") and "characters" in out[2]
+    assert out[2].startswith("[*] html: ")
+    assert "characters" in out[2]
     prefix = stored.data_file.prefix
     assert out[3] == f"[*] attachments: {prefix}_2025.csv, {prefix}_2026.csv"
     assert len(out) == 4

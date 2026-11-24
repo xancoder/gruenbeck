@@ -206,7 +206,7 @@ def test_logger_of_the_module_has_its_own_name() -> None:
 
 
 @pytest.mark.parametrize(
-    "port, security, expected",
+    ("port", "security", "expected"),
     [
         (465, None, "ssl"),
         (587, None, "starttls"),
@@ -359,7 +359,7 @@ def test_authentication_error_is_not_retried_and_not_wrapped_twice(
 
 
 @pytest.mark.parametrize(
-    "step, error",
+    ("step", "error"),
     [
         ("sendmail", smtplib.SMTPSenderRefused(550, b"sender refused", "sender@example.com")),
         ("sendmail", smtplib.SMTPRecipientsRefused({"one@example.com": (550, b"unknown")})),
@@ -384,7 +384,7 @@ def test_permanent_error_is_not_retried(
 
 
 @pytest.mark.parametrize(
-    "step, error",
+    ("step", "error"),
     [
         ("connect", ssl.SSLError("certificate verify failed")),
         ("connect", OSError(113, "No route to host")),

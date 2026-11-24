@@ -304,7 +304,7 @@ class FakeDevice:
         self.errors: list[BaseException] = []
         self.answer: dict[str, str | None] = {
             "D_C_4_2": "16:00",
-            **{name: "1" for name in MEMORY},
+            **dict.fromkeys(MEMORY, "1"),
         }
 
     def fetch(
@@ -418,7 +418,7 @@ def test_send_data_mail_without_data_folder_raises_storage_error(
 
 
 @pytest.mark.parametrize(
-    "error, message",
+    ("error", "message"),
     [
         (mail.MailError("Authentication failed: x"), "Authentication failed: x"),
         (RuntimeError("boom"), "unexpected error: RuntimeError: boom"),
@@ -579,7 +579,7 @@ def test_run_without_configuration_file_asks_nobody(
 
 
 @pytest.mark.parametrize(
-    "changes, message",
+    ("changes", "message"),
     [
         ({"dataPath": None}, "no config parameter: 'dataPath'"),
         ({"dataFile": None}, "no config parameter: 'dataFile'"),

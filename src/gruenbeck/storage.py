@@ -161,7 +161,7 @@ def write_data(
             os.fsync(csv_out_file.fileno())
         if file_object.exists():
             shutil.copymode(file_object, tmp_file)
-        os.replace(tmp_file, file_object)
+        tmp_file.replace(file_object)
     except BaseException:
         tmp_file.unlink(missing_ok=True)
         raise

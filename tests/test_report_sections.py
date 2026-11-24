@@ -86,7 +86,7 @@ def test_note_if_no_earlier_year_has_enough_values() -> None:
 
 
 @pytest.mark.parametrize(
-    "first_year, note",
+    ("first_year", "note"),
     [
         (2020, "1 earlier year is not shown (older than the latest 5, or with values on less"),
         (2018, "3 earlier years are not shown (older than the latest 5, or with values on less"),
@@ -102,7 +102,7 @@ def test_note_about_the_earlier_years_that_are_left_out(first_year: int, note: s
 
 
 @pytest.mark.parametrize(
-    "missing, no_data, note",
+    ("missing", "no_data", "note"),
     [
         (0, 0, None),
         (1, 0, "incomplete: 1 day missing"),

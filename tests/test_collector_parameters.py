@@ -20,7 +20,7 @@ def device(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         session: object = None,
     ) -> dict[str, str | None]:
         requests.append(list(parameters))
-        return {name: "1" for name in parameters}
+        return dict.fromkeys(parameters, "1")
 
     monkeypatch.setattr(gruenbeck.device, "get_data_from_mux_http", fetch)
     return requests

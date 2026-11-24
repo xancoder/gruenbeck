@@ -171,10 +171,8 @@ def test_only_direct_children_of_the_root_are_values(device: responses.RequestsM
 def test_answer_without_values_is_an_error(device: responses.RequestsMock, body: str) -> None:
     device.post(URL, body=body)
 
-    with pytest.raises(ValueError) as err:
+    with pytest.raises(ValueError, match=r"^device response contains no values$"):
         gruenbeck.device.get_data_from_mux_http(HOST, ["D_Y_2_1"])
-
-    assert str(err.value) == "device response contains no values"
 
 
 @pytest.mark.parametrize(

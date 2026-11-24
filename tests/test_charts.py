@@ -141,8 +141,10 @@ def test_chart_is_valid_svg_with_title_and_description(name: str, dataset: str) 
     assert "max-width:640px" in root.get("style", "")
     assert root.get("role") == "img"
     title, description = root.find(SVG + "title"), root.find(SVG + "desc")
-    assert title is not None and title.text
-    assert description is not None and description.text
+    assert title is not None
+    assert title.text
+    assert description is not None
+    assert description.text
     # the title and the description are named by the chart, with ids that exist
     assert root.get("aria-labelledby") == f"{title.get('id')} {description.get('id')}"
     assert title.text in texts(root, "text.gb-title")
@@ -197,7 +199,8 @@ def test_everything_lies_inside_the_view_box(name: str, dataset: str) -> None:
                 assert 0 <= float(element.get(attribute, "")) <= limit, (element.tag, attribute)
         for pair in element.get("points", "").split():
             x, y = map(float, pair.split(","))
-            assert 0 <= x <= charts.WIDTH and 0 <= y <= height
+            assert 0 <= x <= charts.WIDTH
+            assert 0 <= y <= height
 
 
 def test_ids_of_the_charts_are_unique_on_one_page() -> None:
@@ -297,7 +300,7 @@ def test_ticks_are_round_numbers_up_to_the_maximum(maximum: int, ticks: tuple[in
 
 
 def test_ticks_for_any_maximum_are_at_most_5_intervals_with_steps_of_1_2_or_5() -> None:
-    for maximum in [*range(0, 3000), *range(3000, 10**7, 99_991), 10**12 + 7]:
+    for maximum in [*range(3000), *range(3000, 10**7, 99_991), 10**12 + 7]:
         ticks = charts.nice_ticks(maximum)
         step = ticks[1] - ticks[0]
         assert ticks[0] == 0
@@ -375,7 +378,8 @@ def test_week_chart_marks_an_interpolated_day() -> None:
     assert texts(root, "text.gb-value")[:3] == ["100", "200*", "300"]
     assert "interpolated *" in legend(root)
     description = root.find(SVG + "desc")
-    assert description is not None and "Tue 200 (interpolated)" in (description.text or "")
+    assert description is not None
+    assert "Tue 200 (interpolated)" in (description.text or "")
 
 
 def test_week_chart_shows_missing_days_as_gaps_with_a_dash() -> None:

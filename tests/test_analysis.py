@@ -52,7 +52,7 @@ def test_run_without_the_analysis_extra_fails(
 
 
 @pytest.mark.parametrize(
-    "argv, config_file",
+    ("argv", "config_file"),
     [([], "./src/config.json"), (["-c", "other.json"], "other.json")],
 )
 def test_command_passes_the_config_file_to_the_analysis(

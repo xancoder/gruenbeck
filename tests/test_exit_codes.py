@@ -69,7 +69,7 @@ def answers(
             if isinstance(item, BaseException):
                 raise item
             return item
-        return {"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}}
+        return {"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1")}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
     now = datetime.datetime.combine(TODAY, datetime.time(16, 0))
@@ -201,7 +201,7 @@ def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(
     mails: list[tuple[str, typing.Any]],
     answers: list[dict[str, str | None] | BaseException],
 ) -> None:
-    answers.append({"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}, "D_Y_1": "5"})
+    answers.append({"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1"), "D_Y_1": "5"})
 
     assert collect() == 1
 
@@ -283,7 +283,7 @@ def test_unexpected_error_exits_with_1_and_error_mail_with_traceback(
     def disk_full(source: object, target: object) -> typing.NoReturn:
         raise OSError(28, "No space left on device")
 
-    # storage uses os.replace: the module os is the same object
+    # storage calls Path.replace, which calls os.replace: the module os is the same object
     monkeypatch.setattr(os, "replace", disk_full)
 
     assert collect() == 1
@@ -390,7 +390,7 @@ def test_errors_of_the_package_have_a_common_base_class() -> None:
 
 
 @pytest.mark.parametrize(
-    "error, message",
+    ("error", "message"),
     [
         (FileNotFoundError(2, "No such file or directory", "c.json"), "no configuration: "),
         (config.ConfigurationError(["no config parameter: 'dataPath'"]), ""),

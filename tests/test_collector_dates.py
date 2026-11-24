@@ -357,7 +357,7 @@ def clock_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "local_time, device_clock",
+    ("local_time", "device_clock"),
     [
         ("16:00", "16:00"),  # weekly run, Monday 16:00
         ("00:10", "00:10"),  # the clock does not tell whether the device rolled over
@@ -379,7 +379,7 @@ def test_device_clock_within_tolerance_gives_no_warning(
 
 
 @pytest.mark.parametrize(
-    "local_time, device_clock, deviation",
+    ("local_time", "device_clock", "deviation"),
     [
         ("16:00", "15:44", "-0:16"),
         ("16:00", "17:00", "+1:00"),  # no switch to daylight saving time
@@ -406,7 +406,7 @@ def test_device_clock_off_is_only_a_warning(
 
 
 @pytest.mark.parametrize(
-    "device_clock, warning",
+    ("device_clock", "warning"),
     [
         (None, "the device response has no device clock D_C_4_2"),
         ("24:00", "invalid device clock D_C_4_2 '24:00' (expected HH:MM)"),
@@ -440,7 +440,7 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run: Run, tmp_path: pa
 
 
 @pytest.mark.parametrize(
-    "device_clock, local_time, deviation",
+    ("device_clock", "local_time", "deviation"),
     [
         ("10:00", "10:00", 0),
         ("01:00", "02:00", -60),
@@ -664,7 +664,7 @@ def test_run_keeps_the_other_stored_days_and_sorts_the_file(
     assert mails == [("data", tmp_path / "data")]
 
 
-@pytest.mark.parametrize("device_value, stored", [(" 93 ", "93"), ("007", "7"), ("0", "0")])
+@pytest.mark.parametrize(("device_value", "stored"), [(" 93 ", "93"), ("007", "7"), ("0", "0")])
 def test_run_stores_the_device_values_as_whole_numbers(
     run: Run, tmp_path: pathlib.Path, device_value: str, stored: str
 ) -> None:
@@ -797,7 +797,7 @@ def test_run_with_only_values_without_value_fails_with_error_mail(
     write_year(tmp_path, 2026, [("2026-11-22", "77")])
     before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
 
-    assert run({name: "-" for name in DEVICE_2026_11_23}) == 1
+    assert run(dict.fromkeys(DEVICE_2026_11_23, "-")) == 1
 
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
     assert mails == [("error", "the device has no consumption value: all 14 values are '-'")]

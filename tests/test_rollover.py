@@ -330,7 +330,7 @@ def test_default_timeout_comes_from_gruenbeck(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "config, message",
+    ("config", "message"),
     [
         (None, "[-] no configuration"),
         ({}, "[-] no config parameter: 'softWaterSystem'"),

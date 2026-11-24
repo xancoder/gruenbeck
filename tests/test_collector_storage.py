@@ -308,7 +308,7 @@ def test_write_data_syncs_the_temporary_file_before_replacing(
         assert path.read_text(encoding="utf-8") == "date,value\n2026-11-01,1\n"
         replace(source, target)
 
-    # storage uses os.fsync and os.replace: the module os is the same object
+    # storage uses os.fsync and Path.replace (calls os.replace): the module os is the same object
     monkeypatch.setattr(os, "fsync", record_fsync)
     monkeypatch.setattr(os, "replace", record_replace)
 
@@ -369,7 +369,7 @@ def test_write_data_in_a_missing_folder_fails(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "fieldnames, date_pattern, data",
+    ("fieldnames", "date_pattern", "data"),
     [
         (FIELDNAMES, ISO, {"2026-11-21": 102, "2026-11-22": 101, "2026-11-23": "-"}),
         (config.FieldNames("day", "litres"), "%d.%m.%Y", {"30.11.2026": 1, "01.12.2026": 2}),

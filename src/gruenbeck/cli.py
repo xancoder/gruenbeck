@@ -69,7 +69,9 @@ def main(config_file: str | os.PathLike[str]) -> int:
     try:
         config = configuration.load_configuration(config_file)
     except FileNotFoundError as err:
-        logger.error("no configuration: %s", err)
+        # TRY400 here and below: an expected error that its message describes completely; the
+        # traceback is logged only for an unexpected exception (see report_error)
+        logger.error("no configuration: %s", err)  # noqa: TRY400
         return 1
     except configuration.ConfigurationError as err:
         # an error mail is only possible if the mail section is valid
@@ -86,7 +88,7 @@ def main(config_file: str | os.PathLike[str]) -> int:
         report_error(
             config.mail,
             f"unexpected error: {type(err).__name__}: {err}\n\n{traceback.format_exc()}",
-            unexpected=True,
+            exception=err,
         )
         return 1
 
@@ -96,8 +98,8 @@ def main(config_file: str | os.PathLike[str]) -> int:
     try:
         collector.send_data_mail(config, result.data_path, result.today)
     except errors.GruenbeckError as err:
-        logger.error("mail sending failed: %s", err)
-        logger.error("data was collected and stored, but email sending failed")
+        logger.error("mail sending failed: %s", err)  # noqa: TRY400
+        logger.error("data was collected and stored, but email sending failed")  # noqa: TRY400
         return 1
 
     logger.info("Data collection completed")
@@ -105,15 +107,17 @@ def main(config_file: str | os.PathLike[str]) -> int:
 
 
 def report_error(
-    mail_settings: configuration.Mail | None, error_text: str, unexpected: bool = False
+    mail_settings: configuration.Mail | None,
+    error_text: str,
+    exception: BaseException | None = None,
 ) -> None:
     """
     log the error and send it as error mail
     :param mail_settings: mail section of the configuration, None if it is invalid
-    :param unexpected: called while handling an unexpected exception: log its traceback
+    :param exception: an unexpected exception: its traceback goes into the log
     """
-    if unexpected:
-        logger.exception("%s", error_text.split("\n", 1)[0])
+    if exception is not None:
+        logger.error("%s", error_text.split("\n", 1)[0], exc_info=exception)
     else:
         logger.error("%s", error_text)
 
@@ -125,7 +129,7 @@ def report_error(
         mail.send_mail(mail_settings, ERROR_MAIL_SUBJECT, error_text)
         logger.info("Error notification email sent")
     except Exception as mail_error:
-        logger.error("Failed to send error notification email: %s", mail_error)
+        logger.error("Failed to send error notification email: %s", mail_error)  # noqa: TRY400
 
 
 def collect(argv: Sequence[str] | None = None) -> int:

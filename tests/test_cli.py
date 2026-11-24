@@ -138,7 +138,7 @@ def test_run_with_options(
     def fetch(
         host: str, parameters: list[str], timeout: float, session: object = None
     ) -> dict[str, str | None]:
-        return {"D_C_4_2": f"{now:%H:%M}", **{name: "1" for name in parameters[1:]}}
+        return {"D_C_4_2": f"{now:%H:%M}", **dict.fromkeys(parameters[1:], "1")}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
     monkeypatch.setattr(

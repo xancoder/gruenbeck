@@ -20,7 +20,7 @@ import urllib3.exceptions
 from gruenbeck import device
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
-ANSWER = {"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}}
+ANSWER = {"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1")}
 VALID_XML = (
     "<data>" + "".join(f"<{key}>{value}</{key}>" for key, value in ANSWER.items()) + "</data>"
 )
@@ -211,7 +211,7 @@ def test_no_retry_with_retries_zero(fake: Fake, sleeps: list[float]) -> None:
 
 
 @pytest.mark.parametrize(
-    "error, text",
+    ("error", "text"),
     [
         (requests.exceptions.ConnectTimeout("connect timed out"), "connect timed out"),
         (requests.exceptions.ReadTimeout("read timed out"), "read timed out"),
@@ -327,7 +327,7 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: typing.Any) -> None:
+        def log_message(self, fmt: str, *args: typing.Any) -> None:
             pass
 
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

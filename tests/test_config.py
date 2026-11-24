@@ -98,7 +98,7 @@ def test_retry_defaults(loaded_config: gruenbeck.config.Configuration) -> None:
 
 @pytest.mark.parametrize("section", ["softWaterSystem", "mail"])
 @pytest.mark.parametrize(
-    "key, value, expected",
+    ("key", "value", "expected"),
     [
         ("retries", 0, 0),
         ("retries", 1, 1),
@@ -141,7 +141,7 @@ def test_retries_of_the_sections_are_independent(
 
 
 @pytest.mark.parametrize(
-    "key, value, expected",
+    ("key", "value", "expected"),
     [
         ("timeout", 5, 5.0),
         ("timeout", 0.1, 0.1),
@@ -210,7 +210,7 @@ def credentials(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
 
 
 @pytest.mark.parametrize(
-    "content, password",
+    ("content", "password"),
     [
         (SECRET, SECRET),
         (SECRET + "\n", SECRET),
@@ -447,7 +447,7 @@ def test_empty_variable_means_the_default_file(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.parametrize(
-    "variable, argv, expected",
+    ("variable", "argv", "expected"),
     [
         (None, [], "./src/config.json"),
         ("", [], "./src/config.json"),
@@ -524,7 +524,7 @@ def test_missing_file_raises_file_not_found_error(tmp_path: pathlib.Path) -> Non
 
 
 @pytest.mark.parametrize(
-    "text, problem",
+    ("text", "problem"),
     [
         ("{not json", "is not valid JSON: Expecting property name enclosed in double quotes"),
         ("", "is not valid JSON: Expecting value: line 1 column 1 (char 0)"),
@@ -578,7 +578,7 @@ def test_missing_required_key_is_a_problem(
 
 
 @pytest.mark.parametrize(
-    "key, value, reason",
+    ("key", "value", "reason"),
     [
         ("dataPath", "", "expected a non-empty text"),
         ("dataPath", 5, "expected a non-empty text"),
@@ -667,7 +667,7 @@ def test_invalid_value_is_a_problem(
 
 
 @pytest.mark.parametrize(
-    "value, reason",
+    ("value", "reason"),
     [
         ("20.11.2026", "expected a date YYYY-MM-DD"),
         # the text of the ValueError differs between Python versions
@@ -744,7 +744,7 @@ def test_error_has_no_mail_section_if_it_is_invalid(
 
 
 @pytest.mark.parametrize(
-    "data_path, expected",
+    ("data_path", "expected"),
     [("data", "repo/src/data"), ("./data", "repo/src/data"), ("../data", "repo/data")],
 )
 def test_relative_paths_start_at_the_folder_of_the_configuration(
