@@ -23,10 +23,15 @@ TODAY = datetime.date(2026, 11, 23)
 def mails(monkeypatch):
     """records data and error mails instead of sending them"""
     sent = []
-    monkeypatch.setattr(mail, "send_mail", lambda param, folder: sent.append(("data", folder)))
-    monkeypatch.setattr(
-        mail, "send_mail_text", lambda param, subject, text: sent.append((subject, text))
-    )
+
+    def record(settings, subject, text, attachments=()):
+        if subject == cli.ERROR_MAIL_SUBJECT:
+            sent.append((subject, text))
+        else:
+            # the data mail attaches the csv files of the data folder
+            sent.append(("data", next(iter(attachments)).parent))
+
+    monkeypatch.setattr(mail, "send_mail", record)
     return sent
 
 
@@ -187,8 +192,8 @@ def test_unexpected_error_exits_with_1_and_error_mail_with_traceback(
 
 
 def test_failed_data_mail_exits_with_1_without_error_mail(collect, mails, monkeypatch, tmp_path):
-    def refused(param, folder):
-        raise ValueError("Error preparing email: refused")
+    def refused(settings, subject, text, attachments=()):
+        raise mail.MailError("Authentication failed: refused")
 
     monkeypatch.setattr(mail, "send_mail", refused)
 
@@ -199,15 +204,15 @@ def test_failed_data_mail_exits_with_1_without_error_mail(collect, mails, monkey
 
 
 def test_failed_error_mail_keeps_exit_code_1(collect, monkeypatch, config_data, tmp_path):
-    def refused(param, subject, text):
-        raise ValueError("Error preparing email: refused")
+    def refused(settings, subject, text, attachments=()):
+        raise mail.MailError("Authentication failed: refused")
 
-    monkeypatch.setattr(mail, "send_mail_text", refused)
+    monkeypatch.setattr(mail, "send_mail", refused)
     del config_data["dataPath"]
 
     assert collect() == 1
 
-    assert "Failed to send error notification email: Error preparing email: refused" in (
+    assert "Failed to send error notification email: Authentication failed: refused" in (
         (tmp_path / "errors.log").read_text()
     )
 
@@ -281,6 +286,7 @@ def test_every_module_logs_with_its_own_name():
     assert cli.logger.name == "gruenbeck.cli"
     assert config.logger.name == "gruenbeck.config"
     assert device.logger.name == "gruenbeck.device"
+    assert mail.logger.name == "gruenbeck.mail"
     assert storage.logger.name == "gruenbeck.storage"
     assert cli.package_logger.name == "gruenbeck"
 

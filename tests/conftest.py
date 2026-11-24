@@ -6,12 +6,17 @@ import logging
 import pathlib
 import smtplib
 import time
+import typing
 
 import pytest
 
 from gruenbeck import config
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# smtplib.SMTP.send_message, taken before a test replaces smtplib.SMTP by the fake server;
+# Any: it is called with the fake server as self
+REAL_SEND_MESSAGE: typing.Any = smtplib.SMTP.send_message
 
 
 @pytest.fixture(scope="session")
@@ -84,6 +89,9 @@ class FakeSMTP:
     `errors` lists (step, exception) pairs; when a step (connect, starttls, login,
     sendmail, quit) is reached and the first pair names it, the exception is raised
     and the pair is used up.
+
+    send_message() is the one of smtplib: it takes the envelope from the headers and
+    serializes the mail, so the recorded sendmail() call is what a server would get.
     """
 
     def __init__(self):
@@ -126,7 +134,18 @@ class FakeSMTP:
                 fake.step("login")
                 self.calls.append(("login", user, password))
 
-            def sendmail(self, from_addr, to_addrs, msg):
+            def send_message(self, msg, from_addr=None, to_addrs=None):
+                self.calls.append(("send_message", msg))
+                return REAL_SEND_MESSAGE(self, msg, from_addr, to_addrs)
+
+            # used by smtplib.SMTP.send_message(): no EHLO, no SMTPUTF8 on the fake server
+            def ehlo_or_helo_if_needed(self):
+                pass
+
+            def has_extn(self, opt):
+                return False
+
+            def sendmail(self, from_addr, to_addrs, msg, mail_options=(), rcpt_options=()):
                 fake.step("sendmail")
                 self.calls.append(("sendmail", from_addr, to_addrs, msg))
 
@@ -136,7 +155,7 @@ class FakeSMTP:
 
         return Server
 
-    def raw_messages(self):
+    def raw_messages(self) -> list[bytes]:
         """sent mails as given to sendmail()"""
         return [
             call[3]
@@ -146,9 +165,9 @@ class FakeSMTP:
         ]
 
     def messages(self):
-        """sent mails, parsed"""
+        """sent mails, parsed (the line ends CRLF of the transmission are read as LF)"""
         return [
-            email.message_from_string(raw, policy=email.policy.default)
+            email.message_from_bytes(raw.replace(b"\r\n", b"\n"), policy=email.policy.default)
             for raw in self.raw_messages()
         ]
 

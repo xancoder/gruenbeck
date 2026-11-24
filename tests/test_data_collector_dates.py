@@ -21,16 +21,15 @@ def day(text):
 def mails(monkeypatch):
     """records data and error mails instead of sending them"""
     sent = []
-    monkeypatch.setattr(
-        mail,
-        "send_mail",
-        lambda param, data_folder: sent.append(("data", data_folder)),
-    )
-    monkeypatch.setattr(
-        mail,
-        "send_mail_text",
-        lambda param, subject, text: sent.append(("error", text)),
-    )
+
+    def record(settings, subject, text, attachments=()):
+        if subject == cli.ERROR_MAIL_SUBJECT:
+            sent.append(("error", text))
+        else:
+            # the data mail attaches the csv files of the data folder
+            sent.append(("data", next(iter(attachments)).parent))
+
+    monkeypatch.setattr(mail, "send_mail", record)
     return sent
 
 

@@ -108,12 +108,18 @@ def test_run_with_options(tmp_path, monkeypatch, capsys, package_logger, config_
         return {"D_C_4_2": f"{now:%H:%M}", **{name: "1" for name in parameters[1:]}}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
-    monkeypatch.setattr(mail, "send_mail", lambda param, folder: sent.append(folder))
+    monkeypatch.setattr(
+        mail,
+        "send_mail",
+        lambda settings, subject, text, attachments=(): sent.extend(attachments),
+    )
 
     cli.collect(["-c", str(config_file), "-e", str(log_file), "-l"])
 
-    assert sent == [tmp_path / "data"]
-    assert len(list((tmp_path / "data").glob("p_*.csv"))) in (1, 2)  # 2 at the year change
+    files = sorted((tmp_path / "data").glob("p_*.csv"))
+    assert len(files) in (1, 2)  # 2 at the year change
+    # the data mail attaches the yearly files
+    assert sent == files
     # -l: INFO and above on the console (stderr), also from other modules of the package
     err = capsys.readouterr().err
     assert "gruenbeck.cli - INFO - Data collection completed" in err

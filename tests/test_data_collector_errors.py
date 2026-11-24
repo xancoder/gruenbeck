@@ -17,6 +17,7 @@ import requests
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
 from gruenbeck import cli, mail, storage
+from gruenbeck import config as configuration
 
 PREFIX = "p"
 TODAY = datetime.date(2026, 11, 23)
@@ -27,17 +28,30 @@ MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 def mails(monkeypatch):
     """records data and error mails instead of sending them"""
     sent = []
-    monkeypatch.setattr(
-        mail,
-        "send_mail",
-        lambda param, data_folder: sent.append(("data", param, data_folder)),
-    )
-    monkeypatch.setattr(
-        mail,
-        "send_mail_text",
-        lambda param, subject, text: sent.append((subject, param, text)),
-    )
+
+    def record(settings, subject, text, attachments=()):
+        if subject == cli.ERROR_MAIL_SUBJECT:
+            sent.append((subject, settings, text))
+        else:
+            # the data mail attaches the csv files of the data folder
+            sent.append(("data", settings, next(iter(attachments)).parent))
+
+    monkeypatch.setattr(mail, "send_mail", record)
     return sent
+
+
+def mail_settings(config_data):
+    """the mail section of config_data as the loaded configuration has it"""
+    section = config_data["mail"]
+    return configuration.Mail(
+        smtp_server=section["smtpServer"],
+        smtp_port=section["smtpPort"],
+        smtp_security=None,
+        sender_email=section["senderEmail"],
+        sender_password=section["senderPassword"],
+        recipients=tuple(section["recipients"]),
+        subject=section["subject"],
+    )
 
 
 @pytest.fixture
@@ -65,7 +79,7 @@ def test_report_error_logs_and_sends_the_error_mail(mails, logs, loaded_config):
     assert mails == [
         (
             "gruenbeck data collector failure",
-            loaded_config.mail.as_dict(),
+            loaded_config.mail,
             "something failed",
         )
     ]
@@ -80,7 +94,8 @@ def test_report_error_sends_a_text_mail_over_smtp(smtp, sleeps, loaded_config):
 
     (message,) = smtp.messages()
     assert message["Subject"] == "gruenbeck data collector failure"
-    assert [part.get_content() for part in message.iter_parts()] == ["something failed"]
+    assert message.get_content_type() == "text/plain"
+    assert message.get_content() == "something failed\n"
 
 
 def test_failed_error_mail_is_logged(smtp, sleeps, logs, loaded_config):
@@ -92,7 +107,7 @@ def test_failed_error_mail_is_logged(smtp, sleeps, logs, loaded_config):
         ("ERROR", "something failed"),
         (
             "ERROR",
-            "Failed to send error notification email: Error preparing email:"
+            "Failed to send error notification email:"
             " Authentication failed: (535, b'bad credentials')",
         ),
     ]
@@ -157,7 +172,7 @@ def test_invalid_configuration_sends_every_problem_by_mail(mails, logs, config_d
         " than 0; no config parameter: 'parameterFile'"
     )
     assert logs()[1] == ("ERROR", message)
-    assert mails == [("gruenbeck data collector failure", config_data["mail"], message)]
+    assert mails == [("gruenbeck data collector failure", mail_settings(config_data), message)]
 
 
 def test_invalid_mail_section_exits_with_1_without_mail(mails, logs, config_data, write_config):
@@ -358,27 +373,74 @@ def test_key_error_of_the_request_is_retried_like_other_errors(
 # --- data mail: get_mail ------------------------------------------------------------
 
 
-def test_get_mail_sends_the_data_folder(mails, logs, tmp_path, loaded_config):
+def parts(message):
+    """(content type, filename, content) of every part of a multipart mail"""
+    return [
+        (part.get_content_type(), part.get_filename(), part.get_content())
+        for part in message.iter_parts()
+    ]
+
+
+def test_get_mail_sends_the_csv_files_of_the_data_folder(smtp, logs, tmp_path, loaded_config):
+    (tmp_path / "gruenbeck_2026.csv").write_text("date,value\n2026-11-22,101\n")
+    (tmp_path / "gruenbeck_2025.csv").write_bytes(b"date,value\r\n2025-12-31,3\r\n")
+    (tmp_path / "notes.txt").write_text("not attached")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "deeper.csv").write_text("not attached")
+
     assert cli.get_mail(loaded_config, tmp_path) is True
 
-    assert mails == [("data", loaded_config.mail.as_dict(), tmp_path)]
+    (message,) = smtp.messages()
+    # the subject is the one of the mail section
+    assert message["Subject"] == "[data collector] - gruenbeck"
+    assert message.get_content_type() == "multipart/mixed"
+    # attachments sorted by name
+    assert parts(message) == [
+        ("text/plain", None, "your stored data\n"),
+        ("application/octet-stream", "gruenbeck_2025.csv", b"date,value\r\n2025-12-31,3\r\n"),
+        ("application/octet-stream", "gruenbeck_2026.csv", b"date,value\n2026-11-22,101\n"),
+    ]
     assert logs() == [("INFO", "mail sent successfully")]
+
+
+def test_get_mail_without_csv_files_says_so(smtp, logs, tmp_path, loaded_config):
+    (tmp_path / "notes.txt").write_text("not attached")
+
+    assert cli.get_mail(loaded_config, tmp_path) is True
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "text/plain"
+    assert message.get_content() == "your stored data\n\nNo data files found to attach.\n"
+    assert logs() == [("INFO", "mail sent successfully")]
+
+
+def test_get_mail_without_data_folder_returns_false(smtp, logs, tmp_path, loaded_config):
+    folder = tmp_path / "missing"
+
+    assert cli.get_mail(loaded_config, folder) is False
+
+    assert logs() == [
+        (
+            "ERROR",
+            f"mail sending failed: data folder does not exist or is not a directory: {folder}",
+        )
+    ]
+    assert smtp.connections == []
 
 
 @pytest.mark.parametrize(
     "error, message",
     [
-        (KeyError("smtpServer"), "no mail configured: 'smtpServer'"),
         (
-            ValueError("Error preparing email: x"),
-            "mail sending failed: Error preparing email: x",
+            mail.MailError("Authentication failed: x"),
+            "mail sending failed: Authentication failed: x",
         ),
         (RuntimeError("boom"), "unexpected error during mail sending: boom"),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
 def test_failed_data_mail_returns_false(monkeypatch, logs, tmp_path, loaded_config, error, message):
-    def fail(param, data_folder):
+    def fail(settings, subject, text, attachments=()):
         raise error
 
     monkeypatch.setattr(mail, "send_mail", fail)
@@ -394,11 +456,7 @@ def test_data_mail_over_smtp_with_rejected_login_returns_false(
 
     assert cli.get_mail(loaded_config, tmp_path) is False
     assert logs() == [
-        (
-            "ERROR",
-            "mail sending failed: Error preparing email: Authentication failed:"
-            " (535, b'bad credentials')",
-        )
+        ("ERROR", "mail sending failed: Authentication failed: (535, b'bad credentials')")
     ]
 
 
@@ -435,29 +493,29 @@ def test_successful_run_logs_start_and_end(run, device, mails, logs, tmp_path, c
         ("INFO", "mail sent successfully"),
         ("INFO", "Data collection completed"),
     ]
-    assert mails == [("data", config_data["mail"], tmp_path / "data")]
+    assert mails == [("data", mail_settings(config_data), tmp_path / "data")]
     assert len((tmp_path / "data" / f"{PREFIX}_2026.csv").read_text().splitlines()) == 15
 
 
 def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
     run, device, monkeypatch, logs, tmp_path
 ):
-    sent = []
+    subjects = []
 
-    def fail(param, data_folder):
-        raise ValueError("Error preparing email: refused")
+    def fail(settings, subject, text, attachments=()):
+        subjects.append(subject)
+        raise mail.MailError("Authentication failed: refused")
 
     monkeypatch.setattr(mail, "send_mail", fail)
-    monkeypatch.setattr(mail, "send_mail_text", lambda *args: sent.append(args))
 
     assert run() == 1
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").exists()
     assert logs()[-2:] == [
-        ("ERROR", "mail sending failed: Error preparing email: refused"),
+        ("ERROR", "mail sending failed: Authentication failed: refused"),
         ("ERROR", "data was collected and stored, but email sending failed"),
     ]
-    # no error mail in this case
-    assert sent == []
+    # no error mail in this case: the data mail was the only attempt
+    assert subjects == ["[data collector] - gruenbeck"]
 
 
 def test_run_without_consumption_values_is_an_error(run, device, mails, tmp_path):

@@ -30,6 +30,8 @@ formatter = logging.Formatter(
 
 ONE_DAY = datetime.timedelta(days=1)
 ERROR_MAIL_SUBJECT = "gruenbeck data collector failure"
+DATA_MAIL_TEXT = "your stored data"
+NO_DATA_FILES_TEXT = "No data files found to attach."
 
 
 class CollectError(errors.GruenbeckError):
@@ -290,7 +292,7 @@ def report_error(
         logger.error("Failed to send error notification email: no valid mail configuration")
         return
     try:
-        mail.send_mail_text(mail_settings.as_dict(), ERROR_MAIL_SUBJECT, error_text)
+        mail.send_mail(mail_settings, ERROR_MAIL_SUBJECT, error_text)
         logger.info("Error notification email sent")
     except Exception as mail_error:
         logger.error("Failed to send error notification email: %s", mail_error)
@@ -360,22 +362,22 @@ def check_stored_overlap(new_values, stored, date_pattern):
     )
 
 
-def get_mail(config, data_path):
+def get_mail(config, data_path) -> bool:
+    """
+    send the csv files of the data folder as data mail
+    :return: True if the mail was sent; a failure is logged and gives False
+    """
     try:
-        mail.send_mail(config.mail.as_dict(), data_path)
+        files = storage.list_csv_files(data_path)
+        text = DATA_MAIL_TEXT if files else f"{DATA_MAIL_TEXT}\n\n{NO_DATA_FILES_TEXT}"
+        mail.send_mail(config.mail, config.mail.subject, text, files)
         logger.info("mail sent successfully")
         return True
-    except KeyError as error:
-        logger.error("no mail configured: %s", error)
-        # Continue execution instead of exiting
-        return False
-    except ValueError as error:
+    except errors.GruenbeckError as error:
         logger.error("mail sending failed: %s", error)
-        # Continue execution instead of exiting
         return False
     except Exception as error:
         logger.error("unexpected error during mail sending: %s", error)
-        # Continue execution instead of exiting
         return False
 
 

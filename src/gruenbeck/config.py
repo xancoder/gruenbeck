@@ -74,20 +74,6 @@ class Mail:
     recipients: tuple[str, ...]
     subject: str
 
-    def as_dict(self) -> dict:
-        """the keys of the mail section as gruenbeck.mail expects them"""
-        result: dict = {
-            "smtpServer": self.smtp_server,
-            "smtpPort": self.smtp_port,
-            "senderEmail": self.sender_email,
-            "senderPassword": self.sender_password,
-            "recipients": list(self.recipients),
-            "subject": self.subject,
-        }
-        if self.smtp_security is not None:
-            result["smtpSecurity"] = self.smtp_security
-        return result
-
 
 @dataclasses.dataclass(frozen=True)
 class SoftWaterSystem:

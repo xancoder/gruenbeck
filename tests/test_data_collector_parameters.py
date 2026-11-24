@@ -25,8 +25,8 @@ def error_mails(monkeypatch):
     sent = []
     monkeypatch.setattr(
         mail,
-        "send_mail_text",
-        lambda param, subject, text: sent.append(text),
+        "send_mail",
+        lambda settings, subject, text, attachments=(): sent.append(text),
     )
     return sent
 

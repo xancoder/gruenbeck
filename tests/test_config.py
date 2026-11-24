@@ -105,19 +105,14 @@ def test_smtp_security_null_is_derived_from_the_port(config_data, write_config):
     loaded = configuration.load_configuration(write_config(config_data))
 
     assert loaded.mail.smtp_security is None
-    assert "smtpSecurity" not in loaded.mail.as_dict()
 
 
-def test_mail_as_dict_has_the_keys_of_the_mail_module(loaded_config, config_data):
-    assert loaded_config.mail.as_dict() == config_data["mail"]
-
-
-def test_mail_as_dict_has_the_normalized_values(config_data, write_config):
+def test_mail_port_and_security_are_normalized(config_data, write_config):
     config_data["mail"].update(smtpPort="465", smtpSecurity=" SSL ")
 
     loaded = configuration.load_configuration(write_config(config_data))
 
-    assert loaded.mail.as_dict() == {**config_data["mail"], "smtpPort": 465, "smtpSecurity": "ssl"}
+    assert (loaded.mail.smtp_port, loaded.mail.smtp_security) == (465, "ssl")
 
 
 def test_password_is_not_in_the_repr(loaded_config):

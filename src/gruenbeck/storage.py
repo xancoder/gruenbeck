@@ -44,6 +44,16 @@ def get_data_file(data_path, prefix: str, year) -> pathlib.Path:
     return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
 
 
+def list_csv_files(data_folder: pathlib.Path) -> list[pathlib.Path]:
+    """
+    the csv files directly in the data folder (not in subfolders), sorted by name
+    :raises StorageError: the data folder does not exist or is not a folder
+    """
+    if not data_folder.is_dir():
+        raise StorageError(f"data folder does not exist or is not a directory: {data_folder}")
+    return sorted(data_folder.glob("*.csv"))
+
+
 def read_data_file(file_obj, fieldnames: config.FieldNames, date_pattern: str) -> dict:
     """
     stored values of one yearly file
