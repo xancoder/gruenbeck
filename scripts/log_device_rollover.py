@@ -51,7 +51,11 @@ STATUS_OK = "ok"
 STATUS_ERROR = "error"
 STATUS_ROLLOVER = "rollover"
 
-Fetch = typing.Callable[..., dict]
+# one CSV row: column name and text
+Row = dict[str, str]
+# rollover values of a response, in the order of ROLLOVER_PARAMETERS
+RolloverValues = tuple[str, ...]
+Fetch = typing.Callable[..., dict[str, str | None]]
 
 
 def local_now() -> datetime.datetime:
@@ -59,7 +63,7 @@ def local_now() -> datetime.datetime:
     return datetime.datetime.now().astimezone()
 
 
-def missing_values(values: dict) -> list:
+def missing_values(values: typing.Mapping[str, str | None]) -> list[str]:
     """names of the consumption values that are absent or not a number"""
     return [name for name in VALUE_PARAMETERS if not str(values.get(name) or "").strip().isdigit()]
 
@@ -67,10 +71,10 @@ def missing_values(values: dict) -> list:
 def poll(
     host: str,
     timeout: float,
-    previous: tuple | None,
+    previous: RolloverValues | None,
     fetch: Fetch,
     since: str | None = None,
-):
+) -> tuple[Row, RolloverValues | None]:
     """
     request the device once and classify the response
     :param previous: rollover values of the last complete response, None at the start
@@ -92,7 +96,7 @@ def poll(
         row.update(status=STATUS_ERROR, message=f"incomplete response: {', '.join(missing)}")
         return row, previous
 
-    current = tuple(values[name].strip() for name in ROLLOVER_PARAMETERS)
+    current = tuple((values[name] or "").strip() for name in ROLLOVER_PARAMETERS)
     if previous is not None and current != previous:
         message = ", ".join(
             f"{name} {old} -> {new}"
@@ -106,7 +110,7 @@ def poll(
     return row, current
 
 
-def last_complete_row(output: pathlib.Path) -> dict | None:
+def last_complete_row(output: pathlib.Path) -> Row | None:
     """
     last row of an earlier run with status ok or rollover and all values
     :return: the row, or None if the file is missing, empty or has no complete row
@@ -114,7 +118,7 @@ def last_complete_row(output: pathlib.Path) -> dict | None:
     """
     if not output.exists() or output.stat().st_size == 0:
         return None
-    last = None
+    last: Row | None = None
     with output.open(newline="", encoding="utf-8") as csv_file:
         reader = csv.DictReader(csv_file)
         if tuple(reader.fieldnames or ()) != FIELDNAMES:
@@ -127,7 +131,7 @@ def last_complete_row(output: pathlib.Path) -> dict | None:
     return last
 
 
-def append_row(output: pathlib.Path, row: dict) -> None:
+def append_row(output: pathlib.Path, row: Row) -> None:
     """append one row; the header is written only into a new or empty file"""
     output.parent.mkdir(parents=True, exist_ok=True)
     write_header = not output.exists() or output.stat().st_size == 0
@@ -147,7 +151,7 @@ def run(
     fetch: Fetch = gruenbeck.device.get_data_from_mux_http,
     now: typing.Callable[[], datetime.datetime] = local_now,
     sleep: typing.Callable[[float], None] = time.sleep,
-    previous_row: dict | None = None,
+    previous_row: Row | None = None,
 ) -> int:
     """
     poll the device every interval seconds until hours have passed
@@ -157,8 +161,8 @@ def run(
     start = now()
     deadline = start + datetime.timedelta(hours=hours)
     next_poll = start
-    previous = None
-    since = None
+    previous: RolloverValues | None = None
+    since: str | None = None
     if previous_row:
         previous = tuple(previous_row[name].strip() for name in ROLLOVER_PARAMETERS)
         since = previous_row["time"]
@@ -193,7 +197,7 @@ def positive_float(text: str) -> float:
     return value
 
 
-def parse_args(argv=None) -> argparse.Namespace:
+def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="log the daily rollover of the consumption values (read-only)"
     )
@@ -229,7 +233,7 @@ def read_device_config(config_file: str) -> tuple[str, float]:
     return device["host"], timeout
 
 
-def main(argv=None) -> int:
+def main(argv: typing.Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         host, timeout = read_device_config(args.config_file)

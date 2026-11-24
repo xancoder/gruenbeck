@@ -261,9 +261,11 @@ The dev tools (`uv sync`) include ruff, mypy and pre-commit; their settings are 
 ```shell script
 uv run ruff format   # format the code (double quotes, line length 100)
 uv run ruff check    # lint
-uv run mypy          # check the types of src and tests (strict)
+uv run mypy          # check the types of src, tests, scripts and deploy (strict)
+uv run pytest --cov  # tests with line and branch coverage of the code (src, scripts, deploy)
 ```
 
+The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
 #### pre-commit
 
 [pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML and TOML syntax, large files) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. Install the git hooks once per clone:

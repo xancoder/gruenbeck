@@ -7,7 +7,9 @@ The generated files are never written into the repository.
 """
 
 import argparse
+import collections.abc
 import getpass
+import os
 import pathlib
 import re
 import shlex
@@ -25,7 +27,11 @@ SYSTEMD_DIR = "/etc/systemd/system/"
 INVALID_VALUE = re.compile(r"[\s%]")
 
 
-def generate_units(user, install_path, output_dir=None):
+def generate_units(
+    user: str,
+    install_path: str | os.PathLike[str],
+    output_dir: str | os.PathLike[str] | None = None,
+) -> pathlib.Path:
     """
     Create service and timer unit in output_dir (a new temporary directory if None)
     :param user: user the service runs as
@@ -60,7 +66,7 @@ def generate_units(user, install_path, output_dir=None):
     return output_dir
 
 
-def install_commands(output_dir):
+def install_commands(output_dir: pathlib.Path) -> list[str]:
     """
     :return: list of shell commands to install the units as system service
     """
@@ -72,7 +78,7 @@ def install_commands(output_dir):
     ]
 
 
-def main(argv=None):
+def main(argv: collections.abc.Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate systemd units for the Gruenbeck data collector"
     )

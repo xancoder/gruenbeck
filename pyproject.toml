@@ -47,7 +47,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests"]
+files = ["src", "tests", "scripts", "deploy"]
 mypy_path = "src"
 strict = true
 
@@ -62,3 +62,12 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--import-mode=importlib"]
 strict = true
+
+[tool.coverage.run]
+branch = true
+# the code only, not the tests
+source = ["src", "scripts", "deploy"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 95
