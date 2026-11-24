@@ -173,6 +173,9 @@ class FakeSMTP:
                 fake.step("quit")
                 self.calls.append(("quit",))
 
+            def close(self) -> None:
+                self.calls.append(("close",))
+
         return Server
 
     def raw_messages(self) -> list[bytes]:

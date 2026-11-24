@@ -1044,6 +1044,21 @@ def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(
     ]
 
 
+def test_stored_row_without_value_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
+    # a date without a comma: a clear error instead of an unexpected AttributeError
+    write_year(tmp_path, 2026, [("2026-11-09", "5"), ("2026-11-10",)])
+    path = tmp_path / "data" / f"{PREFIX}_2026.csv"
+    before = path.read_bytes()
+
+    assert run(memory(true_value)) == 1
+    assert path.read_bytes() == before
+    assert mails == [
+        ("error", f"{path}, line 3: no value in the column 'value': nothing written"),
+    ]
+
+
 @pytest.mark.parametrize("text", ["1.12.2026", "01.12.26", "01.12.2026 ", "2026-12-01"])
 def test_date_text_has_to_be_exactly_what_the_pattern_writes(
     run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]], text: str

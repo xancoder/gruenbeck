@@ -138,6 +138,27 @@ def test_short_row_without_date_is_an_error(tmp_path: pathlib.Path) -> None:
         storage.read_data_file(path, FIELDNAMES, ISO)
 
 
+def test_short_row_without_value_is_an_error(tmp_path: pathlib.Path) -> None:
+    # a date without a comma: csv.DictReader gives None, not "" (an empty value stays text)
+    path = tmp_path / "p_2026.csv"
+    path.write_text("date,value\n2026-11-20,1\n2026-11-21\n2026-11-22,\n", encoding="utf-8")
+
+    with pytest.raises(storage.StorageError) as err:
+        storage.read_data_file(path, FIELDNAMES, ISO)
+
+    assert str(err.value) == f"{path}, line 3: no value in the column 'value'"
+
+
+def test_short_row_names_the_configured_value_column(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "p_2026.csv"
+    path.write_text("day,note,litres\n2026-11-22,x\n", encoding="utf-8")
+
+    with pytest.raises(storage.StorageError) as err:
+        storage.read_data_file(path, config.FieldNames(date="day", value="litres"), ISO)
+
+    assert str(err.value) == f"{path}, line 2: no value in the column 'litres'"
+
+
 def test_columns_are_read_by_the_configured_fieldnames(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "p_2026.csv"
     path.write_text("litres,note,day\n101,x,2026-11-22\n", encoding="utf-8")

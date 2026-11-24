@@ -232,6 +232,27 @@ def test_unusable_data_file_gives_a_note_instead_of_the_statistics(
     assert record.exc_info[0] is storage.StorageError
 
 
+def test_data_file_with_a_row_without_value_gives_the_note(
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+    old_file = storage.get_data_file(loaded_config.data_path, loaded_config.data_file.prefix, 2024)
+    old_file.write_text("date,value\n2024-11-18,5\n2024-11-19\n", encoding="utf-8")
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    text, _ = sent(smtp)
+    assert text.startswith(
+        f"your stored data\n\n{STATISTICS_FAILED}{old_file}, line 3: no value in the column"
+        " 'value'\n"
+    )
+    (record,) = warnings()
+    assert record.exc_info is not None
+    assert record.exc_info[0] is storage.StorageError
+
+
 def test_unexpected_error_of_the_statistics_gives_the_note_too(
     monkeypatch: pytest.MonkeyPatch,
     smtp: "FakeSMTP",

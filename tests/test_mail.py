@@ -34,7 +34,7 @@ SETTINGS = config.Mail(
     retry_delay=5,
 )
 
-SEND_STEPS = ["starttls", "login", "send_message", "sendmail", "quit", "exit"]
+SEND_STEPS = ["starttls", "login", "send_message", "sendmail", "quit", "close", "exit"]
 
 
 def settings_with(**changes: typing.Any) -> config.Mail:
@@ -389,7 +389,6 @@ def test_permanent_error_is_not_retried(
         ("connect", ssl.SSLError("certificate verify failed")),
         ("connect", OSError(113, "No route to host")),
         ("sendmail", smtplib.SMTPResponseException(451, b"try again later")),
-        ("quit", RuntimeError("unexpected")),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
@@ -403,6 +402,65 @@ def test_other_errors_are_not_retried(
 
     assert str(err.value) == f"Unexpected error while sending email: {error}"
     assert sleeps == []
+
+
+# --- ending the session after the mail was accepted (P009-S2) ------------------------
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        # the connection breaks or times out before the answer to QUIT
+        smtplib.SMTPServerDisconnected("Connection unexpectedly closed"),
+        TimeoutError("timed out"),
+        # an answer other than 221 to QUIT
+        smtplib.SMTPResponseException(421, b"closing"),
+        RuntimeError("unexpected"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+def test_error_while_ending_the_session_neither_sends_again_nor_fails(
+    smtp: "FakeSMTP", sleeps: list[float], caplog: pytest.LogCaptureFixture, error: Exception
+) -> None:
+    smtp.errors = [("quit", error)]
+    caplog.set_level(logging.WARNING, logger="gruenbeck")
+
+    send()
+
+    (connection,) = smtp.connections
+    assert [call[0] for call in connection["calls"]] == [
+        "starttls",
+        "login",
+        "send_message",
+        "sendmail",
+        "close",
+        "exit",
+    ]
+    assert len(smtp.raw_messages()) == 1
+    assert sleeps == []
+    assert [(r.name, r.levelno, r.getMessage()) for r in caplog.records] == [
+        (
+            "gruenbeck.mail",
+            logging.WARNING,
+            f"mail sent, but ending the SMTP session failed: {error}",
+        )
+    ]
+
+
+def test_ending_a_real_session_closes_it_so_the_with_block_does_not_quit_again(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # smtplib.SMTP itself (not the fake): never connected, so QUIT cannot be sent
+    server = smtplib.SMTP()
+    caplog.set_level(logging.WARNING, logger="gruenbeck")
+
+    with server:
+        mail._end_session(server)
+
+    assert server.sock is None
+    assert [r.getMessage() for r in caplog.records] == [
+        "mail sent, but ending the SMTP session failed: please run connect() first"
+    ]
 
 
 # --- HTML part (P007-S4) ------------------------------------------------------------

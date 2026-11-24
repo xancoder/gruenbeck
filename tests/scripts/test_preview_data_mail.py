@@ -177,6 +177,7 @@ def test_send_to_sends_the_mail_to_that_address_only(
         "send_message",
         "sendmail",
         "quit",
+        "close",
         "exit",
     ]
     (sendmail,) = [call for call in connection["calls"] if call[0] == "sendmail"]
