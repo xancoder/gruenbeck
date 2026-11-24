@@ -90,7 +90,7 @@ def main(config_file: str | os.PathLike[str]) -> int:
         return 1
 
     try:
-        data_path = collect_and_store(config)
+        result = collect_and_store(config)
     except errors.GruenbeckError as err:
         report_error(config.mail, str(err))
         return 1
@@ -104,8 +104,9 @@ def main(config_file: str | os.PathLike[str]) -> int:
         return 1
 
     # the data is stored at this point; a failed mail still has to be visible
-    # as a failed run (exit code 1) for cron and systemd
-    if not get_mail(config, data_path, local_now().date()):
+    # as a failed run (exit code 1) for cron and systemd; the statistics are for the day the
+    # values were stored under, even if the run went past midnight
+    if not get_mail(config, result.data_path, result.today):
         logger.error("data was collected and stored, but email sending failed")
         return 1
 
@@ -113,10 +114,24 @@ def main(config_file: str | os.PathLike[str]) -> int:
     return 0
 
 
-def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
+@dataclasses.dataclass(frozen=True)
+class CollectResult:
+    """what the data collector stored"""
+
+    data_path: pathlib.Path
+    """the data folder"""
+    today: datetime.date
+    """the day of the run: the values were stored under it (the only call of local_now)"""
+
+
+def collect_and_store(config: configuration.Configuration) -> CollectResult:
     """
     request the device and store the new values in the yearly files
-    :return: pathlib.Path of the data folder
+
+    The time of the run is taken once, after the response of the device (the request can
+    take minutes with retries); the day of the run is part of the result, so the statistics
+    of the data mail are calculated for the day the values were stored under.
+    :return: the data folder and the day of the run
     :raises errors.GruenbeckError: the run fails; nothing is written then
     """
     data_path = get_data_folder(config)
@@ -176,7 +191,7 @@ def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
             data_existing,
             data_file.date_pattern,
         )
-    return data_path
+    return CollectResult(data_path, now.date())
 
 
 def get_data_folder(config: configuration.Configuration) -> pathlib.Path:

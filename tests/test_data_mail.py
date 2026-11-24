@@ -13,7 +13,7 @@ import typing
 
 import pytest
 
-from gruenbeck import charts, cli, config, report, storage
+from gruenbeck import charts, cli, config, device, report, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
@@ -189,9 +189,8 @@ def test_failed_statistics_do_not_fail_the_run(
         raise storage.StorageError("bad file")
 
     # the collector part of the run is not under test: the data is stored already
-    monkeypatch.setattr(cli, "collect_and_store", lambda config: loaded_config.data_path)
     monkeypatch.setattr(
-        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+        cli, "collect_and_store", lambda config: cli.CollectResult(loaded_config.data_path, TODAY)
     )
     monkeypatch.setattr(report, "build_report", fail)
 
@@ -211,12 +210,12 @@ def test_run_calculates_the_statistics_for_the_day_of_the_run(
     monkeypatch: pytest.MonkeyPatch, smtp: "FakeSMTP", loaded_config: config.Configuration
 ) -> None:
     write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-    monkeypatch.setattr(cli, "collect_and_store", lambda config: loaded_config.data_path)
     # Thursday: the week of the statistics is the one before the week of the run
+    thursday = datetime.date(2026, 11, 26)
     monkeypatch.setattr(
         cli,
-        "local_now",
-        lambda: datetime.datetime.combine(datetime.date(2026, 11, 26), datetime.time(16, 0)),
+        "collect_and_store",
+        lambda config: cli.CollectResult(loaded_config.data_path, thursday),
     )
 
     assert cli.main(str(loaded_config.file)) == 0
@@ -224,6 +223,50 @@ def test_run_calculates_the_statistics_for_the_day_of_the_run(
     text, _ = sent(smtp)
     assert "Water consumption in liters, run on 2026-11-26\n" in text
     assert "Last week: week 47/2026, 2026-11-16 .. 2026-11-22" in text.splitlines()
+
+
+def test_run_past_midnight_calculates_the_statistics_for_the_day_of_the_stored_values(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    warnings: typing.Callable[[], list[logging.LogRecord]],
+    loaded_config: config.Configuration,
+) -> None:
+    monday = datetime.datetime(2026, 11, 23, 23, 59)
+    tuesday = datetime.datetime(2026, 11, 24, 0, 1)
+    calls: list[datetime.datetime] = []
+
+    def now() -> datetime.datetime:
+        # the first call is before midnight, every further call after it
+        calls.append(monday if not calls else tuesday)
+        return calls[-1]
+
+    def fetch(
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
+        return {"D_C_4_2": "23:59", **{f"D_Y_2_{place}": "100" for place in range(1, 15)}}
+
+    monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
+    monkeypatch.setattr(cli, "local_now", now)
+
+    assert cli.main(str(loaded_config.file)) == 0
+
+    # the time of the run is taken once, so the statistics cannot get another day
+    assert len(calls) == 1
+    text, attachments = sent(smtp)
+    assert "Water consumption in liters, run on 2026-11-23\n" in text
+    assert "2026-11-24" not in text
+    # the values are stored under the day before Monday, the last one is the Sunday
+    stored = storage.read_data_file(
+        storage.get_data_file(loaded_config.data_path, loaded_config.data_file.prefix, monday.year),
+        loaded_config.data_file.fieldnames,
+        loaded_config.data_file.date_pattern,
+    )
+    assert max(stored) == "2026-11-22"
+    assert len(attachments) == 1
+    assert warnings() == []
 
 
 # --- HTML part and charts (P007-S4) -----------------------------------------------------
@@ -444,9 +487,8 @@ def test_run_with_a_failed_chart_still_exits_with_0(
         raise RuntimeError("boom")
 
     monkeypatch.setitem(charts.CHARTS, "cumulative", fail)
-    monkeypatch.setattr(cli, "collect_and_store", lambda config: loaded_config.data_path)
     monkeypatch.setattr(
-        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+        cli, "collect_and_store", lambda config: cli.CollectResult(loaded_config.data_path, TODAY)
     )
 
     assert cli.main(str(loaded_config.file)) == 0
