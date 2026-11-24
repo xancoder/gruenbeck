@@ -15,7 +15,7 @@ import sys
 import traceback
 from collections.abc import Sequence
 
-from gruenbeck import analysis, device, errors, mail, storage
+from gruenbeck import analysis, device, errors, mail, report, storage
 from gruenbeck import config as configuration
 
 # the handlers of setup_logging() sit on the logger of the package, so they also get the
@@ -32,6 +32,9 @@ ONE_DAY = datetime.timedelta(days=1)
 ERROR_MAIL_SUBJECT = "gruenbeck data collector failure"
 DATA_MAIL_TEXT = "your stored data"
 NO_DATA_FILES_TEXT = "No data files found to attach."
+STATISTICS_FAILED_TEXT = (
+    "The statistics could not be calculated: {error}\nDetails are in the log file."
+)
 
 
 class CollectError(errors.GruenbeckError):
@@ -101,7 +104,7 @@ def main(config_file: str | os.PathLike[str]) -> int:
 
     # the data is stored at this point; a failed mail still has to be visible
     # as a failed run (exit code 1) for cron and systemd
-    if not get_mail(config, data_path):
+    if not get_mail(config, data_path, local_now().date()):
         logger.error("data was collected and stored, but email sending failed")
         return 1
 
@@ -287,15 +290,21 @@ def check_stored_overlap(
     )
 
 
-def get_mail(config: configuration.Configuration, data_path: pathlib.Path) -> bool:
+def get_mail(
+    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
+) -> bool:
     """
-    send the csv files of the data folder as data mail
+    send the csv files of the data folder as data mail, with the statistics as text
+    :param today: day of the run, for the statistics
     :return: True if the mail was sent; a failure is logged and gives False
     """
     try:
         files = storage.list_csv_files(data_path)
-        text = DATA_MAIL_TEXT if files else f"{DATA_MAIL_TEXT}\n\n{NO_DATA_FILES_TEXT}"
-        mail.send_mail(config.mail, config.mail.subject, text, files)
+        parts = [DATA_MAIL_TEXT]
+        if not files:
+            parts.append(NO_DATA_FILES_TEXT)
+        parts.append(get_statistics_text(config, data_path, today))
+        mail.send_mail(config.mail, config.mail.subject, "\n\n".join(parts), files)
         logger.info("mail sent successfully")
         return True
     except errors.GruenbeckError as error:
@@ -304,6 +313,23 @@ def get_mail(config: configuration.Configuration, data_path: pathlib.Path) -> bo
     except Exception as error:
         logger.error("unexpected error during mail sending: %s", error)
         return False
+
+
+def get_statistics_text(
+    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
+) -> str:
+    """
+    the statistics of the stored data as text for the data mail
+
+    The data is stored already and the data mail has to go out, so a failure of the
+    statistics (an unusable data file, a bug) only gives a note instead of the statistics,
+    and a warning with the traceback in the log. It never fails the run.
+    """
+    try:
+        return report.format_text(report.build_report(data_path, config.data_file, today))
+    except Exception as error:
+        logger.warning("statistics for the data mail failed: %s", error, exc_info=True)
+        return STATISTICS_FAILED_TEXT.format(error=error)
 
 
 def collect(argv: Sequence[str] | None = None) -> int:

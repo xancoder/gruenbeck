@@ -411,3 +411,157 @@ def _cumulative(series: _Series, year: int) -> YearCumulative:
             running += day.liters
             points.append(CumulativePoint(day.date, day.status, running))
     return YearCumulative(year, tuple(points))
+
+
+# --- text of the data mail ------------------------------------------------------------------
+
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+# the columns of a table are this wide whatever the values are (up to 7 digits of liters)
+TABLE_ROW = "{year:<4}  {period:<12}  {total:>8}  {mean:>5}  {minimum:>11}  {maximum:>11}"
+TABLE_HEADER = TABLE_ROW.format(
+    year="Year", period="Period", total="Total ", mean="Mean", minimum="Min", maximum="Max"
+)
+TABLE_RULE = TABLE_ROW.format(
+    year="-" * 4, period="-" * 12, total="-" * 8, mean="-" * 5, minimum="-" * 11, maximum="-" * 11
+)
+# a note about an incomplete period is indented to the column "Period"
+NOTE_INDENT = " " * 6
+NO_EARLIER_YEAR_TEXT = "No earlier year has values for this period."
+LEGEND_TEXT = (
+    "* includes interpolated days: a gap of up to {gap} days between measured days is\n"
+    "  filled with a straight line (whole liters), not stored in the data files.\n"
+    "Mean: liters per day with a value. Min and Max: measured days only."
+)
+
+
+def format_text(report: Report) -> str:
+    """
+    the statistics as plain text for the data mail (ASCII, at most 78 characters per line)
+
+    The last week with every day, then tables of the week, the current and the last month
+    and the year so far, each with the same period of the earlier years, and the earlier
+    years as a whole. A period with missing days or days without data is marked as
+    incomplete with their number; a total with interpolated days has a `*`.
+    """
+    shown: list[Period] = []
+    sections = [f"Water consumption in liters, run on {report.today.isoformat()}"]
+
+    week = report.week.current
+    iso_year, iso_week, _ = week.start.isocalendar()
+    sections.append(
+        _section(
+            f"Last week: week {iso_week}/{iso_year}, {_range(week)}",
+            report.week,
+            shown,
+            daily=week,
+        )
+    )
+    if report.current_month is not None:
+        sections.append(
+            _section(
+                f"Current month so far: {_range(report.current_month.current)}",
+                report.current_month,
+                shown,
+            )
+        )
+    sections.append(
+        _section(f"Last month: {_range(report.last_month.current)}", report.last_month, shown)
+    )
+    if report.year_to_date is not None:
+        sections.append(
+            _section(
+                f"Year so far: {_range(report.year_to_date.current)}", report.year_to_date, shown
+            )
+        )
+    sections.append(_previous_years_section(report.previous_years, shown))
+
+    legend = []
+    if any(period.interpolated for period in shown):
+        legend.append(LEGEND_TEXT.format(gap=MAX_INTERPOLATED_GAP))
+    else:
+        legend.append(LEGEND_TEXT.splitlines()[-1])
+    return "\n\n".join([*sections, *legend]) + "\n"
+
+
+def _range(period: Period) -> str:
+    return f"{period.start.isoformat()} .. {period.end.isoformat()}"
+
+
+def _section(
+    title: str, comparison: Comparison, shown: list[Period], daily: Period | None = None
+) -> str:
+    lines = [title, ""]
+    if daily is not None:
+        lines += [_day_line(day) for day in daily.days]
+        lines.append("")
+    periods = [comparison.current, *comparison.previous]
+    shown.extend(periods)
+    lines += _table(periods)
+    if not comparison.previous:
+        lines += ["", NO_EARLIER_YEAR_TEXT]
+    return "\n".join(lines)
+
+
+def _previous_years_section(years: tuple[Period, ...], shown: list[Period]) -> str:
+    lines = ["Earlier years as a whole", ""]
+    if years:
+        shown.extend(years)
+        lines += _table(years)
+    else:
+        lines.append("No earlier year has values.")
+    return "\n".join(lines)
+
+
+def _day_line(day: Day) -> str:
+    if day.liters is None:
+        note = "  missing" if day.status is DayStatus.MISSING else "  no data"
+        return f"  {WEEKDAYS[day.date.weekday()]} {day.date.isoformat()}  {'-':>7} {note}"
+    mark = "*" if day.status is DayStatus.INTERPOLATED else " "
+    return (
+        f"  {WEEKDAYS[day.date.weekday()]} {day.date.isoformat()}  {day.liters:>7}{mark}".rstrip()
+    )
+
+
+def _table(periods: collections.abc.Sequence[Period]) -> list[str]:
+    lines = [TABLE_HEADER, TABLE_RULE]
+    for period in periods:
+        lines.append(_table_row(period).rstrip())
+        note = _incomplete_note(period)
+        if note:
+            lines.append(NOTE_INDENT + note)
+    return lines
+
+
+def _table_row(period: Period) -> str:
+    if period.total is None or period.mean is None:
+        total, mean = f"{'-':>7} ", "-"
+    else:
+        total = f"{period.total:>7}{'*' if period.interpolated else ' '}"
+        mean = f"{period.mean:.0f}"
+    return TABLE_ROW.format(
+        year=period.year,
+        period=f"{period.start:%m-%d}..{period.end:%m-%d}",
+        total=total,
+        mean=mean,
+        minimum=_extreme(period.minimum),
+        maximum=_extreme(period.maximum),
+    )
+
+
+def _extreme(day: Day | None) -> str:
+    if day is None or day.liters is None:
+        return "-"
+    return f"{day.liters:>5} {day.date:%m-%d}"
+
+
+def _incomplete_note(period: Period) -> str | None:
+    parts = []
+    if period.missing:
+        parts.append(f"{_days(period.missing)} missing")
+    if period.no_data:
+        parts.append(f"{_days(period.no_data)} without data")
+    return f"incomplete: {', '.join(parts)}" if parts else None
+
+
+def _days(count: int) -> str:
+    return f"{count} day" if count == 1 else f"{count} days"

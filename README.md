@@ -120,7 +120,7 @@ In every failing case nothing is written, not even one of two yearly files, and 
 
 | exit code | meaning |
 |-----------|---------|
-| `0` | data collected, stored and sent by mail |
+| `0` | data collected, stored and sent by mail (also if only the [statistics in the data mail](#data-mail) failed) |
 | `1` | any failure: configuration or data folder invalid, device not reachable or without values, new values that differ from the stored ones, e.g. a run before the daily rollover of the device (see the note under [Scheduling](#scheduling)), error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
 
 Cron and systemd can therefore detect a failed run by its exit code.
@@ -139,6 +139,38 @@ Scheduled runs call the command of the virtual environment directly (`./.venv/bi
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
+### data mail
+
+Every run ends with the data mail to the `recipients`: the subject is `mail.subject`, every CSV file directly in the data folder is attached, and the text holds the statistics of the stored consumption. They are calculated after the yearly files have been written, so they include the values of the run. All figures are whole liters, the text is plain ASCII with tables of a fixed column width (at most 78 characters per line).
+
+The statistics cover, for the day of the run:
+
+| part | period |
+|------|--------|
+| Last week | the last complete calendar week (Monday to Sunday) before the day of the run, with the value of every day. A run on another weekday (e.g. a missed run that the systemd timer makes up) reports the same week |
+| Current month so far | the 1st up to yesterday; left out on the 1st of a month |
+| Last month | the last complete month |
+| Year so far | 1 January up to yesterday; left out on 1 January |
+| Earlier years as a whole | every earlier year with values, from 1 January to 31 December |
+
+Each of the first four parts is compared with the same period of every earlier year that has values in it, latest year first: the calendar week with the same number (ISO week; week 53 only in years that have one), the same days of the month, the same days of the year (29 February counts only in leap years, so an earlier year ends at 28 February if the year of the run does not have the 29th), and for the last month the complete month. A year without any value in the period is left out. The table shows total, mean per day, and the minimum and maximum with their day (`MM-DD`):
+
+```text
+Year  Period          Total    Mean          Min          Max
+----  ------------  --------  -----  -----------  -----------
+2026  11-16..11-22     1100     157     90 11-21    300 11-20
+2025  11-17..11-23      140      20     20 11-17     20 11-17
+```
+
+#### missing values and interpolation
+
+A day is **missing** if no value is stored for it (no row, or a value that is not a number such as `-` from older runs), from the first stored day up to yesterday. Days before the first stored day and the day of the run itself are **without data**: the collector was not running yet, or the day is not over.
+
+- A gap of up to 3 missing days with a measured day on both sides is **interpolated**: a straight line between the two values, in whole liters. The value counts for the total and the mean, is marked with `*` (in the list of days and at the total of the period) and is not used for the minimum and maximum, which are measured days only. Interpolated values exist for the statistics only; they are never written to the data files.
+- Longer gaps and gaps at the edge of the data (for example no value for yesterday, which has no measured day after it) stay missing: total and mean cover the days with a value, and the period is marked below its row as `incomplete: 4 days missing` and, if it starts before the first stored day, `n days without data`.
+
+If the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`), the data mail still goes out, with a note instead of the statistics, and the log file gets a warning with the traceback. The run is not a failure then: the exit code stays `0`.
+
 ### analysis
 
 `gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
@@ -156,6 +188,7 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/device.py` | web server of the soft water system: parameter file, request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |
 | `src/gruenbeck/mail.py` | data mail and error mail |
+| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text) |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
 | `deploy/systemd/` | systemd units and their setup |
