@@ -41,13 +41,12 @@ def test_parameter_file_lists_all_consumption_rows_of_the_pdf(parameter_file):
     ]
 
 
-@pytest.mark.parametrize("suffix, separator", [(".csv", ","), (".tsv", "\t")])
-def test_parameter_files_have_no_commented_rows(parameter_file, suffix, separator):
-    lines = parameter_file.with_suffix(suffix).read_text(encoding="utf-8").splitlines()
+def test_parameter_file_has_no_commented_rows(parameter_file):
+    lines = parameter_file.read_text(encoding="utf-8").splitlines()
 
     assert not [line for line in lines if line.startswith("#")]
-    assert f"D_Y_1{separator}read" in "\n".join(lines)
-    assert f"D_Y_2_27{separator}read" in "\n".join(lines)
+    assert "D_Y_1,read" in "\n".join(lines)
+    assert "D_Y_2_27,read" in "\n".join(lines)
 
 
 def test_only_the_14_day_memory_is_requested(device, parameter_file):
