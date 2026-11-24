@@ -281,12 +281,16 @@ uv run pytest --cov  # tests with line and branch coverage of the code (src, dep
 The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
 #### pre-commit
 
-[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files), [zizmor](https://docs.zizmor.sh/) (audits the GitHub Actions workflows and the Dependabot configuration, offline) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:
+[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files), [typos](https://github.com/crate-ci/typos) (spelling of code, comments and documentation), [zizmor](https://docs.zizmor.sh/) (audits the GitHub Actions workflows and the Dependabot configuration, offline) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:
 
 ```shell script
 uv sync
-uv run pre-commit install
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
 ```
+
+The hook type `commit-msg` checks the first word of the commit message ([conventional-pre-commit](https://github.com/compilerla/conventional-pre-commit)): it has to be a type of the history (`feat`, `fix`, `refactor`, `test`, `docs`, `style`, `chore`, `build`, `ci` or `perf`), optionally with a scope and `!`, then `: ` and a description, for example `fix(storage): report a row without value as storage error`. Other messages are rejected. `CHANGELOG.md` is generated from these messages (see [release](#release)). The hook runs only when this hook type is installed; leave out `--hook-type commit-msg` to go without it.
+
+`typos` only reports what it finds (the hook of the project does not write corrections into the files, because a name of the standard library such as `smtplib.SMTPHeloError` would be "corrected" too). The settings are in `pyproject.toml` (`[tool.typos]`): `assets/`, `uv.lock` and the generated `CHANGELOG.md` are not checked, and the few false positives are listed with their reason (names of `smtplib`, the SMTP command `helo`, the misspelled key of a test).
 
 Hooks that already exist in `.git/hooks` are kept as `<hook>.legacy` and still run first. To check all files at any time:
 

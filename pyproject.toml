@@ -134,3 +134,26 @@ commit_parsers = [
     { message = "^chore", group = "<!-- 9 -->Miscellaneous" },
     { message = ".*", group = "<!-- 10 -->Other" },
 ]
+
+# spelling check (pre-commit hook typos); every exception has its reason
+[tool.typos.files]
+extend-exclude = [
+    # the documentation of the manufacturer and its conversion: not our text
+    "assets/",
+    # package names and hashes
+    "uv.lock",
+    # generated from the commit messages (git-cliff): fix the message, not the file
+    "CHANGELOG.md",
+]
+
+[tool.typos.default.extend-identifiers]
+# names of the standard library: smtplib.SMTPHeloError and the method of the fake server
+# that replaces smtplib.SMTP.ehlo_or_helo_if_needed
+SMTPHeloError = "SMTPHeloError"
+ehlo_or_helo_if_needed = "ehlo_or_helo_if_needed"
+# the misspelled key of the test that unknown keys are ignored with a warning
+smtpSecurty = "smtpSecurty"
+
+[tool.typos.default.extend-words]
+# HELO is the SMTP command of the greeting (the text of an error of the fake server)
+helo = "helo"
