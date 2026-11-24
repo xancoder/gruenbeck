@@ -19,6 +19,9 @@ import requests
 
 from gruenbeck import analysis, cli, collector, config, device, errors, mail, storage
 
+if typing.TYPE_CHECKING:
+    from conftest import FakeSMTP
+
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 TODAY = datetime.date(2026, 11, 23)
 
@@ -453,3 +456,62 @@ def test_setup_logging_configures_the_package_logger(tmp_path: pathlib.Path) -> 
         "StreamHandler",
         "RotatingFileHandler",
     ]
+
+
+# --- the SMTP password from the credential of systemd (P009-S14) ---------------------
+
+SECRET = "s3cret-from-the-credential"
+
+
+def test_run_with_the_credential_logs_in_with_it_and_keeps_it_out_of_log_and_mail(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    smtp: "FakeSMTP",
+    answers: list[dict[str, str | None] | BaseException],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    credentials = tmp_path / "credentials"
+    credentials.mkdir()
+    (credentials / "smtp-password").write_text(SECRET + "\n")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(credentials))
+    # the key is still in the file: the credential wins and the log asks to remove the key
+    config_file = write_config(config_data)
+    error_log = tmp_path / "errors.log"
+
+    exit_code = cli.collect(["-c", str(config_file), "-e", str(error_log), "-l"])
+
+    assert exit_code == 0
+    [connection] = smtp.connections
+    assert ("login", "sender@example.com", SECRET) in connection["calls"]
+    log = error_log.read_text()
+    assert "remove 'mail.senderPassword' from the configuration file" in log
+    everything = log + caplog.text + "".join(capsys.readouterr())
+    assert SECRET not in everything
+    assert "test-password" not in everything
+    # nothing of the credential in the mail that was sent (the fake records the envelope)
+    assert SECRET not in repr([call for call in connection["calls"] if call[0] != "login"])
+
+
+def test_run_with_an_empty_credential_ends_with_exit_code_1_and_no_mail(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    answers: list[dict[str, str | None] | BaseException],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    credentials = tmp_path / "credentials"
+    credentials.mkdir()
+    (credentials / "smtp-password").write_text("\n")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(credentials))
+    error_log = tmp_path / "errors.log"
+
+    exit_code = cli.collect(["-c", str(write_config(config_data)), "-e", str(error_log)])
+
+    assert exit_code == 1
+    assert f"the credential {credentials / 'smtp-password'} is empty" in error_log.read_text()
+    # without a password there is no mail section, so no error mail and no login
+    assert smtp.connections == []

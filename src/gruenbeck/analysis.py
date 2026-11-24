@@ -130,7 +130,8 @@ def main(config_file: str | os.PathLike[str]) -> None:
     import pandas
 
     # FileNotFoundError and ConfigurationError go to the caller (gruenbeck.cli.analyse)
-    config = configuration.load_configuration(config_file)
+    # the analysis never logs in to the SMTP server
+    config = configuration.load_configuration(config_file, password_required=False)
     data_file = config.data_file
     paths = storage.list_year_files(config.data_path, data_file.prefix)
     if not paths:

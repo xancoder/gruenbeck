@@ -35,7 +35,9 @@ cp src/config.example.json src/config.json
 chmod 600 src/config.json
 ```
 
-The file is read only by the service user, so restrict its permissions (`600`) and let that user own it. The SMTP password is read from this file only.
+The file is read only by the service user, so restrict its permissions (`600`) and let that user own it. The SMTP password is in this file (`mail.senderPassword`) unless the service gets it as a systemd credential (see [mail settings](#mail-settings)).
+
+All commands read `./src/config.json` (relative to the current directory) unless `--config-file` / `-c` names another file. If the environment variable `GRUENBECK_CONFIG` is set and not empty, it is the default of `--config-file` instead, so a service can read a configuration outside of the repository, e.g. `/etc/gruenbeck/config.json`; the option still wins over the variable.
 
 The data collector and the analysis check the whole file when they start: every missing key and every invalid value is listed in one message, and the run ends with exit code 1 before the device is asked. If the `mail` section itself is valid, that message also goes out as error mail. Unknown keys (e.g. a typo in an optional key) are ignored with a warning in the log.
 
@@ -47,7 +49,7 @@ The data collector and the analysis check the whole file when they start: every 
 
 The key `parameterFile` of older configurations is not used any more (the data collector asks for fixed parameters, see [assets](assets/README.md) for the documentation of the device); remove it, otherwise every run logs the warning `unknown config parameter 'parameterFile' is ignored`.
 
-A relative path starts at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json`) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
+A relative path starts at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json` unless `GRUENBECK_CONFIG` is set) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
 
 #### existing configuration with paths relative to the current directory
 
@@ -74,13 +76,23 @@ The section `mail` configures the SMTP server used for the data mail and the err
 | `smtpServer` | host name of the SMTP server |
 | `smtpPort` | port of the SMTP server (number 1 ... 65535; a string like `"587"` is still accepted) |
 | `smtpSecurity` | optional, `"ssl"` (implicit TLS, usually port 465) or `"starttls"` (usually port 587). If omitted, port 465 uses `ssl` and every other port uses `starttls` |
-| `senderEmail`, `senderPassword` | login and sender address |
+| `senderEmail`, `senderPassword` | login and sender address. `senderPassword` is optional if the SMTP password comes from a credential (see below) |
 | `recipients` | list of recipient addresses |
 | `subject` | subject of the data mail (may be empty) |
 | `retries` | optional, how often a mail is sent again after a temporary error (whole number, 0 or greater, default `3`) |
 | `retryDelay` | optional, seconds to wait before every repeated attempt (number, 0 or greater, default `5`) |
 
 Temporary errors (connection lost, timeout, connection failed) are retried `retries` times, `retryDelay` seconds apart; permanent errors (wrong login, rejected sender or recipient) fail immediately.
+
+##### SMTP password as a systemd credential
+
+The password need not be in `src/config.json`. If the environment variable `CREDENTIALS_DIRECTORY` is set (systemd does that for a service with `LoadCredential=`) and the folder holds a file `smtp-password`, its content is the SMTP password, without a final line break, and `senderPassword` is optional:
+
+- Both there: the credential wins, and the log gets the warning `the credential 'smtp-password' is used as SMTP password; remove 'mail.senderPassword' from the configuration file`. Remove the key, the file does not need the password any more.
+- Neither there: the configuration error names both ways (the key and the credential).
+- A credential that is empty or cannot be read is a configuration error; it is not replaced by `senderPassword`. As the `mail` section is then unusable, no error mail is sent.
+
+The password appears in no log entry and in no mail. How to create the file and let the service load it is in [deploy/systemd/README.md](deploy/systemd/README.md#smtp-password-as-credential). Commands that never log in to the SMTP server do not need the password: `gruenbeck-analyse` and `gruenbeck-preview-mail` without `--send-to` run without `senderPassword` and without a credential (a password that is there is still used and checked). `gruenbeck-collect` and `gruenbeck-preview-mail --send-to` stop with the error above if the password is missing, so start the collector through the service (`sudo systemctl start gruenbeck-collector.service`) once the key is removed.
 
 #### device settings
 
@@ -216,7 +228,7 @@ uv run gruenbeck-preview-mail --send-to me@example.com
 
 | option | meaning |
 |--------|---------|
-| `--config-file` / `-c` | configuration file (default `./src/config.json`) |
+| `--config-file` / `-c` | configuration file (default: `$GRUENBECK_CONFIG` if set, else `./src/config.json`) |
 | `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
 | `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the command only reports what it built (lines of text, size of the HTML, attachments) |
 | `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
@@ -225,7 +237,7 @@ Warnings of the statistics and the charts go to stderr. An error in the configur
 
 ### analysis
 
-`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
+`gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `$GRUENBECK_CONFIG` if set, else `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
 
 ```shell script
 uv run --extra analysis gruenbeck-analyse

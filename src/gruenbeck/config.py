@@ -4,8 +4,14 @@ configuration file of the data collector: loading and checking
 load_configuration() reads the JSON file into a Configuration and checks required keys,
 types and values. A relative path (dataPath) starts at the folder of the
 configuration file, not at the working directory.
+
+The file of the commands is --config-file; its default is the environment variable
+GRUENBECK_CONFIG if it is set, else ./src/config.json (add_config_file_option()). The SMTP
+password can come from the systemd credential "smtp-password" instead of the key
+mail.senderPassword.
 """
 
+import argparse
 import dataclasses
 import datetime
 import json
@@ -25,6 +31,12 @@ FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 # dates to check dataFile.datePattern with: written and read back, they must stay the same
 PATTERN_CHECK_DATES = (datetime.date(2026, 1, 2), datetime.date(2027, 12, 31))
 SMTP_SECURITY = ("ssl", "starttls")
+# the default of --config-file: this environment variable if set and not empty, else the file
+CONFIG_FILE_ENV = "GRUENBECK_CONFIG"
+DEFAULT_CONFIG_FILE = "./src/config.json"
+# systemd puts the credentials of LoadCredential= into the folder this variable names
+CREDENTIALS_DIRECTORY_ENV = "CREDENTIALS_DIRECTORY"
+PASSWORD_CREDENTIAL = "smtp-password"
 # defaults of the optional keys retries and retryDelay of softWaterSystem and mail:
 # repeated attempts after a temporary error and the seconds to wait (see gruenbeck.device
 # and gruenbeck.mail for what the delay means)
@@ -153,6 +165,24 @@ class _Section:
                 logger.warning("unknown config parameter %r is ignored", self.name(key))
 
 
+def default_config_file() -> str:
+    """the default of --config-file: $GRUENBECK_CONFIG if it is set and not empty, else the file"""
+    return os.environ.get(CONFIG_FILE_ENV) or DEFAULT_CONFIG_FILE
+
+
+def add_config_file_option(parser: argparse.ArgumentParser) -> None:
+    """add --config-file / -c with the default of default_config_file() to a command"""
+    parser.add_argument(
+        "--config-file",
+        "-c",
+        default=default_config_file(),
+        help=(
+            "set config file (default: the environment variable"
+            f" {CONFIG_FILE_ENV} if it is set, else {DEFAULT_CONFIG_FILE})"
+        ),
+    )
+
+
 def read_configuration_file(configuration_file: str | os.PathLike[str]) -> dict[str, typing.Any]:
     """
     the JSON object of the configuration file, not checked
@@ -172,10 +202,15 @@ def read_configuration_file(configuration_file: str | os.PathLike[str]) -> dict[
     return data
 
 
-def load_configuration(configuration_file: str | os.PathLike[str]) -> Configuration:
+def load_configuration(
+    configuration_file: str | os.PathLike[str], *, password_required: bool = True
+) -> Configuration:
     """
     read and check the configuration file
     :param configuration_file: path of the JSON file
+    :param password_required: False for a command that never logs in to the SMTP server
+        (gruenbeck-analyse, the preview without --send-to): a missing SMTP password is then no
+        problem and `mail.sender_password` is empty. A password that is there is checked.
     :return: Configuration with absolute paths
     :raises FileNotFoundError: the file does not exist
     :raises ConfigurationError: a key is missing or has an invalid value
@@ -187,7 +222,7 @@ def load_configuration(configuration_file: str | os.PathLike[str]) -> Configurat
     top = _Section(data, "", problems)
 
     # first, so the error mail can report the problems of the other parts
-    mail = _read_mail(top.section("mail"))
+    mail = _read_mail(top.section("mail"), password_required)
     soft_water_system = _read_soft_water_system(top.section("softWaterSystem"))
     data_file = _read_data_file(top.section("dataFile"))
     data_path = _read_path(top, "dataPath", base)
@@ -233,7 +268,7 @@ def _read_path(section: _Section, key: str, base: pathlib.Path) -> pathlib.Path 
     return resolved
 
 
-def _read_mail(section: _Section | None) -> Mail | None:
+def _read_mail(section: _Section | None, password_required: bool) -> Mail | None:
     if section is None:
         return None
     count = len(section.problems)
@@ -241,7 +276,7 @@ def _read_mail(section: _Section | None) -> Mail | None:
     smtp_port = _read_port(section, "smtpPort")
     smtp_security = _read_security(section, "smtpSecurity")
     sender_email = section.text("senderEmail")
-    sender_password = section.text("senderPassword")
+    sender_password = _read_sender_password(section, password_required)
     recipients = _read_recipients(section, "recipients")
     subject = section.text("subject", allow_empty=True)
     retries = _read_retries(section, MAIL_RETRIES)
@@ -260,6 +295,69 @@ def _read_mail(section: _Section | None) -> Mail | None:
         retries=typing.cast(int, retries),
         retry_delay=typing.cast(float, retry_delay),
     )
+
+
+class _CredentialError(Exception):
+    """the credential is there, but cannot be used; the text names the file, never the content"""
+
+
+def _read_password_credential() -> str | None:
+    """
+    the SMTP password of the credential "smtp-password" of systemd, without the final line break
+    :return: the password, or None if there is no credential
+    :raises _CredentialError: the credential cannot be read or is empty
+    """
+    folder = os.environ.get(CREDENTIALS_DIRECTORY_ENV)
+    if not folder:
+        return None
+    path = pathlib.Path(folder) / PASSWORD_CREDENTIAL
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except UnicodeDecodeError:
+        # no chained error: its text names bytes of the file
+        raise _CredentialError(f"the credential {path} is not valid UTF-8") from None
+    except OSError as err:
+        raise _CredentialError(f"cannot read the credential {path}: {err}") from err
+    password = text.removesuffix("\n").removesuffix("\r") if text.endswith("\n") else text
+    if not password.strip():
+        raise _CredentialError(f"the credential {path} is empty")
+    return password
+
+
+def _read_sender_password(section: _Section, required: bool) -> str | None:
+    """
+    the SMTP password: the credential if there is one, else mail.senderPassword
+    Both together are no problem, but the credential wins and the log gets a warning.
+    Neither is a problem only if the password is required (see load_configuration()).
+    """
+    key = "senderPassword"
+    try:
+        credential = _read_password_credential()
+    except _CredentialError as err:
+        section.read.add(key)
+        section.problems.append(str(err))
+        return None
+    if credential is not None:
+        if section.value(key, required=False) is not _MISSING:
+            logger.warning(
+                "the credential %r is used as SMTP password; remove %r from the configuration file",
+                PASSWORD_CREDENTIAL,
+                section.name(key),
+            )
+        return credential
+    if key in section.data:
+        return section.text(key)
+    section.read.add(key)
+    if not required:
+        return ""
+    section.problems.append(
+        f"no SMTP password: set {section.name(key)!r} in the configuration file or provide the"
+        f" credential {PASSWORD_CREDENTIAL!r} (systemd LoadCredential=, found through"
+        f" ${CREDENTIALS_DIRECTORY_ENV})"
+    )
+    return None
 
 
 def _read_port(section: _Section, key: str) -> int | None:

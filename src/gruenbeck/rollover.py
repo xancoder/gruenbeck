@@ -199,7 +199,7 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="log the daily rollover of the consumption values (read-only)"
     )
-    parser.add_argument("--config-file", "-c", default="./src/config.json", help="set config file")
+    gruenbeck.config.add_config_file_option(parser)
     parser.add_argument(
         "--interval",
         type=positive_float,

@@ -1,5 +1,6 @@
 """configuration file: loading, checking and the paths (P006-S3)"""
 
+import argparse
 import collections.abc
 import copy
 import datetime
@@ -195,6 +196,279 @@ def test_mail_port_and_security_are_normalized(
     assert (loaded.mail.smtp_port, loaded.mail.smtp_security) == (465, "ssl")
 
 
+# --- the SMTP password: mail.senderPassword or the credential "smtp-password" ----------
+
+SECRET = "s3cret-from-the-credential"
+
+
+@pytest.fixture
+def credentials(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """the folder of $CREDENTIALS_DIRECTORY, still empty"""
+    folder = tmp_path / "credentials"
+    folder.mkdir()
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(folder))
+    return folder
+
+
+@pytest.mark.parametrize(
+    "content, password",
+    [
+        (SECRET, SECRET),
+        (SECRET + "\n", SECRET),
+        (SECRET + "\r\n", SECRET),
+        # only one final line break belongs to the file, not to the password
+        (SECRET + "\n\n", SECRET + "\n"),
+        (" a b ", " a b "),
+    ],
+)
+def test_credential_is_the_password(
+    credentials: pathlib.Path,
+    content: str,
+    password: str,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    (credentials / "smtp-password").write_bytes(content.encode())
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.mail.sender_password == password
+    assert caplog.records == []
+
+
+def test_credential_wins_over_the_key_and_the_log_asks_to_remove_it(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    (credentials / "smtp-password").write_text(SECRET + "\n")
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.mail.sender_password == SECRET
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (
+            logging.WARNING,
+            "the credential 'smtp-password' is used as SMTP password;"
+            " remove 'mail.senderPassword' from the configuration file",
+        )
+    ]
+    assert SECRET not in caplog.text
+    assert "test-password" not in caplog.text
+
+
+def test_credential_folder_without_the_credential_falls_back_to_the_key(
+    credentials: pathlib.Path,
+    loaded_config: configuration.Configuration,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # systemd lists every credential of the unit in the folder, not only this one
+    (credentials / "other").write_text("x")
+
+    assert loaded_config.mail.sender_password == "test-password"
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize("folder", [None, ""])
+def test_no_credential_folder_uses_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: str | None,
+    loaded_config: configuration.Configuration,
+) -> None:
+    if folder is not None:
+        monkeypatch.setenv("CREDENTIALS_DIRECTORY", folder)
+
+    assert loaded_config.mail.sender_password == "test-password"
+
+
+@pytest.mark.parametrize("with_folder", [True, False])
+def test_missing_password_names_both_ways(
+    with_folder: bool,
+    request: pytest.FixtureRequest,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    if with_folder:
+        request.getfixturevalue("credentials")
+    del config_data["mail"]["senderPassword"]
+
+    assert problems(config_data, write_config) == [
+        "no SMTP password: set 'mail.senderPassword' in the configuration file or provide the"
+        " credential 'smtp-password' (systemd LoadCredential=, found through"
+        " $CREDENTIALS_DIRECTORY)"
+    ]
+
+
+def test_password_is_optional_where_it_is_not_needed(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    credentials: pathlib.Path,
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    path = write_config(config_data)
+
+    loaded = configuration.load_configuration(path, password_required=False)
+
+    assert loaded.mail.sender_password == ""
+    assert loaded.mail.sender_email == "sender@example.com"
+    # the default stays strict
+    with pytest.raises(configuration.ConfigurationError, match="no SMTP password"):
+        configuration.load_configuration(path)
+
+
+def test_password_that_is_there_is_used_and_checked_even_if_not_required(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    kept = configuration.load_configuration(write_config(config_data), password_required=False)
+    assert kept.mail.sender_password == "test-password"
+
+    (credentials / "smtp-password").write_text(SECRET)
+    from_credential = configuration.load_configuration(
+        write_config(config_data), password_required=False
+    )
+    assert from_credential.mail.sender_password == SECRET
+
+    (credentials / "smtp-password").write_text("")
+    with pytest.raises(configuration.ConfigurationError, match="is empty"):
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+    (credentials / "smtp-password").unlink()
+    config_data["mail"]["senderPassword"] = ""
+    with pytest.raises(configuration.ConfigurationError, match="expected a non-empty text"):
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+
+def test_other_problems_are_reported_if_the_password_is_not_required(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    del config_data["mail"]["smtpServer"]
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+    assert err.value.problems == ["no config parameter: 'mail.smtpServer'"]
+
+
+@pytest.mark.parametrize("content", [b"", b"\n", b"\r\n", b"  \n"])
+@pytest.mark.parametrize("with_key", [True, False])
+def test_empty_credential_is_a_problem(
+    credentials: pathlib.Path,
+    content: bytes,
+    with_key: bool,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    if not with_key:
+        del config_data["mail"]["senderPassword"]
+    (credentials / "smtp-password").write_bytes(content)
+
+    # not a silent fallback to the key: the credential is there, so it is meant
+    assert problems(config_data, write_config) == [
+        f"the credential {credentials / 'smtp-password'} is empty"
+    ]
+
+
+def test_unreadable_credential_is_a_problem(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").mkdir()
+
+    [problem] = problems(config_data, write_config)
+
+    assert problem.startswith(f"cannot read the credential {credentials / 'smtp-password'}: ")
+
+
+def test_credential_that_is_no_text_is_a_problem_without_its_content(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_bytes(b"\xff\xfe secret")
+
+    assert problems(config_data, write_config) == [
+        f"the credential {credentials / 'smtp-password'} is not valid UTF-8"
+    ]
+
+
+def test_problem_with_the_credential_leaves_no_mail_section_for_the_error_mail(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_text("")
+    config_data["softWaterSystem"] = {}
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_configuration(write_config(config_data))
+
+    # the password is missing, so no mail can be sent; the other problems are listed as well
+    assert err.value.mail is None
+    assert len(err.value.problems) == 2
+
+
+def test_credential_is_not_in_the_repr_or_in_a_problem(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_text(SECRET)
+    loaded = configuration.load_configuration(write_config(config_data))
+    config_data["softWaterSystem"] = {}
+
+    assert SECRET not in repr(loaded)
+    assert SECRET not in "; ".join(problems(config_data, write_config))
+
+
+# --- the default of --config-file ---------------------------------------------------
+
+
+def test_default_config_file_without_the_variable() -> None:
+    assert configuration.default_config_file() == "./src/config.json"
+
+
+def test_default_config_file_is_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRUENBECK_CONFIG", "/etc/gruenbeck/config.json")
+
+    assert configuration.default_config_file() == "/etc/gruenbeck/config.json"
+
+
+def test_empty_variable_means_the_default_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRUENBECK_CONFIG", "")
+
+    assert configuration.default_config_file() == "./src/config.json"
+
+
+@pytest.mark.parametrize(
+    "variable, argv, expected",
+    [
+        (None, [], "./src/config.json"),
+        ("", [], "./src/config.json"),
+        ("/etc/gruenbeck/config.json", [], "/etc/gruenbeck/config.json"),
+        # the option wins over the variable
+        ("/etc/gruenbeck/config.json", ["-c", "other.json"], "other.json"),
+        ("/etc/gruenbeck/config.json", ["--config-file", "other.json"], "other.json"),
+    ],
+)
+def test_option_uses_the_variable_as_its_default(
+    monkeypatch: pytest.MonkeyPatch, variable: str | None, argv: list[str], expected: str
+) -> None:
+    if variable is not None:
+        monkeypatch.setenv("GRUENBECK_CONFIG", variable)
+    parser = argparse.ArgumentParser()
+    configuration.add_config_file_option(parser)
+
+    assert parser.parse_args(argv).config_file == expected
+
+
 def test_password_is_not_in_the_repr(loaded_config: gruenbeck.config.Configuration) -> None:
     assert "test-password" not in repr(loaded_config)
 
@@ -284,7 +558,6 @@ def test_file_has_to_be_a_json_object(tmp_path: pathlib.Path, text: str, problem
         "mail.smtpServer",
         "mail.smtpPort",
         "mail.senderEmail",
-        "mail.senderPassword",
         "mail.recipients",
         "mail.subject",
         "softWaterSystem",

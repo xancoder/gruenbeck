@@ -121,6 +121,54 @@ setting shows only a run there: after installing, start the service once
 journal. A status `218/CAPABILITIES` or `226/NAMESPACE` means that this system does not allow a
 setting or that a folder in `ReadWritePaths=` is missing.
 
+## SMTP password as credential
+
+By default the SMTP password is in `src/config.json` (`mail.senderPassword`), a file in the
+repository directory that the service user can read. A systemd credential keeps it out of the
+repository: systemd reads a file that only root can access when it starts the service and gives
+the service a private copy through `$CREDENTIALS_DIRECTORY/smtp-password`. The collector
+prefers it to `senderPassword` (see [mail settings](../../README.md#mail-settings)).
+
+1. Create the file once, owned by root and readable only by root (the password is not kept in
+   the shell history or in the process list):
+
+   ```bash
+   sudo install -d -m 700 /etc/gruenbeck
+   sudo bash -c 'umask 077; read -rsp "SMTP password: " password; printf "%s" "$password" > /etc/gruenbeck/smtp-password'
+   ls -l /etc/gruenbeck/smtp-password
+   ```
+
+2. Generate the units with the file; the service then has the line
+   `LoadCredential=smtp-password:/etc/gruenbeck/smtp-password`, and the password is not in the unit:
+
+   ```bash
+   ./deploy/systemd/setup_systemd.py --user your_username --install-path /path/to/gruenbeck \
+       --smtp-password-file /etc/gruenbeck/smtp-password
+   ```
+
+   Install the units as above and run `sudo systemctl daemon-reload`.
+
+3. Start the service once (`sudo systemctl start gruenbeck-collector.service`) and check that the
+   data mail arrives. The log file now has the warning that `senderPassword` in the
+   configuration file is ignored: remove the key (and keep `chmod 600 src/config.json`).
+
+A credential that is empty or unreadable stops the run with a configuration error in the log
+file; no error mail can be sent without the password. To change the password, write the file
+again; the next start of the service uses it.
+
+The same works for the configuration file: set `GRUENBECK_CONFIG` for the service to read a
+configuration outside of the repository, for example with `sudo systemctl edit
+gruenbeck-collector.service`:
+
+```ini
+[Service]
+Environment=GRUENBECK_CONFIG=/etc/gruenbeck/config.json
+```
+
+Relative paths in that file (`dataPath`) start at its folder, so use absolute paths there and
+name the data folder in `--write-path` when it is not below the install path (see
+[Hardening](#hardening)).
+
 ## User service (alternative)
 
 Without root access the same units can be installed for the current user. Differences to the
@@ -131,6 +179,8 @@ system service:
   over about 2.5 minutes, see `retries` and `retryDelay` in the main README).
 - A user service only runs while the user is logged in. To let the timer work without a login
   (like cron does) enable lingering once: `loginctl enable-linger "$USER"`.
+- `--smtp-password-file` works for a user service too, with a file that the user can read
+  (`chmod 600`); the user manager loads it like the system manager does.
 - The hardening settings stay in the service. They work for a user service only if the user
   manager of systemd can set up a user namespace (the transient test unit with these settings
   ran on the development machine, systemd 262). If the start fails with `status=218/CAPABILITIES`

@@ -1,6 +1,7 @@
 """gruenbeck-preview-mail: the data mail from the stored data, without the device (P008-S4)"""
 
 import collections.abc
+import dataclasses
 import datetime
 import email.message
 import json
@@ -307,6 +308,48 @@ def test_invalid_configuration_exits_with_1(
 
     assert "[-] invalid configuration: " in capsys.readouterr().err
     assert not (tmp_path / "out").exists()
+    assert smtp.connections == []
+
+
+def without_password(
+    configuration: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> config.Configuration:
+    """the configuration of the tests without senderPassword and without a credential"""
+    del config_data["mail"]["senderPassword"]
+    return dataclasses.replace(configuration, file=write_config(config_data))
+
+
+def test_output_needs_no_password(
+    tmp_path: pathlib.Path,
+    smtp: "FakeSMTP",
+    stored: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    open_config = without_password(stored, write_config, config_data)
+
+    assert run(open_config, "--output-dir", str(tmp_path / "out")) == 0
+
+    assert (tmp_path / "out" / "data-mail.txt").exists()
+    assert smtp.connections == []
+
+
+def test_send_to_needs_the_password(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    smtp: "FakeSMTP",
+    stored: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    open_config = without_password(stored, write_config, config_data)
+
+    assert run(open_config, "--send-to", "me@example.com") == 1
+
+    err = capsys.readouterr().err
+    assert "[-] invalid configuration: no SMTP password: " in err
     assert smtp.connections == []
 
 

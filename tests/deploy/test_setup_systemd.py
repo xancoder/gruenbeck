@@ -204,3 +204,88 @@ def test_main_rejects_invalid_write_path(
     assert exit_info.value.code == 2
     assert "write path" in capsys.readouterr().err
     assert not list(tmp_path.iterdir())
+
+
+def test_generated_service_has_no_credential_by_default(tmp_path: pathlib.Path) -> None:
+    out = setup_systemd.generate_units("collector", "/opt/gruenbeck", tmp_path)
+
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert "LoadCredential" not in service
+    assert "{{" not in service
+    # the line of the placeholder is gone, it leaves no empty line in the [Service] section
+    assert "gruenbeck-collect\n# a run takes" in service
+
+
+def test_smtp_password_file_becomes_the_credential_of_the_service(tmp_path: pathlib.Path) -> None:
+    out = setup_systemd.generate_units(
+        "collector",
+        "/opt/gruenbeck",
+        tmp_path,
+        smtp_password_file="/etc/gruenbeck/smtp-password",
+    )
+
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert service.count("LoadCredential=") == 1
+    assert "LoadCredential=smtp-password:/etc/gruenbeck/smtp-password\n" in service
+    assert settings(service)["ExecStart"] == "/opt/gruenbeck/.venv/bin/gruenbeck-collect"
+    assert "{{" not in service
+
+
+def test_smtp_password_file_is_made_absolute_and_normalized(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    out = setup_systemd.generate_units(
+        "collector",
+        "/opt/gruenbeck",
+        tmp_path / "out",
+        smtp_password_file="secrets/../smtp-password",
+    )
+
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert f"LoadCredential=smtp-password:{tmp_path / 'smtp-password'}\n" in service
+
+
+@pytest.mark.parametrize("password_file", ["/etc/my dir/smtp-password", "/etc/smtp%password", ""])
+def test_generate_units_rejects_invalid_smtp_password_file(
+    tmp_path: pathlib.Path, password_file: str
+) -> None:
+    with pytest.raises(ValueError, match="SMTP password file"):
+        setup_systemd.generate_units(
+            "collector", "/opt/gruenbeck", tmp_path, smtp_password_file=password_file
+        )
+    assert not list(tmp_path.iterdir())
+
+
+def test_main_passes_the_smtp_password_file_to_the_unit(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "out"
+
+    code = setup_systemd.main(
+        [
+            "--install-path",
+            "/opt/gruenbeck",
+            "--output-dir",
+            str(out),
+            "--smtp-password-file",
+            "/etc/gruenbeck/smtp-password",
+        ]
+    )
+
+    assert code == 0
+    service = (out / "gruenbeck-collector.service").read_text()
+    assert "LoadCredential=smtp-password:/etc/gruenbeck/smtp-password\n" in service
+    capsys.readouterr()
+
+
+def test_main_rejects_invalid_smtp_password_file(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        setup_systemd.main(["--smtp-password-file", "/etc/a b", "--output-dir", str(tmp_path)])
+
+    assert exit_info.value.code == 2
+    assert "SMTP password file" in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())

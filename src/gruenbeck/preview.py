@@ -8,7 +8,7 @@ reports what was built. Warnings of the statistics and the charts go to stderr.
 
 Options:
 
-    --config-file FILE   configuration file (default ./src/config.json)
+    --config-file FILE   configuration file (default $GRUENBECK_CONFIG, else ./src/config.json)
     --today YYYY-MM-DD   the day of the run (default: today); a Monday and a Thursday
                          report the same week, the day before a month ends does not
     --output-dir DIR     write data-mail.txt and data-mail.html into DIR (created if
@@ -67,7 +67,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="build the data mail from the stored data without asking the device"
     )
-    parser.add_argument("--config-file", "-c", default="./src/config.json", help="set config file")
+    gruenbeck.config.add_config_file_option(parser)
     parser.add_argument(
         "--today",
         type=day_of,
@@ -153,7 +153,10 @@ def main(argv: list[str] | None = None) -> int:
     today = args.today or local_today()
 
     try:
-        config = gruenbeck.config.load_configuration(args.config_file)
+        # only sending the mail needs the SMTP password
+        config = gruenbeck.config.load_configuration(
+            args.config_file, password_required=args.send_to is not None
+        )
     except FileNotFoundError as err:
         print(f"[-] no configuration: {err}", file=sys.stderr)
         return 1

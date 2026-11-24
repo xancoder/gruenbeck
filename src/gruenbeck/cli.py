@@ -137,13 +137,7 @@ def collect(argv: Sequence[str] | None = None) -> int:
         prog="gruenbeck-collect",
         description="collect the water consumption of the soft water system, store it and mail it",
     )
-    parser.add_argument(
-        "--config-file",
-        "-c",
-        help="set config file",
-        required=False,
-        default="./src/config.json",
-    )
+    configuration.add_config_file_option(parser)
     parser.add_argument("--log-console", "-l", help="activate console logging", action="store_true")
     parser.add_argument(
         "--log-error",
@@ -173,13 +167,7 @@ def analyse(argv: Sequence[str] | None = None) -> int:
         prog="gruenbeck-analyse",
         description="monthly statistics of the collected water consumption",
     )
-    parser.add_argument(
-        "--config-file",
-        "-c",
-        help="set config file",
-        required=False,
-        default="./src/config.json",
-    )
+    configuration.add_config_file_option(parser)
     args = parser.parse_args(argv)
 
     try:

@@ -5,6 +5,8 @@ next to this script and print the commands to install them as system service.
 
 The service is hardened: it may only write to the data folder and the log folder
 (`<install path>/data` and `<install path>/log`, or the folders of --write-path).
+With --smtp-password-file the unit passes that file to the collector as the systemd
+credential "smtp-password", so the password need not be in the configuration file.
 The generated files are never written into the repository.
 """
 
@@ -21,6 +23,7 @@ import tempfile
 TEMPLATE_DIR = pathlib.Path(__file__).resolve().parent
 REPO_ROOT = TEMPLATE_DIR.parents[1]
 SERVICE_TEMPLATE = "gruenbeck-collector.service.template"
+PASSWORD_CREDENTIAL = "smtp-password"
 SERVICE_NAME = "gruenbeck-collector.service"
 TIMER_NAME = "gruenbeck-collector.timer"
 SYSTEMD_DIR = "/etc/systemd/system/"
@@ -40,6 +43,7 @@ def generate_units(
     install_path: str | os.PathLike[str],
     output_dir: str | os.PathLike[str] | None = None,
     write_paths: collections.abc.Sequence[str | os.PathLike[str]] | None = None,
+    smtp_password_file: str | os.PathLike[str] | None = None,
 ) -> pathlib.Path:
     """
     Create service and timer unit in output_dir (a new temporary directory if None)
@@ -48,11 +52,15 @@ def generate_units(
     :param output_dir: directory for the generated files, must be outside of the repository
     :param write_paths: the only folders the service may write to; they replace the default
         (`data` and `log` in install_path), so list every folder the collector writes to
+    :param smtp_password_file: file on the target machine with the SMTP password; systemd
+        reads it as root and gives it to the service as the credential "smtp-password"
     :return: pathlib.Path of the directory with the generated files
-    :raises ValueError: invalid user, install path, write path or output directory
+    :raises ValueError: invalid user, install path, write path, password file or output directory
     """
     checked = [("user", user), ("install path", str(install_path))]
     checked += [("write path", str(path)) for path in write_paths or ()]
+    if smtp_password_file is not None:
+        checked.append(("SMTP password file", str(smtp_password_file)))
     for name, value in checked:
         if not value or INVALID_VALUE.search(value):
             raise ValueError(
@@ -75,8 +83,14 @@ def generate_units(
         output_dir.mkdir(parents=True, exist_ok=True)
 
     template = (TEMPLATE_DIR / SERVICE_TEMPLATE).read_text(encoding="utf-8")
+    if smtp_password_file is None:
+        credential_line = ""
+    else:
+        credential = pathlib.Path(os.path.normpath(pathlib.Path(smtp_password_file).absolute()))
+        credential_line = f"LoadCredential={PASSWORD_CREDENTIAL}:{credential}\n"
     service = (
-        template.replace("{{USER}}", user)
+        template.replace("{{LOAD_CREDENTIAL}}\n", credential_line)
+        .replace("{{USER}}", user)
         .replace("{{INSTALL_PATH}}", str(install_path))
         .replace("{{WRITE_PATHS}}", " ".join(str(folder) for folder in folders))
     )
@@ -125,6 +139,14 @@ def main(argv: collections.abc.Sequence[str] | None = None) -> int:
         default=None,
     )
     parser.add_argument(
+        "--smtp-password-file",
+        metavar="PATH",
+        help="file on the target machine with the SMTP password (owned by root, mode 600): the"
+        " unit passes it to the collector as the credential 'smtp-password', so mail.senderPassword"
+        " can be removed from the configuration file (default: no credential)",
+        default=None,
+    )
+    parser.add_argument(
         "--output-dir",
         help="directory for the generated units, outside of the repository "
         "(default: a new temporary directory)",
@@ -133,7 +155,13 @@ def main(argv: collections.abc.Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        output_dir = generate_units(args.user, args.install_path, args.output_dir, args.write_path)
+        output_dir = generate_units(
+            args.user,
+            args.install_path,
+            args.output_dir,
+            args.write_path,
+            args.smtp_password_file,
+        )
     except ValueError as err:
         parser.error(str(err))
     except OSError as err:

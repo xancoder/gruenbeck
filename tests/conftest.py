@@ -201,6 +201,13 @@ def restore_package_logger() -> collections.abc.Iterator[None]:
     logger.setLevel(level)
 
 
+@pytest.fixture(autouse=True)
+def no_environment_of_the_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """the tests do not see the configuration file or the credentials of the machine"""
+    monkeypatch.delenv(config.CONFIG_FILE_ENV, raising=False)
+    monkeypatch.delenv(config.CREDENTIALS_DIRECTORY_ENV, raising=False)
+
+
 @pytest.fixture
 def smtp(monkeypatch: pytest.MonkeyPatch) -> FakeSMTP:
     """fake SMTP server in place of smtplib.SMTP and smtplib.SMTP_SSL"""

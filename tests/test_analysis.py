@@ -167,3 +167,22 @@ def test_folder_without_yearly_files_is_an_error(
     prefix = config_data["dataFile"]["prefix"]
     assert str(excinfo.value) == f"no data files '{prefix}_<year>.csv' in {tmp_path / 'data'}"
     assert plots == []
+
+
+def test_analysis_needs_no_smtp_password(
+    plots: list[tuple[list[typing.Any], list[typing.Any], str]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """after the password moved into a credential, the command runs without it"""
+    del config_data["mail"]["senderPassword"]
+    prefix = config_data["dataFile"]["prefix"]
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / f"{prefix}_2026.csv").write_text("date,value\n2026-01-01,5\n")
+
+    assert cli.analyse(["-c", str(write_config(config_data))]) == 0
+
+    assert plots == [([1], [5.0], "2026")]
+    assert capsys.readouterr().out.startswith("data folder: ")
