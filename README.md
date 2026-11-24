@@ -240,7 +240,10 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/device.py` | web server of the soft water system: request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |
 | `src/gruenbeck/mail.py` | data mail (text, HTML, CSV attachments) and error mail |
-| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text and HTML tables) |
+| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation); plain data, no text |
+| `src/gruenbeck/report_sections.py` | the sections, notes and legend of the data mail, shared by the text and the HTML part |
+| `src/gruenbeck/report_text.py` | the statistics as plain text for the data mail |
+| `src/gruenbeck/report_html.py` | the statistics as HTML document for the data mail |
 | `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |

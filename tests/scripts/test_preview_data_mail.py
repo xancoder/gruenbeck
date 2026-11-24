@@ -12,7 +12,7 @@ import typing
 
 import pytest
 
-from gruenbeck import cli, config, device, report, storage
+from gruenbeck import cli, config, device, report, report_html, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
@@ -249,7 +249,7 @@ def test_data_mail_without_html_writes_the_text_only(
     def fail(stats: report.Report, svgs: object, notes: object) -> str:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(report, "format_html", fail)
+    monkeypatch.setattr(report_html, "format_html", fail)
 
     assert run(stored, "--output-dir", str(tmp_path / "out")) == 0
 

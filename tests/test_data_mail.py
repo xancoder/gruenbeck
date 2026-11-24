@@ -13,7 +13,7 @@ import typing
 
 import pytest
 
-from gruenbeck import charts, cli, config, device, report, storage
+from gruenbeck import charts, cli, config, device, report, report_html, report_text, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
@@ -264,7 +264,7 @@ def test_unexpected_error_of_the_statistics_gives_the_note_too(
     def fail(report_: report.Report) -> str:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(report, "format_text", fail)
+    monkeypatch.setattr(report_text, "format_text", fail)
 
     assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
 
@@ -535,7 +535,7 @@ def test_failed_html_leaves_the_mail_with_the_text(
     def fail(*arguments: object) -> str:
         raise RuntimeError("no html")
 
-    monkeypatch.setattr(report, "format_html", fail)
+    monkeypatch.setattr(report_html, "format_html", fail)
 
     assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
 
@@ -561,7 +561,7 @@ def test_failed_statistics_and_failed_note_leave_the_note_in_the_text(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(report, "build_report", fail)
-    monkeypatch.setattr(report, "format_failure_html", fail)
+    monkeypatch.setattr(report_html, "format_failure_html", fail)
     storage.check_data_folder(loaded_config.data_path)
 
     assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True

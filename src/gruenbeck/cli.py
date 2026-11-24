@@ -16,7 +16,17 @@ import sys
 import traceback
 from collections.abc import Callable, Sequence
 
-from gruenbeck import analysis, charts, device, errors, mail, report, storage
+from gruenbeck import (
+    analysis,
+    charts,
+    device,
+    errors,
+    mail,
+    report,
+    report_html,
+    report_text,
+    storage,
+)
 from gruenbeck import config as configuration
 
 # the handlers of setup_logging() sit on the logger of the package, so they also get the
@@ -379,11 +389,11 @@ def get_statistics(
     """
     try:
         stats = report.build_report(data_path, config.data_file, today)
-        text = report.format_text(stats)
+        text = report_text.format_text(stats)
     except Exception as error:
         logger.warning("statistics for the data mail failed: %s", error, exc_info=True)
         note = STATISTICS_FAILED_TEXT.format(error=error)
-        return Statistics(note, _make_html(lambda: report.format_failure_html(note, notes)))
+        return Statistics(note, _make_html(lambda: report_html.format_failure_html(note, notes)))
 
     svgs = {}
     for name, chart in charts.CHARTS.items():
@@ -391,7 +401,7 @@ def get_statistics(
             svgs[name] = chart(stats)
         except Exception as error:
             logger.warning("chart %r for the data mail failed: %s", name, error, exc_info=True)
-    return Statistics(text, _make_html(lambda: report.format_html(stats, svgs, notes)))
+    return Statistics(text, _make_html(lambda: report_html.format_html(stats, svgs, notes)))
 
 
 def _make_html(build: Callable[[], str]) -> str | None:
