@@ -33,10 +33,11 @@ def parameter(parameter_file: pathlib.Path) -> device.Parameter:
     return device.Parameter(str(parameter_file))
 
 
+type LogRecords = collections.abc.Callable[[], list[tuple[str, str]]]
+
+
 @pytest.fixture
-def logs(
-    caplog: pytest.LogCaptureFixture,
-) -> collections.abc.Callable[[], list[tuple[str, str]]]:
+def logs(caplog: pytest.LogCaptureFixture) -> LogRecords:
     """(level, message) of the records of the device module, INFO and above"""
     caplog.set_level(logging.INFO, logger="gruenbeck")
 
@@ -55,13 +56,14 @@ def logs(
 
 class Fake:
     """
-    fake get_data_from_mux_http: `errors` are raised by the next requests, then it answers
-    ANSWER; `calls` records (host, parameters, timeout, session)
+    fake get_data_from_mux_http: `errors` are raised by the next requests, then it gives the
+    `answers` in turn and then ANSWER; `calls` records (host, parameters, timeout, session)
     """
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, list[str], float, requests.Session | None]] = []
         self.errors: list[BaseException] = []
+        self.answers: list[dict[str, str | None]] = []
 
     def fetch(
         self,
@@ -73,7 +75,7 @@ class Fake:
         self.calls.append((host, list(parameters), timeout, session))
         if self.errors:
             raise self.errors.pop(0)
-        return dict(ANSWER)
+        return self.answers.pop(0) if self.answers else dict(ANSWER)
 
 
 @pytest.fixture
@@ -104,7 +106,7 @@ def test_invalid_response_is_asked_again(
     fake: Fake,
     parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
-    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    logs: LogRecords,
     error: Exception,
 ) -> None:
     fake.errors = [error, error]
@@ -136,6 +138,72 @@ def test_invalid_response_fails_after_all_attempts(
     # the error names the last error only; the error mail is sent by cli.main()
     assert str(err.value) == "failed to get device data after 4 attempts: bad 3"
     assert err.value.__cause__ is errors[3]
+
+
+def test_missing_place_is_asked_again(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float], logs: LogRecords
+) -> None:
+    without_place: dict[str, str | None] = {
+        key: value for key, value in ANSWER.items() if key != "D_Y_2_5"
+    }
+    without_three: dict[str, str | None] = {
+        key: value for key, value in ANSWER.items() if key not in MEMORY[:3]
+    }
+    fake.answers = [without_place, without_three, without_place]
+
+    result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+
+    assert result == ANSWER
+    assert len(fake.calls) == 4
+    assert sleeps == [5.0, 5.0, 5.0]
+    assert logs() == [
+        ("WARNING", "invalid device response: device response lacks D_Y_2_5. Attempt 1/6"),
+        (
+            "WARNING",
+            "invalid device response: device response lacks D_Y_2_1, D_Y_2_2, D_Y_2_3. Attempt 2/6",
+        ),
+        ("WARNING", "invalid device response: device response lacks D_Y_2_5. Attempt 3/6"),
+        ("INFO", "Successfully retrieved data after 3 retry attempts"),
+    ]
+
+
+def test_missing_place_fails_after_all_attempts(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
+    fake.answers = [{key: value for key, value in ANSWER.items() if key != "D_Y_2_14"}] * 3
+
+    with pytest.raises(device.DeviceError) as err:
+        device.get_device_data("device.lan", parameter, 30, 2, 5.0)
+
+    assert str(err.value) == (
+        "failed to get device data after 3 attempts: device response lacks D_Y_2_14"
+    )
+    assert isinstance(err.value.__cause__, ValueError)
+    assert len(fake.calls) == 3
+    assert sleeps == [5.0, 5.0]
+
+
+def test_missing_device_clock_is_no_invalid_response(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
+    # the clock only gives a warning, see check_device_clock()
+    fake.answers = [{key: value for key, value in ANSWER.items() if key != "D_C_4_2"}]
+
+    result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+
+    assert "D_C_4_2" not in result
+    assert len(fake.calls) == 1
+    assert sleeps == []
+
+
+def test_extra_parameters_in_the_response_are_not_an_invalid_response(
+    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
+    # read_consumption() reports an unknown consumption parameter
+    fake.answers = [{**ANSWER, "D_Y_1": "5"}]
+
+    assert device.get_device_data("device.lan", parameter, 30, 5, 5.0)["D_Y_1"] == "5"
+    assert len(fake.calls) == 1
 
 
 def test_number_of_retries_and_delay_are_parameters(
@@ -253,7 +321,8 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
     """
     local web server for POST /mux_http; items of `script.items`:
     "ok" valid answer, "reset" close the connection, "slow" no answer until the end of the
-    test, "503" and "404" HTTP status, "xml" answer that is not xml, "empty" no values
+    test, "503" and "404" HTTP status, "xml" answer that is not xml, "empty" no values,
+    "partial" only the clock and D_Y_2_1
     :return: (host with port, script)
     """
     script = Script()
@@ -269,7 +338,13 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
                 script.release.wait(10)
                 return
             status = {"503": 503, "404": 404}.get(item, 200)
-            body = {"ok": VALID_XML, "xml": "<data", "empty": "<data/>"}.get(item, item).encode()
+            answers = {
+                "ok": VALID_XML,
+                "xml": "<data",
+                "empty": "<data/>",
+                "partial": "<data><D_C_4_2>16:00</D_C_4_2><D_Y_2_1>1</D_Y_2_1></data>",
+            }
+            body = answers.get(item, item).encode()
             self.send_response(status)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -295,7 +370,7 @@ def test_success_needs_one_request(
     server: tuple[str, Script],
     parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
-    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    logs: LogRecords,
 ) -> None:
     host, script = server
 
@@ -313,7 +388,7 @@ def test_aborted_connection_is_asked_again_at_once_then_with_growing_waits(
     server: tuple[str, Script],
     parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
-    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["reset", "reset", "reset", "reset"]
@@ -352,7 +427,7 @@ def test_server_error_is_asked_again(
     server: tuple[str, Script],
     parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
-    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["503", "503"]
@@ -420,7 +495,7 @@ def test_no_answer_in_time_is_asked_again(
     server: tuple[str, Script],
     parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
-    logs: collections.abc.Callable[[], list[tuple[str, str]]],
+    logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["slow"]
@@ -464,6 +539,18 @@ def test_invalid_answer_is_asked_again_over_the_network(
     assert len(script.bodies) == 3
     # the wait of the query itself, not of the session
     assert sleeps == [5.0, 5.0]
+
+
+def test_answer_without_all_places_is_asked_again_over_the_network(
+    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+) -> None:
+    host, script = server
+    script.items = ["partial"]
+
+    assert device.get_device_data(host, parameter, 5, 5, 5.0)["D_Y_2_14"] == "1"
+
+    assert len(script.bodies) == 2
+    assert sleeps == [5.0]
 
 
 def test_invalid_answer_fails_after_all_attempts_over_the_network(

@@ -663,10 +663,8 @@ def test_run_keeps_the_other_stored_days_and_sorts_the_file(
     assert mails == [("data", tmp_path / "data")]
 
 
-@pytest.mark.parametrize(
-    "device_value, stored", [(" 93 ", "93"), ("007", "7"), ("+5", "5"), ("-5", "-5"), ("0", "0")]
-)
-def test_run_stores_the_device_values_as_int(
+@pytest.mark.parametrize("device_value, stored", [(" 93 ", "93"), ("007", "7"), ("0", "0")])
+def test_run_stores_the_device_values_as_whole_numbers(
     run: Run, tmp_path: pathlib.Path, device_value: str, stored: str
 ) -> None:
     run({**DEVICE_2026_11_23, "D_Y_2_1": device_value})
@@ -674,40 +672,155 @@ def test_run_stores_the_device_values_as_int(
     assert read_year(tmp_path, 2026)["2026-11-22"] == stored
 
 
+INVALID_VALUES = (
+    "invalid consumption values (expected a whole number 0 or greater, or '-'):"
+    " D_Y_2_5 (2026-11-18)"
+)
+
+
 @pytest.mark.parametrize(
-    "device_value, error",
-    [
-        ("-", "ValueError: invalid literal for int() with base 10: '-'"),
-        ("", "ValueError: invalid literal for int() with base 10: ''"),
-        ("1.5", "ValueError: invalid literal for int() with base 10: '1.5'"),
-        ("x", "ValueError: invalid literal for int() with base 10: 'x'"),
-        (
-            None,
-            "TypeError: int() argument must be a string, a bytes-like object or a real"
-            " number, not 'NoneType'",
-        ),
-    ],
+    "device_value",
+    ["", "   ", "1.5", "1,5", "x", "-5", "+5", "1e3", "1_0", "--", None],
     ids=repr,
 )
-def test_run_with_a_value_that_is_no_int_fails_with_error_mail(
+def test_run_with_an_invalid_value_fails_with_error_mail_and_writes_nothing(
     run: Run,
     tmp_path: pathlib.Path,
     mails: list[tuple[str, typing.Any]],
     caplog: pytest.LogCaptureFixture,
     device_value: str | None,
-    error: str,
 ) -> None:
-    # up to P006-S4 a traceback without error mail; P006-S9 checks the values itself
     assert run({**DEVICE_2026_11_23, "D_Y_2_5": device_value}) == 1
 
     assert not list((tmp_path / "data").glob("*.csv"))
-    ((kind, text),) = mails
-    assert kind == "error"
-    assert text.startswith(f"unexpected error: {error}\n\nTraceback (most recent call last):")
-    # the log has the traceback as well
+    message = f"{INVALID_VALUES} {device_value!r}"
+    assert mails == [("error", message)]
+    # a failure of the device values, no unexpected error: no traceback
     (record,) = [r for r in caplog.records if r.levelname == "ERROR"]
-    assert record.getMessage() == f"unexpected error: {error}"
-    assert record.exc_info is not None
+    assert record.getMessage() == message
+    assert record.exc_info is None
+
+
+def test_run_names_every_invalid_value(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
+    response = {**DEVICE_2026_11_23, "D_Y_2_2": "x", "D_Y_2_5": "-3", "D_Y_2_7": "-"}
+
+    assert run(response) == 1
+
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == [
+        (
+            "error",
+            "invalid consumption values (expected a whole number 0 or greater, or '-'):"
+            " D_Y_2_2 (2026-11-21) 'x'; D_Y_2_5 (2026-11-18) '-3'",
+        )
+    ]
+
+
+def test_run_with_an_invalid_value_changes_no_file_of_two_years(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
+    write_year(tmp_path, 2025, stored_rows(day("2025-12-01"), day("2025-12-19")))
+    write_year(tmp_path, 2026, stored_rows(day("2026-01-01"), day("2026-01-01")))
+    files = sorted((tmp_path / "data").glob("*.csv"))
+    before = [(path.read_bytes(), path.stat().st_mtime_ns) for path in files]
+    today = day("2026-01-03")
+    # D_Y_2_1 and D_Y_2_2 are in 2026, D_Y_2_3 and older in 2025
+    response = {**memory(true_value, today=today), "D_Y_2_9": "oops"}
+
+    assert run(response, today=today) == 1
+
+    assert [(path.read_bytes(), path.stat().st_mtime_ns) for path in files] == before
+    assert sorted((tmp_path / "data").iterdir()) == files
+    assert mails == [
+        (
+            "error",
+            "invalid consumption values (expected a whole number 0 or greater, or '-'):"
+            " D_Y_2_9 (2025-12-25) 'oops'",
+        )
+    ]
+
+
+# --- places without a value: "-" -------------------------------------------------------
+
+
+def test_run_does_not_write_a_day_without_value_and_keeps_the_stored_one(
+    run: Run,
+    tmp_path: pathlib.Path,
+    mails: list[tuple[str, typing.Any]],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    write_year(tmp_path, 2026, [("2026-11-22", "77")])
+    response = {**DEVICE_2026_11_23, "D_Y_2_1": "-"}
+    caplog.set_level(logging.WARNING, logger="gruenbeck")
+
+    assert run(response) == 0
+
+    stored = read_year(tmp_path, 2026)
+    assert stored["2026-11-22"] == "77"  # the stored value of the day stays
+    assert stored["2026-11-21"] == "102"
+    assert len(stored) == 14  # 13 new days and the stored one
+    assert mails == [("data", tmp_path / "data")]
+    assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == [
+        "no value for D_Y_2_1 (2026-11-22): not written"
+    ]
+
+
+def test_run_leaves_a_day_without_value_out_of_the_file(run: Run, tmp_path: pathlib.Path) -> None:
+    response = {**DEVICE_2026_11_23, "D_Y_2_3": "-", "D_Y_2_14": " - "}
+
+    assert run(response) == 0
+
+    stored = read_year(tmp_path, 2026)
+    assert "2026-11-20" not in stored
+    assert "2026-11-09" not in stored
+    assert len(stored) == 12
+    assert stored["2026-11-22"] == "101"
+
+
+def test_run_logs_every_place_without_value(run: Run, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gruenbeck")
+
+    run({**DEVICE_2026_11_23, "D_Y_2_2": "-", "D_Y_2_13": "-"})
+
+    assert [r.getMessage() for r in caplog.records if r.levelname == "WARNING"] == [
+        "no value for D_Y_2_2 (2026-11-21): not written",
+        "no value for D_Y_2_13 (2026-11-10): not written",
+    ]
+
+
+def test_run_with_only_values_without_value_fails_with_error_mail(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
+    write_year(tmp_path, 2026, [("2026-11-22", "77")])
+    before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
+
+    assert run({name: "-" for name in DEVICE_2026_11_23}) == 1
+
+    assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
+    assert mails == [("error", "the device has no consumption value: all 14 values are '-'")]
+
+
+# --- a place that is missing in the response ---------------------------------------------
+
+
+def test_run_with_a_missing_place_asks_again_and_fails_without_writing(
+    run: Run,
+    sleeps: list[float],
+    tmp_path: pathlib.Path,
+    mails: list[tuple[str, typing.Any]],
+) -> None:
+    response = {key: value for key, value in DEVICE_2026_11_23.items() if key != "D_Y_2_5"}
+
+    assert run(response) == 1
+
+    assert len(run.requests) == 6  # one request and 5 repeats (retries = 5)
+    assert sleeps == [5.0] * 5
+    assert not list((tmp_path / "data").glob("*.csv"))
+    assert mails == [
+        ("error", "failed to get device data after 6 attempts: device response lacks D_Y_2_5")
+    ]
 
 
 def test_run_over_the_year_change_adds_to_the_stored_file_and_starts_the_new_one(

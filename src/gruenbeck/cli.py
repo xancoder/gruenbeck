@@ -128,14 +128,10 @@ def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
     )
     now = local_now()
     device.check_device_clock(device_data.pop(device.DEVICE_CLOCK_PARAMETER, None), now)
-    values_by_day = device.add_timestamp_as_key_device_data(device_data, today=now.date())
-    values_by_day = filter_first_date(values_by_day, data_file.first_date)
-    # a value without text is None: int() raises TypeError, reported as unexpected error
-    # until P006-S9 checks the values
-    new_values = {
-        day: int(value)  # type: ignore[arg-type]  # a value may be None, see above
-        for day, value in values_by_day.items()
-    }
+    # checks every value before anything is written
+    new_values = filter_first_date(
+        device.read_consumption(device_data, today=now.date()), data_file.first_date
+    )
 
     # read every yearly file involved (also the one of the day before the oldest new
     # value, see check_stored_overlap) before anything is written
@@ -160,9 +156,6 @@ def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
         data_file.date_pattern,
     )
 
-    # Track if any data was processed
-    data_processed = False
-
     # provides files per year and handle year change
     for year in years:
         data_existing = dict(stored_by_year[year])
@@ -179,11 +172,6 @@ def collect_and_store(config: configuration.Configuration) -> pathlib.Path:
             data_existing,
             data_file.date_pattern,
         )
-        data_processed = True
-
-    # nothing stored is a failure, not a successful run
-    if not data_processed:
-        raise CollectError("no data was processed")
     return data_path
 
 

@@ -11,7 +11,7 @@ import time
 import types
 import typing
 import xml.etree.ElementTree
-from collections.abc import Iterable, KeysView
+from collections.abc import Iterable, KeysView, Mapping
 
 import requests
 import urllib3.exceptions
@@ -31,6 +31,9 @@ RETRY_STATUS = frozenset(range(500, 600))
 DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
 # the device keeps the consumption of 14 days (D_Y_2_15 ... D_Y_2_27 return "-")
 DEVICE_MEMORY_DAYS = 14
+# the value of a place without consumption, and a valid consumption: whole liters
+NO_VALUE = "-"
+LITERS = re.compile(r"[0-9]+")
 
 # device clock (HH:MM), only checked for a warning: the daily rollover of the device
 # does not follow it (about 10:05 CET before and after the clock was set, 2026-11-19/20)
@@ -225,8 +228,9 @@ def get_device_data(
     ask the device for the 14-day memory and its clock
 
     A temporary failure of the request is repeated by the session (create_session).
-    A response that is not valid xml or has no values (ValueError) is asked again as
-    well, up to `retries` times with retry_delay seconds in between.
+    A response that is not valid xml, has no values or lacks one of the 14 places
+    (ValueError) is asked again as well, up to `retries` times with retry_delay seconds
+    in between.
     :param host: host name (optionally with port) of the device
     :param parameter: Parameter of the parameter file
     :param timeout: seconds to wait for connect and for the response (per attempt)
@@ -236,17 +240,22 @@ def get_device_data(
     :raises DeviceError: no valid answer after the repeated attempts
     """
     # the device clock comes with the values, see check_device_clock()
-    request_parameters = [DEVICE_CLOCK_PARAMETER, *get_consumption_parameters(parameter)]
+    consumption_parameters = get_consumption_parameters(parameter)
+    request_parameters = [DEVICE_CLOCK_PARAMETER, *consumption_parameters]
     attempts = 0
     with create_session(retries, retry_delay) as session:
         while True:
             try:
                 result = get_data_from_mux_http(host, request_parameters, timeout, session)
+                # a missing place would leave its day out without a word
+                missing = [name for name in consumption_parameters if name not in result]
+                if missing:
+                    raise ValueError(f"device response lacks {', '.join(missing)}")
             except requests.exceptions.RequestException as err:
                 # includes InvalidURL, which is a ValueError as well
                 raise DeviceError(f"failed to get device data: {_describe(err)}") from err
             except ValueError as err:
-                # invalid xml or response without values
+                # invalid xml, response without values or without a requested place
                 attempts += 1
                 logger.warning(
                     "invalid device response: %s. Attempt %d/%d", err, attempts, retries + 1
@@ -307,7 +316,7 @@ def check_device_clock(device_clock: str | None, now: datetime.datetime) -> int 
 
 
 def add_timestamp_as_key_device_data[V](
-    device_data: dict[str, V], today: datetime.date | None = None
+    device_data: Mapping[str, V], today: datetime.date | None = None
 ) -> dict[datetime.date, V]:
     """
     replace the parameter codes with the day each value belongs to
@@ -331,3 +340,43 @@ def add_timestamp_as_key_device_data[V](
             )
         result[today - datetime.timedelta(days=int(match.group(1)))] = value
     return result
+
+
+def read_consumption(
+    device_data: Mapping[str, str | None], today: datetime.date
+) -> dict[datetime.date, int]:
+    """
+    the consumption of every day of the response, checked before anything is written
+
+    A whole number (liters, 0 or greater, surrounding blanks are ignored) is the
+    consumption of the day. "-" means the device has no value for that place: the day is
+    left out (a value stored for it stays) and logged as warning.
+    :param device_data: dictionary of parameter code D_Y_2_<n> and value
+    :param today: date of the run
+    :return: dictionary of datetime.date and liters, never empty
+    :raises DeviceError: a parameter code is not D_Y_2_<n>, a value is neither a whole
+        number nor "-" (empty, text, negative, decimal, None for an element without
+        text), or no day has a value
+    """
+    values: dict[datetime.date, int] = {}
+    invalid = []
+    for day, value in add_timestamp_as_key_device_data(device_data, today).items():
+        # the inverse of add_timestamp_as_key_device_data()
+        parameter = f"D_Y_2_{(today - day).days}"
+        text = None if value is None else value.strip()
+        if text is not None and LITERS.fullmatch(text):
+            values[day] = int(text)
+        elif text == NO_VALUE:
+            logger.warning("no value for %s (%s): not written", parameter, day)
+        else:
+            invalid.append(f"{parameter} ({day}) {value!r}")
+    if invalid:
+        raise DeviceError(
+            f"invalid consumption values (expected a whole number 0 or greater, or"
+            f" {NO_VALUE!r}): {'; '.join(invalid)}"
+        )
+    if not values:
+        raise DeviceError(
+            f"the device has no consumption value: all {len(device_data)} values are {NO_VALUE!r}"
+        )
+    return values

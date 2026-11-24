@@ -555,13 +555,18 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
 def test_run_without_consumption_values_is_an_error(
     run: collections.abc.Callable[..., int],
     device: FakeDevice,
+    sleeps: list[float],
     mails: list[tuple[str, gruenbeck.config.Mail, typing.Any]],
     tmp_path: pathlib.Path,
 ) -> None:
     device.answer = {"D_C_4_2": "16:00"}
 
     assert run() == 1
-    assert [text for kind, _, text in mails] == ["no data was processed"]
+    # the places are missing: asked again like an empty response, then an error
+    assert [text for kind, _, text in mails] == [
+        f"failed to get device data after 6 attempts: device response lacks {', '.join(MEMORY)}"
+    ]
+    assert len(device.calls) == 6
     assert list((tmp_path / "data").iterdir()) == []
 
 

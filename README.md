@@ -89,7 +89,7 @@ The section `softWaterSystem` configures the connection to the soft water system
 | `retries` | optional, how often a failed request is repeated (whole number, 0 or greater, default `5`) |
 | `retryDelay` | optional, backoff factor in seconds (number, 0 or greater, default `5`): the first repeat follows at once, the next ones after 2, 4, 8 ... times `retryDelay` (at most 2 minutes each) |
 
-A request is repeated after a connection error, a timeout, an aborted connection and an HTTP server error (5xx). Other HTTP errors such as 404 fail at once. With the defaults the waits are 0, 10, 20, 40 and 80 seconds, so the device gets about 2.5 minutes to come back, for example when a run that was missed is made up right after the boot and the network is not ready yet. An answer that is no valid XML or has no consumption values is asked again after `retryDelay` seconds each time, up to `retries` times. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1. Every repeated request is logged as a warning. A run against a device that does not answer can take several minutes before it fails, because every attempt may wait up to `timeout` seconds.
+A request is repeated after a connection error, a timeout, an aborted connection and an HTTP server error (5xx). Other HTTP errors such as 404 fail at once. With the defaults the waits are 0, 10, 20, 40 and 80 seconds, so the device gets about 2.5 minutes to come back, for example when a run that was missed is made up right after the boot and the network is not ready yet. An answer that is no valid XML, has no values or lacks one of the 14 places `D_Y_2_1` ... `D_Y_2_14` is asked again after `retryDelay` seconds each time, up to `retries` times. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1. Every repeated request is logged as a warning. A run against a device that does not answer can take several minutes before it fails, because every attempt may wait up to `timeout` seconds.
 
 Close the web interface of the device in the browser before a run: while it was open, the device broke off 4 of 6 requests in a test. The repeated requests often get through, but not reliably.
 
@@ -103,6 +103,18 @@ The section `dataFile` sets the name and format of the yearly files `<prefix>_<y
 | `datePattern` | format of the dates in the files, with year, month and day, e.g. `"%Y-%m-%d"` or `"%d.%m.%Y"` ([format codes](https://docs.python.org/3/library/datetime.html#format-codes)). The rows are sorted by date |
 | `fieldnames` | names of the two columns, `{"date": "date", "value": "value"}`; both are written as header, and existing files must have them |
 | `firstDate` | optional, date `YYYY-MM-DD`, e.g. `"2026-11-20"`. Values of earlier days are not written (the log names their number), values already stored stay unchanged. Without the key every value is written. Use it while the device memory still holds values that would be stored under a wrong date, e.g. after setting the device clock. The key may stay afterwards. If all values of a run are before `firstDate`, the run fails |
+
+#### values of the device
+
+Every value of the response is checked before anything is written:
+
+| value | result |
+|-------|--------|
+| a whole number of liters, 0 or greater (e.g. `93`; blanks around it are ignored) | stored |
+| `-` (the device has no value for that place) | not written, a value already stored for that day stays; one warning per place in the log (parameter and date). If every value is `-`, the run fails |
+| anything else (empty, text, a negative number, a decimal number, an element without text) | the run fails; the error mail names every such place |
+
+In every failing case nothing is written, not even one of two yearly files, and an error mail is sent. The check includes days before `firstDate`.
 
 #### exit codes
 

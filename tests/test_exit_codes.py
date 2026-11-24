@@ -197,7 +197,7 @@ def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(
     mails: list[tuple[str, typing.Any]],
     answers: list[dict[str, str | None] | BaseException],
 ) -> None:
-    answers.append({"D_Y_2_1": "1", "D_Y_1": "5"})
+    answers.append({"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}, "D_Y_1": "5"})
 
     assert collect() == 1
 
