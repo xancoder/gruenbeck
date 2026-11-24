@@ -25,6 +25,13 @@ FIRST_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 # dates to check dataFile.datePattern with: written and read back, they must stay the same
 PATTERN_CHECK_DATES = (datetime.date(2026, 1, 2), datetime.date(2027, 12, 31))
 SMTP_SECURITY = ("ssl", "starttls")
+# defaults of the optional keys retries and retryDelay of softWaterSystem and mail:
+# repeated attempts after a temporary error and the seconds to wait (see gruenbeck.device
+# and gruenbeck.mail for what the delay means)
+DEVICE_RETRIES = 5
+DEVICE_RETRY_DELAY = 5
+MAIL_RETRIES = 3
+MAIL_RETRY_DELAY = 5
 _MISSING = object()
 
 
@@ -73,6 +80,8 @@ class Mail:
     sender_password: str = dataclasses.field(repr=False)
     recipients: tuple[str, ...]
     subject: str
+    retries: int
+    retry_delay: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,6 +90,8 @@ class SoftWaterSystem:
 
     host: str
     timeout: float
+    retries: int
+    retry_delay: float
 
 
 @dataclasses.dataclass(frozen=True)
@@ -237,6 +248,8 @@ def _read_mail(section: _Section | None) -> Mail | None:
     sender_password = section.text("senderPassword")
     recipients = _read_recipients(section, "recipients")
     subject = section.text("subject", allow_empty=True)
+    retries = _read_retries(section, MAIL_RETRIES)
+    retry_delay = _read_retry_delay(section, MAIL_RETRY_DELAY)
     section.warn_unknown()
     if len(section.problems) > count:
         return None
@@ -248,6 +261,8 @@ def _read_mail(section: _Section | None) -> Mail | None:
         sender_password=typing.cast(str, sender_password),
         recipients=typing.cast(tuple, recipients),
         subject=typing.cast(str, subject),
+        retries=typing.cast(int, retries),
+        retry_delay=typing.cast(float, retry_delay),
     )
 
 
@@ -296,10 +311,17 @@ def _read_soft_water_system(section: _Section | None) -> SoftWaterSystem | None:
     count = len(section.problems)
     host = section.text("host")
     timeout = _read_timeout(section, "timeout")
+    retries = _read_retries(section, DEVICE_RETRIES)
+    retry_delay = _read_retry_delay(section, DEVICE_RETRY_DELAY)
     section.warn_unknown()
     if len(section.problems) > count:
         return None
-    return SoftWaterSystem(host=typing.cast(str, host), timeout=typing.cast(float, timeout))
+    return SoftWaterSystem(
+        host=typing.cast(str, host),
+        timeout=typing.cast(float, timeout),
+        retries=typing.cast(int, retries),
+        retry_delay=typing.cast(float, retry_delay),
+    )
 
 
 def _read_timeout(section: _Section, key: str) -> float | None:
@@ -318,6 +340,28 @@ def _read_timeout(section: _Section, key: str) -> float | None:
         section.problem(key, value, "must be a number greater than 0")
         return None
     return timeout
+
+
+def _read_retries(section: _Section, default: int) -> int | None:
+    """optional key retries: whole number of repeated attempts, 0 for none"""
+    value = section.value("retries", required=False)
+    if value is _MISSING:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        section.problem("retries", value, "must be a whole number, 0 or greater")
+        return None
+    return value
+
+
+def _read_retry_delay(section: _Section, default: float) -> float | None:
+    """optional key retryDelay: seconds, 0 for no waiting"""
+    value = section.value("retryDelay", required=False)
+    if value is _MISSING:
+        return float(default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value < math.inf:
+        section.problem("retryDelay", value, "must be a number, 0 or greater")
+        return None
+    return float(value)
 
 
 def _read_data_file(section: _Section | None) -> DataFile | None:

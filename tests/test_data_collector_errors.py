@@ -12,7 +12,6 @@ import smtplib
 import sys
 
 import pytest
-import requests
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
@@ -51,6 +50,8 @@ def mail_settings(config_data):
         sender_password=section["senderPassword"],
         recipients=tuple(section["recipients"]),
         subject=section["subject"],
+        retries=3,
+        retry_delay=5.0,
     )
 
 
@@ -243,12 +244,7 @@ def test_missing_parameter_file_is_an_error(tmp_path, config_data, write_config)
     assert str(err.value) == f"[Errno 2] No such file or directory: '{path}'"
 
 
-# --- device request with retries ----------------------------------------------------
-
-
-@pytest.fixture
-def device_parameter(parameter_file):
-    return gruenbeck.device.Parameter(str(parameter_file))
+# --- fake device ----------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -264,7 +260,7 @@ def device(monkeypatch):
             self.errors: list[BaseException] = []
             self.answer = {"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}}
 
-        def fetch(self, host, parameters, timeout):
+        def fetch(self, host, parameters, timeout, session=None):
             self.calls.append((host, list(parameters), timeout))
             if self.errors:
                 raise self.errors.pop(0)
@@ -273,101 +269,6 @@ def device(monkeypatch):
     fake = Device()
     monkeypatch.setattr(gruenbeck.device, "get_data_from_mux_http", fake.fetch)
     return fake
-
-
-def test_device_request_with_host_and_timeout(
-    device, device_parameter, sleeps, config_data, write_config
-):
-    config_data["softWaterSystem"]["timeout"] = 7
-    config = gruenbeck.config.load_configuration(write_config(config_data))
-
-    result = cli.get_device_data(config, device_parameter)
-
-    assert result == device.answer
-    assert device.calls == [("device.lan", ["D_C_4_2", *MEMORY], 7.0)]
-    assert sleeps == []
-
-
-@pytest.mark.parametrize(
-    "error, warning",
-    [
-        (
-            ValueError("failed to parse xml: x"),
-            "invalid device response: failed to parse xml: x",
-        ),
-        (requests.exceptions.ReadTimeout("read timed out"), "request failed: read timed out"),
-        (requests.exceptions.HTTPError("500 Server Error"), "request failed: 500 Server Error"),
-        (RuntimeError("boom"), "unexpected error: boom"),
-        (TypeError("bad type"), "unexpected error: bad type"),
-    ],
-    ids=lambda value: value if isinstance(value, str) else type(value).__name__,
-)
-def test_device_request_succeeds_after_retries(
-    device, device_parameter, sleeps, logs, error, warning, loaded_config
-):
-    device.errors = [error, error]
-
-    result = cli.get_device_data(loaded_config, device_parameter)
-
-    assert result == device.answer
-    assert len(device.calls) == 3
-    assert sleeps == [5, 5]
-    assert logs() == [
-        ("WARNING", f"{warning}. Attempt 1/4"),
-        ("INFO", "Retry attempt 1/3 for API request"),
-        ("WARNING", f"{warning}. Attempt 2/4"),
-        ("INFO", "Retry attempt 2/3 for API request"),
-        ("INFO", "Successfully retrieved data after 2 retry attempts"),
-    ]
-
-
-def test_device_request_fails_after_four_attempts(
-    device, device_parameter, sleeps, mails, loaded_config
-):
-    device_errors = [
-        requests.exceptions.ConnectTimeout("connect timed out"),
-        requests.exceptions.ConnectionError("refused"),
-        ValueError("device response contains no values"),
-        requests.exceptions.ReadTimeout("read timed out"),
-        ValueError("not reached"),
-    ]
-    device.errors = list(device_errors)
-
-    with pytest.raises(gruenbeck.device.DeviceError) as err:
-        cli.get_device_data(loaded_config, device_parameter)
-
-    assert len(device.calls) == 4
-    assert sleeps == [5, 5, 5]
-    # the error names the last error only; the error mail is sent by main()
-    assert str(err.value) == "failed to get device data after 4 attempts: read timed out"
-    assert err.value.__cause__ is device_errors[3]
-    assert mails == []
-
-
-def test_number_of_retries_and_delay_are_parameters(
-    device, device_parameter, sleeps, mails, loaded_config
-):
-    device.errors = [ValueError("bad")] * 2
-
-    with pytest.raises(gruenbeck.device.DeviceError, match=r"^failed to get device data after 2"):
-        cli.get_device_data(loaded_config, device_parameter, max_retries=1, retry_delay=0.5)
-
-    assert len(device.calls) == 2
-    assert sleeps == [0.5]
-
-
-def test_key_error_of_the_request_is_retried_like_other_errors(
-    device, device_parameter, sleeps, mails, logs, loaded_config
-):
-    # up to P006-S3 a KeyError counted as missing config parameter and was not retried
-    device.errors = [KeyError("text")]
-
-    assert cli.get_device_data(loaded_config, device_parameter) == device.answer
-
-    assert len(device.calls) == 2
-    assert sleeps == [5]
-    assert logs()[0] == ("WARNING", "unexpected error: 'text'. Attempt 1/4")
-    assert mails == []
 
 
 # --- data mail: get_mail ------------------------------------------------------------

@@ -104,7 +104,7 @@ def test_run_with_options(tmp_path, monkeypatch, capsys, package_logger, config_
     log_file = tmp_path / "errors.log"
     sent = []
 
-    def fetch(host, parameters, timeout):
+    def fetch(host, parameters, timeout, session=None):
         return {"D_C_4_2": f"{now:%H:%M}", **{name: "1" for name in parameters[1:]}}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)

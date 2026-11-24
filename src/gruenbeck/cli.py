@@ -10,10 +10,7 @@ import argparse
 import datetime
 import logging.handlers
 import sys
-import time
 import traceback
-
-import requests
 
 from gruenbeck import analysis, device, errors, mail, storage
 from gruenbeck import config as configuration
@@ -116,7 +113,14 @@ def collect_and_store(config: configuration.Configuration):
     data_path = get_data_folder(config)
     data_file = config.data_file
     device_parameter = get_device_parameter(config)
-    device_data = get_device_data(config, device_parameter)
+    water_system = config.soft_water_system
+    device_data = device.get_device_data(
+        water_system.host,
+        device_parameter,
+        water_system.timeout,
+        water_system.retries,
+        water_system.retry_delay,
+    )
     now = local_now()
     device.check_device_clock(device_data.pop(device.DEVICE_CLOCK_PARAMETER, None), now)
     device_data = device.add_timestamp_as_key_device_data(device_data, today=now.date())
@@ -191,87 +195,6 @@ def get_device_parameter(config):
         return device.Parameter(config.parameter_file)
     except FileNotFoundError as err:
         raise device.DeviceError(f"{err}") from err
-
-
-def get_consumption_parameters(parameter):
-    """
-    parameter codes of the 14-day memory: D_Y_2_1 ... D_Y_2_14 in this order
-
-    Other rows of the parameter file about the water consumption (D_Y_1, D_Y_2_27)
-    are not requested.
-    :param parameter: device.Parameter of the parameter file
-    :return: list of parameter codes
-    :raises device.DeviceError: the parameter file lacks one of them
-    """
-    names = [f"D_Y_2_{n}" for n in range(1, device.DEVICE_MEMORY_DAYS + 1)]
-    known = parameter.get_parameter_list()
-    missing = [name for name in names if name not in known]
-    if missing:
-        raise device.DeviceError(
-            f"parameter file {parameter.path_file} lacks the consumption"
-            f" parameters: {', '.join(missing)}"
-        )
-    return names
-
-
-def get_device_data(config, parameter, max_retries=3, retry_delay=5):
-    """
-    :raises device.DeviceError: no valid answer after max_retries + 1 attempts
-    """
-    attempts = 0
-    last_error: Exception | None = None
-    timeout = config.soft_water_system.timeout
-    # the device clock comes with the values, see check_device_clock()
-    request_parameters = [
-        device.DEVICE_CLOCK_PARAMETER,
-        *get_consumption_parameters(parameter),
-    ]
-
-    while True:
-        try:
-            if attempts > 0:
-                logger.info("Retry attempt %d/%d for API request", attempts, max_retries)
-
-            result = device.get_data_from_mux_http(
-                config.soft_water_system.host,
-                request_parameters,
-                timeout=timeout,
-            )
-
-            # If we got here, the request was successful
-            if attempts > 0:
-                logger.info("Successfully retrieved data after %d retry attempts", attempts)
-            return result
-
-        except ValueError as err:
-            # invalid xml or response without values
-            last_error = err
-            logger.warning(
-                "invalid device response: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1
-            )
-
-        except requests.exceptions.RequestException as err:
-            # Network-related errors
-            last_error = err
-            logger.warning("request failed: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1)
-
-        except Exception as err:
-            # Any other unexpected errors
-            last_error = err
-            logger.warning(
-                "unexpected error: %s. Attempt %d/%d", err, attempts + 1, max_retries + 1
-            )
-
-        attempts += 1
-
-        # If we've reached max retries, the run fails
-        if attempts > max_retries:
-            raise device.DeviceError(
-                f"failed to get device data after {max_retries + 1} attempts: {last_error}"
-            ) from last_error
-
-        # Wait before retrying
-        time.sleep(retry_delay)
 
 
 def report_error(

@@ -77,8 +77,8 @@ Without root access the same units can be installed for the current user. Differ
 system service:
 
 - A user service has no `User=` setting and no `network-online.target`; delete both lines from
-  the generated service. The collector then relies on its own retries (4 attempts, 5 seconds
-  apart).
+  the generated service. The collector then relies on its own retries (by default 6 attempts
+  over about 2.5 minutes, see `retries` and `retryDelay` in the main README).
 - A user service only runs while the user is logged in. To let the timer work without a login
   (like cron does) enable lingering once: `loginctl enable-linger "$USER"`.
 - A missed run is made up directly after boot or login, possibly before the network is

@@ -24,6 +24,8 @@ SETTINGS = config.Mail(
     sender_password="test-password",
     recipients=("one@example.com", "two@example.com"),
     subject="[data collector] - gruenbeck",
+    retries=3,
+    retry_delay=5,
 )
 
 SEND_STEPS = ["starttls", "login", "send_message", "sendmail", "quit", "exit"]
@@ -298,20 +300,20 @@ def test_transient_error_fails_after_four_attempts(smtp, sleeps):
     assert len(smtp.errors) == 1
 
 
-def test_number_of_retries_and_delay_are_parameters(smtp, sleeps):
+def test_number_of_retries_and_delay_come_from_the_configuration(smtp, sleeps):
     smtp.errors = [("connect", TimeoutError("timed out"))] * 2
 
-    send(max_retries=2, retry_delay=0.5)
+    send(settings_with(retries=2, retry_delay=0.5))
 
     assert sleeps == [0.5, 0.5]
     assert len(smtp.connections) == 1
 
 
-def test_no_retry_with_max_retries_zero(smtp, sleeps):
+def test_no_retry_with_retries_zero(smtp, sleeps):
     smtp.errors = [("connect", TimeoutError("timed out"))]
 
     with pytest.raises(mail.MailError, match=r"^Failed to send email after 1 attempts: timed out$"):
-        send(max_retries=0)
+        send(settings_with(retries=0))
 
     assert sleeps == []
 

@@ -2,7 +2,7 @@ import pytest
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
-from gruenbeck import cli, mail
+from gruenbeck import mail
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 
@@ -12,7 +12,7 @@ def device(monkeypatch):
     """fake device; records the parameters of every request"""
     requests = []
 
-    def fetch(host, parameters, timeout):
+    def fetch(host, parameters, timeout, session=None):
         requests.append(list(parameters))
         return {name: "1" for name in parameters}
 
@@ -50,10 +50,10 @@ def test_parameter_files_have_no_commented_rows(parameter_file, suffix, separato
     assert f"D_Y_2_27{separator}read" in "\n".join(lines)
 
 
-def test_only_the_14_day_memory_is_requested(device, parameter_file, loaded_config):
+def test_only_the_14_day_memory_is_requested(device, parameter_file):
     parameter = gruenbeck.device.Parameter(str(parameter_file))
 
-    result = cli.get_device_data(loaded_config, parameter)
+    result = gruenbeck.device.get_device_data("device.lan", parameter, 30, 5, 5)
 
     # plus the device clock for check_device_clock() (P004-S8)
     assert device == [["D_C_4_2", *MEMORY]]
@@ -61,7 +61,7 @@ def test_only_the_14_day_memory_is_requested(device, parameter_file, loaded_conf
 
 
 def test_missing_memory_parameter_fails_before_asking_the_device(
-    device, error_mails, parameter_file, tmp_path, caplog, loaded_config
+    device, error_mails, parameter_file, tmp_path, caplog
 ):
     rows = parameter_file.read_text(encoding="utf-8").splitlines(keepends=True)
     without = [row for row in rows if not row.startswith(("D_Y_2_5,", "D_Y_2_12,"))]
@@ -70,7 +70,9 @@ def test_missing_memory_parameter_fails_before_asking_the_device(
     reduced.write_text("".join(without), encoding="utf-8")
 
     with pytest.raises(gruenbeck.device.DeviceError) as err:
-        cli.get_device_data(loaded_config, gruenbeck.device.Parameter(str(reduced)))
+        gruenbeck.device.get_device_data(
+            "device.lan", gruenbeck.device.Parameter(str(reduced)), 30, 5, 5
+        )
 
     assert device == []
     message = f"parameter file {reduced} lacks the consumption parameters: D_Y_2_5, D_Y_2_12"

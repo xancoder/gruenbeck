@@ -168,7 +168,7 @@ def run(mails, monkeypatch, config_data, write_config):
         config["dataFile"].update(prefix=PREFIX, **data_file)
         config_file = write_config(config)
 
-        def fetch(host, parameters, timeout):
+        def fetch(host, parameters, timeout, session=None):
             requests.append(list(parameters))
             clock = {} if device_clock is None else {"D_C_4_2": device_clock}
             return {**clock, **response}
@@ -812,7 +812,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     monkeypatch.setattr(
         device,
         "get_data_from_mux_http",
-        lambda host, parameters, timeout: {"D_C_4_2": "16:00", **response},
+        lambda host, parameters, timeout, session=None: {"D_C_4_2": "16:00", **response},
     )
     monkeypatch.setattr(
         cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))

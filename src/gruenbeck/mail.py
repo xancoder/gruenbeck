@@ -95,22 +95,18 @@ def send_mail(
     subject: str,
     text: str,
     attachments: Iterable[pathlib.Path] = (),
-    max_retries: int = 3,
-    retry_delay: float = 5,
 ) -> None:
     """
     send a mail to the recipients of the configuration, with or without attachments
 
-    Temporary errors (connection lost, timeout) are retried max_retries times, with
-    retry_delay seconds in between. A wrong login, a rejected sender or recipient and
-    other errors fail at once.
+    Temporary errors (connection lost, timeout) are retried settings.retries times, with
+    settings.retry_delay seconds in between. A wrong login, a rejected sender or recipient
+    and other errors fail at once.
 
     :param settings: mail section of the configuration
     :param subject: subject of the mail
     :param text: body of the mail
     :param attachments: files to attach (see build_message)
-    :param max_retries: number of repeated attempts after the first one
-    :param retry_delay: seconds to wait before an attempt is repeated
     :raises MailError: the mail cannot be built or sent
     """
     message = build_message(settings, subject, text, attachments)
@@ -139,11 +135,11 @@ def send_mail(
             # Authentication errors are not retryable
             raise MailError(f"Authentication failed: {error}") from error
         except TRANSIENT_SMTP_ERRORS as error:
-            if attempts > max_retries:
+            if attempts > settings.retries:
                 raise MailError(
                     f"Failed to send email after {attempts} attempts: {error}"
                 ) from error
-            time.sleep(retry_delay)  # Wait before retrying
+            time.sleep(settings.retry_delay)  # Wait before retrying
         except PERMANENT_SMTP_ERRORS as error:
             # Permanent errors, retrying does not help
             raise MailError(f"Email rejected: {error}") from error

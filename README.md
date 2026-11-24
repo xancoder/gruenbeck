@@ -73,8 +73,10 @@ The section `mail` configures the SMTP server used for the data mail and the err
 | `senderEmail`, `senderPassword` | login and sender address |
 | `recipients` | list of recipient addresses |
 | `subject` | subject of the data mail (may be empty) |
+| `retries` | optional, how often a mail is sent again after a temporary error (whole number, 0 or greater, default `3`) |
+| `retryDelay` | optional, seconds to wait before every repeated attempt (number, 0 or greater, default `5`) |
 
-Temporary errors (connection lost, timeout, connection failed) are retried up to 3 times with a 5 seconds delay; permanent errors (wrong login, rejected sender or recipient) fail immediately.
+Temporary errors (connection lost, timeout, connection failed) are retried `retries` times, `retryDelay` seconds apart; permanent errors (wrong login, rejected sender or recipient) fail immediately.
 
 #### device settings
 
@@ -83,9 +85,13 @@ The section `softWaterSystem` configures the connection to the soft water system
 | key | meaning |
 |-----|---------|
 | `host` | host name (or IP address) of the soft water system |
-| `timeout` | optional, seconds to wait for the connection and for the response of the device (number greater than 0, default `30`) |
+| `timeout` | optional, seconds to wait for the connection and for the response of the device, per attempt (number greater than 0, default `30`) |
+| `retries` | optional, how often a failed request is repeated (whole number, 0 or greater, default `5`) |
+| `retryDelay` | optional, backoff factor in seconds (number, 0 or greater, default `5`): the first repeat follows at once, the next ones after 2, 4, 8 ... times `retryDelay` (at most 2 minutes each) |
 
-If the device does not answer in time, answers with an HTTP error or returns no consumption values, the request is repeated up to 3 times with a 5 seconds delay. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1.
+A request is repeated after a connection error, a timeout, an aborted connection and an HTTP server error (5xx). Other HTTP errors such as 404 fail at once. With the defaults the waits are 0, 10, 20, 40 and 80 seconds, so the device gets about 2.5 minutes to come back, for example when a run that was missed is made up right after the boot and the network is not ready yet. An answer that is no valid XML or has no consumption values is asked again after `retryDelay` seconds each time, up to `retries` times. If it still fails, the error is logged, an error mail is sent and the script ends with exit code 1. Every repeated request is logged as a warning. A run against a device that does not answer can take several minutes before it fails, because every attempt may wait up to `timeout` seconds.
+
+Close the web interface of the device in the browser before a run: while it was open, the device broke off 4 of 6 requests in a test. The repeated requests often get through, but not reliably.
 
 #### data file settings
 

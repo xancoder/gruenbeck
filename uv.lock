@@ -522,6 +522,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },
+    { name = "urllib3" },
 ]
 
 [package.optional-dependencies]
@@ -546,6 +547,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'analysis'", specifier = ">=3.9" },
     { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.2" },
     { name = "requests", specifier = ">=2.32" },
+    { name = "urllib3", specifier = ">=2.0" },
 ]
 provides-extras = ["analysis"]
 

@@ -43,7 +43,7 @@ def answers(monkeypatch, sleeps):
     """
     queue: list = []
 
-    def fetch(host, parameters, timeout):
+    def fetch(host, parameters, timeout, session=None):
         if queue:
             item = queue.pop(0)
             if isinstance(item, BaseException):
@@ -109,11 +109,34 @@ def test_invalid_mail_section_exits_with_1_without_mail(collect, mails, config_d
 
 
 def test_device_error_exits_with_1_and_error_mail(collect, mails, answers):
-    answers.extend([requests.exceptions.ConnectTimeout("connect timed out")] * 4)
+    # the session of the device query repeated the request already (tests/test_device_query.py)
+    answers.append(requests.exceptions.ConnectTimeout("connect timed out"))
 
     assert collect() == 1
 
-    assert error_mails(mails) == ["failed to get device data after 4 attempts: connect timed out"]
+    assert error_mails(mails) == ["failed to get device data: connect timed out"]
+
+
+def test_invalid_device_answer_exits_with_1_after_all_attempts(collect, mails, answers, sleeps):
+    answers.extend([ValueError("device response contains no values")] * 6)
+
+    assert collect() == 1
+
+    # retries 5 by default: 6 attempts, 5 seconds apart
+    assert error_mails(mails) == [
+        "failed to get device data after 6 attempts: device response contains no values"
+    ]
+    assert sleeps == [5.0] * 5
+
+
+def test_retries_of_the_configuration_are_used(collect, mails, answers, sleeps, config_data):
+    config_data["softWaterSystem"].update(retries=1, retryDelay=0.5)
+    answers.extend([ValueError("bad answer")] * 2)
+
+    assert collect() == 1
+
+    assert error_mails(mails) == ["failed to get device data after 2 attempts: bad answer"]
+    assert sleeps == [0.5]
 
 
 def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(collect, mails, answers):

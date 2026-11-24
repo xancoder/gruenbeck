@@ -31,15 +31,17 @@ def test_example_configuration_is_valid(config_example_file, repo_root, caplog):
     assert loaded.mail.smtp_security == "starttls"
     assert loaded.mail.recipients == ("receiver@example.com",)
     assert loaded.soft_water_system == configuration.SoftWaterSystem(
-        host="softliq-sc.example.lan", timeout=30.0
+        host="softliq-sc.example.lan", timeout=30.0, retries=5, retry_delay=5.0
     )
     # every key of the example is known
     assert caplog.records == []
 
 
 def test_values_are_typed(config_data, write_config, tmp_path, parameter_file):
-    config_data["mail"].update(smtpPort=" 465 ", smtpSecurity=" SSL ", subject="")
-    config_data["softWaterSystem"]["timeout"] = "2.5"
+    config_data["mail"].update(
+        smtpPort=" 465 ", smtpSecurity=" SSL ", subject="", retries=2, retryDelay=1.5
+    )
+    config_data["softWaterSystem"].update(timeout="2.5", retries=0, retryDelay=0.5)
     config_data["dataFile"]["firstDate"] = "2026-11-20"
 
     loaded = configuration.load_configuration(write_config(config_data))
@@ -62,8 +64,12 @@ def test_values_are_typed(config_data, write_config, tmp_path, parameter_file):
             sender_password="test-password",
             recipients=("receiver@example.com",),
             subject="",
+            retries=2,
+            retry_delay=1.5,
         ),
-        soft_water_system=configuration.SoftWaterSystem(host="device.lan", timeout=2.5),
+        soft_water_system=configuration.SoftWaterSystem(
+            host="device.lan", timeout=2.5, retries=0, retry_delay=0.5
+        ),
     )
 
 
@@ -72,6 +78,49 @@ def test_optional_keys_have_defaults(loaded_config):
     assert loaded_config.mail.smtp_security is None
     assert loaded_config.soft_water_system.timeout == 30.0
     assert type(loaded_config.soft_water_system.timeout) is float
+
+
+def test_retry_defaults(loaded_config):
+    # the device is asked again for about 2.5 minutes, the mail for about 15 seconds
+    water, mail = loaded_config.soft_water_system, loaded_config.mail
+    assert (water.retries, water.retry_delay) == (5, 5.0)
+    assert (mail.retries, mail.retry_delay) == (3, 5.0)
+    assert type(water.retry_delay) is float
+    assert type(mail.retry_delay) is float
+
+
+@pytest.mark.parametrize("section", ["softWaterSystem", "mail"])
+@pytest.mark.parametrize(
+    "key, value, expected",
+    [
+        ("retries", 0, 0),
+        ("retries", 1, 1),
+        ("retries", 10, 10),
+        ("retryDelay", 0, 0.0),
+        ("retryDelay", 0.5, 0.5),
+        ("retryDelay", 30, 30.0),
+    ],
+)
+def test_retries_and_retry_delay(config_data, write_config, caplog, section, key, value, expected):
+    config_data[section][key] = value
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    part = loaded.soft_water_system if section == "softWaterSystem" else loaded.mail
+    result = part.retries if key == "retries" else part.retry_delay
+    assert result == expected
+    assert type(result) is type(expected)
+    # known keys: no warning about an unknown parameter
+    assert caplog.records == []
+
+
+def test_retries_of_the_sections_are_independent(config_data, write_config):
+    config_data["softWaterSystem"].update(retries=1, retryDelay=2)
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert (loaded.soft_water_system.retries, loaded.soft_water_system.retry_delay) == (1, 2.0)
+    assert (loaded.mail.retries, loaded.mail.retry_delay) == (3, 5.0)
 
 
 @pytest.mark.parametrize(
@@ -243,6 +292,20 @@ def test_missing_required_key_is_a_problem(config_data, write_config, key):
         ("softWaterSystem.timeout", "nan", "must be a number greater than 0"),
         ("softWaterSystem.timeout", "inf", "must be a number greater than 0"),
         ("softWaterSystem.timeout", True, "expected a number"),
+        ("softWaterSystem.retries", -1, "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retries", 2.5, "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retries", 3.0, "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retries", "3", "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retries", True, "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retries", None, "must be a whole number, 0 or greater"),
+        ("softWaterSystem.retryDelay", -1, "must be a number, 0 or greater"),
+        ("softWaterSystem.retryDelay", "5", "must be a number, 0 or greater"),
+        ("softWaterSystem.retryDelay", True, "must be a number, 0 or greater"),
+        ("softWaterSystem.retryDelay", None, "must be a number, 0 or greater"),
+        ("mail.retries", -1, "must be a whole number, 0 or greater"),
+        ("mail.retries", "3", "must be a whole number, 0 or greater"),
+        ("mail.retryDelay", -0.5, "must be a number, 0 or greater"),
+        ("mail.retryDelay", [5], "must be a number, 0 or greater"),
         ("softWaterSystem.timeout", "abc", "could not convert string to float: 'abc'"),
         (
             "softWaterSystem.timeout",
