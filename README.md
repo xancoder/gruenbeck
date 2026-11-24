@@ -44,13 +44,14 @@ The data collector and the analysis check the whole file when they start: every 
 | key | meaning |
 |-----|---------|
 | `dataPath` | folder of the yearly data files; created if it does not exist (its parent folder must exist) |
-| `parameterFile` | parameter list of the device, `assets/Gruenbeck_Webserver_Dokumentation.csv` |
 
-Relative paths start at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json`) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
+The key `parameterFile` of older configurations is not used any more (the data collector asks for fixed parameters, see [assets](assets/README.md) for the documentation of the device); remove it, otherwise every run logs the warning `unknown config parameter 'parameterFile' is ignored`.
+
+A relative path starts at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json`) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
 
 #### existing configuration with paths relative to the current directory
 
-Up to now relative paths started at the current directory, so a configuration from before this version contains `"./data"` and `"./assets/Gruenbeck_Webserver_Dokumentation.csv"`. Change them to `"../data"` and `"../assets/Gruenbeck_Webserver_Dokumentation.csv"` (relative to `src/`) or to absolute paths. Until then the data collector refuses to run if a path exists only relative to the current directory: the error names the path to use, and nothing is written.
+Up to now relative paths started at the current directory, so a configuration from before this version contains `"./data"`. Change it to `"../data"` (relative to `src/`) or to an absolute path. Until then the data collector refuses to run if a path exists only relative to the current directory: the error names the path to use, and nothing is written.
 
 #### existing installation with a versioned config.json
 
@@ -236,7 +237,7 @@ uv run --extra analysis gruenbeck-analyse
 |------|---------|
 | `src/gruenbeck/cli.py` | the commands `gruenbeck-collect` and `gruenbeck-analyse` and the run of the data collector |
 | `src/gruenbeck/config.py` | reading the configuration file |
-| `src/gruenbeck/device.py` | web server of the soft water system: parameter file, request, meaning of the values |
+| `src/gruenbeck/device.py` | web server of the soft water system: request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |
 | `src/gruenbeck/mail.py` | data mail (text, HTML, CSV attachments) and error mail |
 | `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text and HTML tables) |

@@ -2,7 +2,7 @@
 configuration file of the data collector: loading and checking
 
 load_configuration() reads the JSON file into a Configuration and checks required keys,
-types and values. Relative paths (dataPath, parameterFile) start at the folder of the
+types and values. A relative path (dataPath) starts at the folder of the
 configuration file, not at the working directory.
 """
 
@@ -100,7 +100,6 @@ class Configuration:
 
     file: pathlib.Path
     data_path: pathlib.Path
-    parameter_file: pathlib.Path
     data_file: DataFile
     mail: Mail
     soft_water_system: SoftWaterSystem
@@ -193,7 +192,6 @@ def load_configuration(configuration_file: str | os.PathLike[str]) -> Configurat
     soft_water_system = _read_soft_water_system(top.section("softWaterSystem"))
     data_file = _read_data_file(top.section("dataFile"))
     data_path = _read_path(top, "dataPath", base)
-    parameter_file = _read_path(top, "parameterFile", base)
     top.warn_unknown()
 
     if problems:
@@ -202,7 +200,6 @@ def load_configuration(configuration_file: str | os.PathLike[str]) -> Configurat
     return Configuration(
         file=path.resolve(),
         data_path=typing.cast(pathlib.Path, data_path),
-        parameter_file=typing.cast(pathlib.Path, parameter_file),
         data_file=typing.cast(DataFile, data_file),
         mail=typing.cast(Mail, mail),
         soft_water_system=typing.cast(SoftWaterSystem, soft_water_system),

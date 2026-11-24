@@ -207,19 +207,21 @@ def test_unknown_parameter_in_the_answer_exits_with_1_and_error_mail(
     ]
 
 
-def test_missing_parameter_file_exits_with_1_and_error_mail(
+def test_run_with_the_former_parameter_file_key_exits_with_0_and_warns(
     collect: collections.abc.Callable[..., int],
     mails: list[tuple[str, typing.Any]],
     config_data: dict[str, typing.Any],
+    caplog: pytest.LogCaptureFixture,
     tmp_path: pathlib.Path,
 ) -> None:
+    # configurations from before P009-S7 still have it: the file is not read any more,
+    # so it does not matter that it is missing
     config_data["parameterFile"] = str(tmp_path / "missing.csv")
 
-    assert collect() == 1
+    assert collect() == 0
 
-    assert error_mails(mails) == [
-        f"[Errno 2] No such file or directory: '{tmp_path / 'missing.csv'}'"
-    ]
+    assert mails == [("data", tmp_path / "data")]
+    assert "unknown config parameter 'parameterFile' is ignored" in caplog.messages
 
 
 def test_data_folder_that_cannot_be_created_exits_with_1_and_error_mail(

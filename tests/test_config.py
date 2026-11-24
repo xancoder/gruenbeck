@@ -25,8 +25,6 @@ def test_example_configuration_is_valid(
     assert loaded.file == config_example_file
     # relative paths start at src/, the folder of the configuration file
     assert loaded.data_path == repo_root / "data"
-    assert loaded.parameter_file == repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
-    assert loaded.parameter_file.exists()
     assert loaded.data_file == configuration.DataFile(
         date_pattern="%Y-%m-%d",
         fieldnames=configuration.FieldNames(date="date", value="value"),
@@ -47,7 +45,6 @@ def test_values_are_typed(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
-    parameter_file: pathlib.Path,
 ) -> None:
     config_data["mail"].update(
         smtpPort=" 465 ", smtpSecurity=" SSL ", subject="", retries=2, retryDelay=1.5
@@ -60,7 +57,6 @@ def test_values_are_typed(
     assert loaded == configuration.Configuration(
         file=tmp_path / "config.json",
         data_path=tmp_path / "data",
-        parameter_file=parameter_file,
         data_file=configuration.DataFile(
             date_pattern="%Y-%m-%d",
             fieldnames=configuration.FieldNames(date="date", value="value"),
@@ -220,6 +216,22 @@ def test_unknown_keys_are_ignored_with_a_warning(
     ]
 
 
+def test_former_parameter_file_key_is_ignored_with_a_warning(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # configurations from before P009-S7 still have it; the file does not even have to exist
+    config_data["parameterFile"] = "../assets/missing.csv"
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.data_path == pathlib.Path(config_data["dataPath"])
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "unknown config parameter 'parameterFile' is ignored")
+    ]
+
+
 # --- invalid configurations ---------------------------------------------------------
 
 
@@ -262,7 +274,6 @@ def test_file_has_to_be_a_json_object(tmp_path: pathlib.Path, text: str, problem
     "key",
     [
         "dataPath",
-        "parameterFile",
         "dataFile",
         "dataFile.datePattern",
         "dataFile.fieldnames",
@@ -299,7 +310,6 @@ def test_missing_required_key_is_a_problem(
     [
         ("dataPath", "", "expected a non-empty text"),
         ("dataPath", 5, "expected a non-empty text"),
-        ("parameterFile", None, "expected a non-empty text"),
         ("dataFile", "data", "expected an object"),
         ("dataFile.datePattern", "", "expected a non-empty text"),
         ("dataFile.datePattern", "%m-%d", "expected a date format with year, month and day"),
@@ -434,7 +444,7 @@ def test_error_has_the_mail_section_if_it_is_valid(
     loaded_config: gruenbeck.config.Configuration,
 ) -> None:
     invalid = copy.deepcopy(config_data)
-    del invalid["parameterFile"]
+    del invalid["dataPath"]
 
     with pytest.raises(configuration.ConfigurationError) as err:
         configuration.load_configuration(write_config(invalid))
@@ -445,7 +455,7 @@ def test_error_has_the_mail_section_if_it_is_valid(
 def test_error_has_no_mail_section_if_it_is_invalid(
     config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
 ) -> None:
-    del config_data["parameterFile"]
+    del config_data["dataPath"]
     del config_data["mail"]["subject"]
 
     with pytest.raises(configuration.ConfigurationError) as err:
@@ -454,7 +464,7 @@ def test_error_has_no_mail_section_if_it_is_invalid(
     assert err.value.mail is None
     assert err.value.problems == [
         "no config parameter: 'mail.subject'",
-        "no config parameter: 'parameterFile'",
+        "no config parameter: 'dataPath'",
     ]
 
 
@@ -473,9 +483,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     data_path: str,
     expected: str,
 ) -> None:
-    (tmp_path / "repo" / "assets").mkdir(parents=True)
-    (tmp_path / "repo" / "assets" / "parameters.csv").write_text("")
-    config_data.update(dataPath=data_path, parameterFile="../assets/parameters.csv")
+    config_data["dataPath"] = data_path
     path = write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     monkeypatch.chdir(tmp_path)
 
@@ -484,7 +492,6 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
 
     assert loaded.file == path
     assert loaded.data_path == tmp_path / expected
-    assert loaded.parameter_file == tmp_path / "repo" / "assets" / "parameters.csv"
 
 
 def test_absolute_paths_stay(
@@ -492,12 +499,11 @@ def test_absolute_paths_stay(
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
 ) -> None:
-    config_data.update(dataPath="/srv/gruenbeck/data", parameterFile="/srv/gruenbeck/p.csv")
+    config_data["dataPath"] = "/srv/gruenbeck/data"
 
     loaded = configuration.load_configuration(write_config(config_data, tmp_path / "c.json"))
 
     assert loaded.data_path == pathlib.Path("/srv/gruenbeck/data")
-    assert loaded.parameter_file == pathlib.Path("/srv/gruenbeck/p.csv")
 
 
 def test_path_written_for_the_working_directory_is_an_error(

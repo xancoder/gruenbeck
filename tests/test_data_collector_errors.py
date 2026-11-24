@@ -212,14 +212,14 @@ def test_invalid_configuration_sends_every_problem_by_mail(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
 ) -> None:
-    del config_data["parameterFile"]
+    del config_data["dataPath"]
     config_data["softWaterSystem"]["timeout"] = 0
 
     assert cli.main(str(write_config(config_data))) == 1
 
     message = (
         "invalid config parameter softWaterSystem.timeout 0: must be a number greater"
-        " than 0; no config parameter: 'parameterFile'"
+        " than 0; no config parameter: 'dataPath'"
     )
     assert logs()[1] == ("ERROR", message)
     assert mails == [("gruenbeck data collector failure", mail_settings(config_data), message)]
@@ -288,30 +288,6 @@ def test_data_folder_in_a_missing_folder_is_an_error(
         "creation data folder failed: [Errno 2] No such file or directory:"
         f" '{tmp_path / 'a' / 'data'}'"
     )
-
-
-def test_device_parameter_is_read_from_the_parameter_file(
-    loaded_config: gruenbeck.config.Configuration,
-) -> None:
-    parameter = cli.get_device_parameter(loaded_config)
-
-    assert "D_Y_2_14" in parameter.get_parameter_list()
-
-
-def test_missing_parameter_file_is_an_error(
-    tmp_path: pathlib.Path,
-    config_data: dict[str, typing.Any],
-    write_config: collections.abc.Callable[..., pathlib.Path],
-) -> None:
-    path = tmp_path / "missing.csv"
-    config_data["parameterFile"] = str(path)
-    loaded = gruenbeck.config.load_configuration(write_config(config_data))
-
-    with pytest.raises(gruenbeck.device.DeviceError) as err:
-        cli.get_device_parameter(loaded)
-
-    # the text of the FileNotFoundError
-    assert str(err.value) == f"[Errno 2] No such file or directory: '{path}'"
 
 
 # --- fake device ----------------------------------------------------------------------
@@ -604,7 +580,6 @@ def test_run_without_configuration_file_asks_nobody(
     [
         ({"dataPath": None}, "no config parameter: 'dataPath'"),
         ({"dataFile": None}, "no config parameter: 'dataFile'"),
-        ({"parameterFile": None}, "no config parameter: 'parameterFile'"),
         ({"softWaterSystem": None}, "no config parameter: 'softWaterSystem'"),
         ({"softWaterSystem": {}}, "no config parameter: 'softWaterSystem.host'"),
         (

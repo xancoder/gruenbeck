@@ -34,11 +34,6 @@ def config_example_file(repo_root: pathlib.Path) -> pathlib.Path:
     return repo_root / "src" / "config.example.json"
 
 
-@pytest.fixture(scope="session")
-def parameter_file(repo_root: pathlib.Path) -> pathlib.Path:
-    return repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
-
-
 # mail section of the configurations of the tests (no mail leaves a test: the tests
 # replace the functions of gruenbeck.mail or smtplib)
 MAIL_SECTION = {
@@ -52,7 +47,7 @@ MAIL_SECTION = {
 
 
 @pytest.fixture
-def config_data(tmp_path: pathlib.Path, parameter_file: pathlib.Path) -> dict[str, typing.Any]:
+def config_data(tmp_path: pathlib.Path) -> dict[str, typing.Any]:
     """a complete and valid configuration as in the JSON file; data folder in tmp_path"""
     return {
         "dataFile": {
@@ -62,7 +57,6 @@ def config_data(tmp_path: pathlib.Path, parameter_file: pathlib.Path) -> dict[st
         },
         "dataPath": str(tmp_path / "data"),
         "mail": copy.deepcopy(MAIL_SECTION),
-        "parameterFile": str(parameter_file),
         "softWaterSystem": {"host": "device.lan"},
     }
 

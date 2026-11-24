@@ -1086,10 +1086,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
 ) -> None:
-    (tmp_path / "repo" / "assets").mkdir(parents=True)
-    parameters = tmp_path / "repo" / "assets" / "parameters.csv"
-    parameters.write_bytes(pathlib.Path(config_data["parameterFile"]).read_bytes())
-    config_data.update(dataPath="../data", parameterFile="../assets/parameters.csv")
+    config_data["dataPath"] = "../data"
     config_file = write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     (tmp_path / "elsewhere").mkdir()
     monkeypatch.chdir(tmp_path / "elsewhere")

@@ -136,11 +136,9 @@ def collect_and_store(config: configuration.Configuration) -> CollectResult:
     """
     data_path = get_data_folder(config)
     data_file = config.data_file
-    device_parameter = get_device_parameter(config)
     water_system = config.soft_water_system
     device_data = device.get_device_data(
         water_system.host,
-        device_parameter,
         water_system.timeout,
         water_system.retries,
         water_system.retry_delay,
@@ -202,16 +200,6 @@ def get_data_folder(config: configuration.Configuration) -> pathlib.Path:
         return storage.check_data_folder(config.data_path)
     except OSError as err:
         raise storage.StorageError(f"creation data folder failed: {err}") from err
-
-
-def get_device_parameter(config: configuration.Configuration) -> device.Parameter:
-    """
-    :raises device.DeviceError: the parameter file is missing
-    """
-    try:
-        return device.Parameter(config.parameter_file)
-    except FileNotFoundError as err:
-        raise device.DeviceError(f"{err}") from err
 
 
 def report_error(

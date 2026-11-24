@@ -1,17 +1,14 @@
-"""web server of the soft water system: parameters, request, meaning of the values"""
+"""web server of the soft water system: request, meaning of the values"""
 
-import csv
 import datetime
 import logging
-import os
-import pathlib
 import random
 import re
 import time
 import types
 import typing
 import xml.etree.ElementTree
-from collections.abc import Iterable, KeysView, Mapping
+from collections.abc import Iterable, Mapping
 
 import requests
 import urllib3.exceptions
@@ -31,6 +28,9 @@ RETRY_STATUS = frozenset(range(500, 600))
 DAY_PARAMETER = re.compile(r"D_Y_2_([1-9][0-9]*)")
 # the device keeps the consumption of 14 days (D_Y_2_15 ... D_Y_2_27 return "-")
 DEVICE_MEMORY_DAYS = 14
+# the places of the 14-day memory in the order of the days: D_Y_2_1 ... D_Y_2_14
+# (D_Y_1 and D_Y_2_27, which the parameter list of the manufacturer also has, are not asked)
+CONSUMPTION_PARAMETERS = tuple(f"D_Y_2_{n}" for n in range(1, DEVICE_MEMORY_DAYS + 1))
 # the value of a place without consumption, and a valid consumption: whole liters
 NO_VALUE = "-"
 LITERS = re.compile(r"[0-9]+")
@@ -44,7 +44,7 @@ MINUTES_PER_DAY = 24 * 60
 
 
 class DeviceError(errors.GruenbeckError):
-    """the parameter file or the answer of the device is not usable"""
+    """the answer of the device is not usable"""
 
 
 class _LoggingRetry(urllib3.util.Retry):
@@ -72,53 +72,6 @@ class _LoggingRetry(urllib3.util.Retry):
             retry.get_backoff_time(),
         )
         return retry
-
-
-class Parameter:
-    count = 0
-
-    def __init__(self, path: str | os.PathLike[str]):
-        self.path_file = path
-        self.parameters: dict[str, dict[str, str]] = {}
-        self.read()
-
-    def read(self) -> None:
-        file_path = pathlib.Path(self.path_file)
-        with file_path.open() as input_file:
-            reader = csv.DictReader(input_file)
-            for row in reader:
-                # skip empty lines or with starting with '#'
-                if not row["parameter"] or row["parameter"].startswith("#"):
-                    continue
-                # build parameter dictionary
-                self.parameters.update(
-                    {
-                        row["parameter"]: {
-                            "access": row["access"],
-                            "device": row["device"],
-                            "value": row["value"],
-                            "unit": row["unit"],
-                            "code": row["code"],
-                            "note": row["note"],
-                        }
-                    }
-                )
-
-    def get_count(self) -> int:
-        return len(self.parameters)
-
-    def get_parameter_list(self) -> KeysView[str]:
-        return self.parameters.keys()
-
-    def get_parameter_by_note(self, note: str) -> list[str]:
-        result = []
-        for _ in self.get_parameter_list():
-            if note in self.get_parameter(_)["note"]:
-                result.append(_)
-        return result
-
-    def get_parameter(self, name: str) -> dict[str, str]:
-        return self.parameters[name]
 
 
 def create_session(retries: int, retry_delay: float) -> requests.Session:
@@ -192,27 +145,6 @@ def get_data_from_mux_http(
     return result_data
 
 
-def get_consumption_parameters(parameter: Parameter) -> list[str]:
-    """
-    parameter codes of the 14-day memory: D_Y_2_1 ... D_Y_2_14 in this order
-
-    Other rows of the parameter file about the water consumption (D_Y_1, D_Y_2_27)
-    are not requested.
-    :param parameter: Parameter of the parameter file
-    :return: list of parameter codes
-    :raises DeviceError: the parameter file lacks one of them
-    """
-    names = [f"D_Y_2_{n}" for n in range(1, DEVICE_MEMORY_DAYS + 1)]
-    known = parameter.get_parameter_list()
-    missing = [name for name in names if name not in known]
-    if missing:
-        raise DeviceError(
-            f"parameter file {parameter.path_file} lacks the consumption"
-            f" parameters: {', '.join(missing)}"
-        )
-    return names
-
-
 def _describe(error: requests.exceptions.RequestException) -> str:
     """the text of a failed request; without the pool and url urllib3 adds to the last error"""
     cause = error.args[0] if error.args else None
@@ -222,7 +154,7 @@ def _describe(error: requests.exceptions.RequestException) -> str:
 
 
 def get_device_data(
-    host: str, parameter: Parameter, timeout: float, retries: int, retry_delay: float
+    host: str, timeout: float, retries: int, retry_delay: float
 ) -> dict[str, str | None]:
     """
     ask the device for the 14-day memory and its clock
@@ -232,7 +164,6 @@ def get_device_data(
     (ValueError) is asked again as well, up to `retries` times with retry_delay seconds
     in between.
     :param host: host name (optionally with port) of the device
-    :param parameter: Parameter of the parameter file
     :param timeout: seconds to wait for connect and for the response (per attempt)
     :param retries: number of repeated attempts after the first one
     :param retry_delay: seconds to wait (backoff factor of the session)
@@ -240,15 +171,14 @@ def get_device_data(
     :raises DeviceError: no valid answer after the repeated attempts
     """
     # the device clock comes with the values, see check_device_clock()
-    consumption_parameters = get_consumption_parameters(parameter)
-    request_parameters = [DEVICE_CLOCK_PARAMETER, *consumption_parameters]
+    request_parameters = [DEVICE_CLOCK_PARAMETER, *CONSUMPTION_PARAMETERS]
     attempts = 0
     with create_session(retries, retry_delay) as session:
         while True:
             try:
                 result = get_data_from_mux_http(host, request_parameters, timeout, session)
                 # a missing place would leave its day out without a word
-                missing = [name for name in consumption_parameters if name not in result]
+                missing = [name for name in CONSUMPTION_PARAMETERS if name not in result]
                 if missing:
                     raise ValueError(f"device response lacks {', '.join(missing)}")
             except requests.exceptions.RequestException as err:
