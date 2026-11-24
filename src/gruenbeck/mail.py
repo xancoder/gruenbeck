@@ -19,11 +19,11 @@ class MailError(errors.GruenbeckError):
     """a mail could not be built or sent (connection, login, rejected mail)"""
 
 
-# Errors that may disappear on a later attempt (connection problems, timeouts)
+# Errors that may disappear on a later attempt (connection problems, timeouts; socket.timeout
+# is TimeoutError since Python 3.10)
 TRANSIENT_SMTP_ERRORS = (
     smtplib.SMTPServerDisconnected,
     smtplib.SMTPConnectError,
-    socket.timeout,
     socket.gaierror,
     ConnectionError,
     TimeoutError,
@@ -122,7 +122,8 @@ def send_mail(
 
     Temporary errors (connection lost, timeout) are retried settings.retries times, with
     settings.retry_delay seconds in between. A wrong login, a rejected sender or recipient
-    and other errors fail at once.
+    and other errors fail at once. Once the server has accepted the mail, nothing is retried
+    and nothing fails: an error while ending the session is only logged (see _end_session).
 
     :param settings: mail section of the configuration
     :param subject: subject of the mail
@@ -151,7 +152,7 @@ def send_mail(
                     server.starttls(context=context)
                 server.login(settings.sender_email, settings.sender_password)
                 server.send_message(message)
-                server.quit()
+                _end_session(server)
                 return  # Success, exit the function
         except smtplib.SMTPAuthenticationError as error:
             # Authentication errors are not retryable
@@ -168,3 +169,20 @@ def send_mail(
         except Exception as error:
             # Unexpected errors
             raise MailError(f"Unexpected error while sending email: {error}") from error
+
+
+def _end_session(server: smtplib.SMTP) -> None:
+    """
+    send QUIT and close the connection after the server accepted the mail
+
+    The mail is sent at this point, so an error here (connection lost or timeout before the
+    answer to QUIT, an unexpected answer) must neither send it again nor fail the run: it is
+    logged as a warning. The connection is closed in any case, so the exit of the `with`
+    block of send_mail() finds it closed and does not send QUIT again.
+    """
+    try:
+        server.quit()
+    except Exception as error:  # the mail is out: whatever happens here is no failure
+        logger.warning("mail sent, but ending the SMTP session failed: %s", error)
+    finally:
+        server.close()

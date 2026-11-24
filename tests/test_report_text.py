@@ -1,11 +1,11 @@
-"""report: the statistics as plain text of the data mail"""
+"""report_text: the statistics as plain text of the data mail"""
 
 import datetime
 import re
 
 import pytest
 
-from gruenbeck import report
+from gruenbeck import report, report_text
 
 D = datetime.date
 Stored = dict[datetime.date, int | str]
@@ -36,7 +36,7 @@ def fill(first: datetime.date, last: datetime.date, liters: int = 10) -> Stored:
 
 
 def text_of(stored: Stored, today: datetime.date = MONDAY) -> str:
-    return report.format_text(report.compute_report(stored, today))
+    return report_text.format_text(report.compute_report(stored, today))
 
 
 def full_data() -> Stored:
@@ -280,6 +280,10 @@ def test_text_is_ascii_with_short_lines_and_aligned_columns(stored: Stored) -> N
     rows = [line for line in lines if re.match(r"\d{4}  \d\d-\d\d\.\.", line)]
     assert rows
     # no row is wider than the rule below the header (a dash for the maximum ends it earlier)
-    assert all(len(line) <= len(report.TABLE_RULE) for line in rows)
-    assert all(len(line) == len(report.TABLE_RULE) for line in lines if line.startswith("Year  "))
-    assert all(len(line) == len(report.TABLE_RULE) for line in lines if line.startswith("----"))
+    assert all(len(line) <= len(report_text.TABLE_RULE) for line in rows)
+    assert all(
+        len(line) == len(report_text.TABLE_RULE) for line in lines if line.startswith("Year  ")
+    )
+    assert all(
+        len(line) == len(report_text.TABLE_RULE) for line in lines if line.startswith("----")
+    )

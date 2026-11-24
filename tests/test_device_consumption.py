@@ -34,7 +34,7 @@ def test_the_order_of_the_response_does_not_matter() -> None:
 
 
 @pytest.mark.parametrize(
-    "text, liters", [(" 93 ", 93), ("\n93\n", 93), ("007", 7), ("0", 0), ("1000000", 1000000)]
+    ("text", "liters"), [(" 93 ", 93), ("\n93\n", 93), ("007", 7), ("0", 0), ("1000000", 1000000)]
 )
 def test_blanks_and_leading_zeros_do_not_matter(text: str, liters: int) -> None:
     assert device.read_consumption({"D_Y_2_1": text}, TODAY) == {day("2026-11-22"): liters}

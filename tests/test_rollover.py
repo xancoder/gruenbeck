@@ -1,22 +1,16 @@
+"""gruenbeck-log-rollover: log of the daily rollover of the device values"""
+
 import collections.abc
 import csv
 import datetime
-import importlib.util
 import json
-import os
 import pathlib
 import typing
 
 import pytest
 import requests
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "log_device_rollover.py"
-
-spec = importlib.util.spec_from_file_location("log_device_rollover", SCRIPT)
-assert spec is not None and spec.loader is not None
-rollover = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(rollover)
+from gruenbeck import device, rollover
 
 CET = datetime.timezone(datetime.timedelta(hours=1))
 START = datetime.datetime(2026, 11, 18, 9, 30, tzinfo=CET)
@@ -94,10 +88,6 @@ def run(
 def read_rows(output: pathlib.Path) -> list[dict[str, str]]:
     with output.open(newline="", encoding="utf-8") as csv_file:
         return list(csv.DictReader(csv_file))
-
-
-def test_script_is_executable() -> None:
-    assert os.access(SCRIPT, os.X_OK)
 
 
 def test_row_format_with_local_time_offset_and_device_values(tmp_path: pathlib.Path) -> None:
@@ -335,12 +325,12 @@ def test_default_timeout_comes_from_gruenbeck(tmp_path: pathlib.Path) -> None:
 
     assert rollover.read_device_config(str(config)) == (
         "device.lan",
-        float(rollover.gruenbeck.device.DEFAULT_TIMEOUT),
+        float(device.DEFAULT_TIMEOUT),
     )
 
 
 @pytest.mark.parametrize(
-    "config, message",
+    ("config", "message"),
     [
         (None, "[-] no configuration"),
         ({}, "[-] no config parameter: 'softWaterSystem'"),

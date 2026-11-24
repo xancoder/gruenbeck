@@ -79,12 +79,15 @@ def read_data_file(
     A value is a number if it is made of decimal digits only (str.isdecimal(): exactly the
     characters int() accepts, also digits of other scripts). Anything else stays text without
     an error: "-", an empty value, a sign, a decimal point or blanks, and characters such as
-    "²" or "½" that str.isnumeric() accepts but int() does not.
+    "²" or "½" that str.isnumeric() accepts but int() does not. A row that ends before the
+    value column (e.g. a date without a comma) has no value at all and is an error; an empty
+    value after the comma is the text "".
     :param fieldnames: column names of date and value (dataFile.fieldnames)
     :param date_pattern: format of the dates (dataFile.datePattern)
     :return: dictionary of date text and value (int if a number, else the text), empty without
         file
-    :raises StorageError: a column is missing, or a date does not match date_pattern
+    :raises StorageError: a column is missing, a date does not match date_pattern, or a row
+        has no value
     """
     data: dict[str, int | str] = {}
     if file_obj.exists():
@@ -108,6 +111,11 @@ def read_data_file(
                         f" dataFile.datePattern {date_pattern!r}"
                     ) from None
                 value = row[fieldnames.value]
+                if value is None:  # short row: csv.DictReader fills the missing columns with None
+                    raise StorageError(
+                        f"{file_obj}, line {reader.line_num}: no value in the column"
+                        f" {fieldnames.value!r}"
+                    )
                 data[text] = int(value) if value.isdecimal() else value
     return data
 
@@ -153,7 +161,7 @@ def write_data(
             os.fsync(csv_out_file.fileno())
         if file_object.exists():
             shutil.copymode(file_object, tmp_file)
-        os.replace(tmp_file, file_object)
+        tmp_file.replace(file_object)
     except BaseException:
         tmp_file.unlink(missing_ok=True)
         raise

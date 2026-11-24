@@ -12,11 +12,18 @@ import ssl
 import time
 import typing
 
+import hypothesis
 import pytest
 
 from gruenbeck import config
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# the property tests (tests/test_properties.py): no time limit per example, because a slow or busy
+# machine (CI) must not turn a correct property into a failure; the number of examples is the
+# default (100) and the whole file takes about a second
+hypothesis.settings.register_profile("project", deadline=None)
+hypothesis.settings.load_profile("project")
 
 # smtplib.SMTP.send_message, taken before a test replaces smtplib.SMTP by the fake server;
 # Any: it is called with the fake server as self
@@ -34,11 +41,6 @@ def config_example_file(repo_root: pathlib.Path) -> pathlib.Path:
     return repo_root / "src" / "config.example.json"
 
 
-@pytest.fixture(scope="session")
-def parameter_file(repo_root: pathlib.Path) -> pathlib.Path:
-    return repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
-
-
 # mail section of the configurations of the tests (no mail leaves a test: the tests
 # replace the functions of gruenbeck.mail or smtplib)
 MAIL_SECTION = {
@@ -52,7 +54,7 @@ MAIL_SECTION = {
 
 
 @pytest.fixture
-def config_data(tmp_path: pathlib.Path, parameter_file: pathlib.Path) -> dict[str, typing.Any]:
+def config_data(tmp_path: pathlib.Path) -> dict[str, typing.Any]:
     """a complete and valid configuration as in the JSON file; data folder in tmp_path"""
     return {
         "dataFile": {
@@ -62,7 +64,6 @@ def config_data(tmp_path: pathlib.Path, parameter_file: pathlib.Path) -> dict[st
         },
         "dataPath": str(tmp_path / "data"),
         "mail": copy.deepcopy(MAIL_SECTION),
-        "parameterFile": str(parameter_file),
         "softWaterSystem": {"host": "device.lan"},
     }
 
@@ -173,6 +174,9 @@ class FakeSMTP:
                 fake.step("quit")
                 self.calls.append(("quit",))
 
+            def close(self) -> None:
+                self.calls.append(("close",))
+
         return Server
 
     def raw_messages(self) -> list[bytes]:
@@ -202,6 +206,13 @@ def restore_package_logger() -> collections.abc.Iterator[None]:
         logger.removeHandler(handler)
         handler.close()
     logger.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def no_environment_of_the_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """the tests do not see the configuration file or the credentials of the machine"""
+    monkeypatch.delenv(config.CONFIG_FILE_ENV, raising=False)
+    monkeypatch.delenv(config.CREDENTIALS_DIRECTORY_ENV, raising=False)
 
 
 @pytest.fixture

@@ -1,43 +1,77 @@
 name: CI
 
 on:
+  # a branch with an open pull request would run twice if it ran on push as well
   push:
+    branches: [master, development]
   pull_request:
 
 permissions:
   contents: read
+
+# a newer run for the same branch or pull request cancels the older one
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # gitleaks scans the whole history
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10.4.0
+      # the lowest supported version; mypy checks against it (python_version in pyproject.toml)
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           python-version: "3.12"
           enable-cache: true
 
+      # with the extra "analysis", so that mypy sees pandas and matplotlib as well
       - name: Install dependencies
-        run: uv sync --locked
+        run: uv sync --locked --all-extras
 
+      # the steps call the recipes of the justfile, so the checks are the same as `just check`
       # ruff (lint, format) and the file checks; the gitleaks hook checks staged changes,
       # of which there are none in CI, so the next step scans the history instead
       - name: pre-commit
         env:
           SKIP: gitleaks
-        run: uv run pre-commit run --all-files --show-diff-on-failure
+        run: uv run just hooks
 
       - name: gitleaks (git history)
-        run: uv run pre-commit run --hook-stage manual --all-files gitleaks-history
+        run: uv run just secrets
 
       - name: mypy
-        run: uv run mypy
+        run: uv run just types
+
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12: lowest supported version (requires-python); 3.15: the version on the Pi
+        # (.python-version)
+        python-version: ["3.12", "3.14", "3.15"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # with the extra "analysis": tests/test_analysis.py and analysis.py need pandas and
+      # matplotlib
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
 
       - name: pytest
-        run: uv run pytest --cov
+        run: uv run just test

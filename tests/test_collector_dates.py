@@ -9,7 +9,7 @@ import typing
 import pytest
 
 import gruenbeck.config
-from gruenbeck import cli, device, mail
+from gruenbeck import cli, collector, device, mail
 
 PREFIX = "gruenbeck_water_consumption"
 TODAY = datetime.date(2026, 11, 23)
@@ -94,7 +94,7 @@ def test_days_are_calendar_dates_of_the_current_day() -> None:
 
 def test_run_time_is_the_local_time_without_time_zone() -> None:
     before = datetime.datetime.now()
-    now = cli.local_now()
+    now = collector.local_now()
     after = datetime.datetime.now()
 
     assert type(now) is datetime.datetime
@@ -141,7 +141,7 @@ def test_unknown_parameter_is_an_error(name: str) -> None:
 def test_first_date_filters_earlier_days(
     caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
 ) -> None:
-    caplog.set_level(logging.INFO, logger=cli.logger.name)
+    caplog.set_level(logging.INFO, logger=collector.logger.name)
     device_data = {
         day("2026-11-22"): "101",
         day("2026-11-20"): "103",
@@ -149,7 +149,7 @@ def test_first_date_filters_earlier_days(
         day("2026-11-18"): "9",
     }
 
-    result = cli.filter_first_date(device_data, day("2026-11-20"))
+    result = collector.filter_first_date(device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
     assert "2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
@@ -158,11 +158,11 @@ def test_first_date_filters_earlier_days(
 def test_without_first_date_nothing_is_filtered(
     caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
 ) -> None:
-    caplog.set_level(logging.INFO, logger=cli.logger.name)
+    caplog.set_level(logging.INFO, logger=collector.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
-    assert cli.filter_first_date(device_data, None) == device_data
-    assert cli.filter_first_date(device_data, day("2025-01-01")) == device_data
+    assert collector.filter_first_date(device_data, None) == device_data
+    assert collector.filter_first_date(device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
@@ -173,8 +173,8 @@ def test_all_values_before_first_date_fail_the_run(
 ) -> None:
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
-    with pytest.raises(cli.CollectError) as err:
-        cli.filter_first_date(device_data, day("2026-11-20"))
+    with pytest.raises(collector.CollectError) as err:
+        collector.filter_first_date(device_data, day("2026-11-20"))
 
     assert str(err.value) == (
         "no data was processed: all 2 values are before dataFile.firstDate 2026-11-20"
@@ -224,7 +224,7 @@ def run(
 
         now = datetime.datetime.combine(today, datetime.time.fromisoformat(local_time))
         monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
-        monkeypatch.setattr(cli, "local_now", lambda: now)
+        monkeypatch.setattr(collector, "local_now", lambda: now)
         return cli.main(str(config_file))
 
     run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
@@ -357,7 +357,7 @@ def clock_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "local_time, device_clock",
+    ("local_time", "device_clock"),
     [
         ("16:00", "16:00"),  # weekly run, Monday 16:00
         ("00:10", "00:10"),  # the clock does not tell whether the device rolled over
@@ -379,7 +379,7 @@ def test_device_clock_within_tolerance_gives_no_warning(
 
 
 @pytest.mark.parametrize(
-    "local_time, device_clock, deviation",
+    ("local_time", "device_clock", "deviation"),
     [
         ("16:00", "15:44", "-0:16"),
         ("16:00", "17:00", "+1:00"),  # no switch to daylight saving time
@@ -406,7 +406,7 @@ def test_device_clock_off_is_only_a_warning(
 
 
 @pytest.mark.parametrize(
-    "device_clock, warning",
+    ("device_clock", "warning"),
     [
         (None, "the device response has no device clock D_C_4_2"),
         ("24:00", "invalid device clock D_C_4_2 '24:00' (expected HH:MM)"),
@@ -440,7 +440,7 @@ def test_run_maps_the_days_from_the_local_date_of_the_run(run: Run, tmp_path: pa
 
 
 @pytest.mark.parametrize(
-    "device_clock, local_time, deviation",
+    ("device_clock", "local_time", "deviation"),
     [
         ("10:00", "10:00", 0),
         ("01:00", "02:00", -60),
@@ -664,7 +664,7 @@ def test_run_keeps_the_other_stored_days_and_sorts_the_file(
     assert mails == [("data", tmp_path / "data")]
 
 
-@pytest.mark.parametrize("device_value, stored", [(" 93 ", "93"), ("007", "7"), ("0", "0")])
+@pytest.mark.parametrize(("device_value", "stored"), [(" 93 ", "93"), ("007", "7"), ("0", "0")])
 def test_run_stores_the_device_values_as_whole_numbers(
     run: Run, tmp_path: pathlib.Path, device_value: str, stored: str
 ) -> None:
@@ -797,7 +797,7 @@ def test_run_with_only_values_without_value_fails_with_error_mail(
     write_year(tmp_path, 2026, [("2026-11-22", "77")])
     before = (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes()
 
-    assert run({name: "-" for name in DEVICE_2026_11_23}) == 1
+    assert run(dict.fromkeys(DEVICE_2026_11_23, "-")) == 1
 
     assert (tmp_path / "data" / f"{PREFIX}_2026.csv").read_bytes() == before
     assert mails == [("error", "the device has no consumption value: all 14 values are '-'")]
@@ -1044,6 +1044,21 @@ def test_stored_date_that_does_not_match_the_date_pattern_writes_nothing(
     ]
 
 
+def test_stored_row_without_value_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]]
+) -> None:
+    # a date without a comma: a clear error instead of an unexpected AttributeError
+    write_year(tmp_path, 2026, [("2026-11-09", "5"), ("2026-11-10",)])
+    path = tmp_path / "data" / f"{PREFIX}_2026.csv"
+    before = path.read_bytes()
+
+    assert run(memory(true_value)) == 1
+    assert path.read_bytes() == before
+    assert mails == [
+        ("error", f"{path}, line 3: no value in the column 'value': nothing written"),
+    ]
+
+
 @pytest.mark.parametrize("text", ["1.12.2026", "01.12.26", "01.12.2026 ", "2026-12-01"])
 def test_date_text_has_to_be_exactly_what_the_pattern_writes(
     run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]], text: str
@@ -1071,10 +1086,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
 ) -> None:
-    (tmp_path / "repo" / "assets").mkdir(parents=True)
-    parameters = tmp_path / "repo" / "assets" / "parameters.csv"
-    parameters.write_bytes(pathlib.Path(config_data["parameterFile"]).read_bytes())
-    config_data.update(dataPath="../data", parameterFile="../assets/parameters.csv")
+    config_data["dataPath"] = "../data"
     config_file = write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     (tmp_path / "elsewhere").mkdir()
     monkeypatch.chdir(tmp_path / "elsewhere")
@@ -1085,7 +1097,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
         lambda host, parameters, timeout, session=None: {"D_C_4_2": "16:00", **response},
     )
     monkeypatch.setattr(
-        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+        collector, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
     )
 
     cli.main(str(config_file))

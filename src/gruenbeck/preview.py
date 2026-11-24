@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Preview the data mail without asking the device.
 
@@ -9,7 +8,7 @@ reports what was built. Warnings of the statistics and the charts go to stderr.
 
 Options:
 
-    --config-file FILE   configuration file (default ./src/config.json)
+    --config-file FILE   configuration file (default $GRUENBECK_CONFIG, else ./src/config.json)
     --today YYYY-MM-DD   the day of the run (default: today); a Monday and a Thursday
                          report the same week, the day before a month ends does not
     --output-dir DIR     write data-mail.txt and data-mail.html into DIR (created if
@@ -20,8 +19,8 @@ Options:
 
 Usage from the repository root (same place as the data collector):
 
-    uv run python scripts/preview_data_mail.py --output-dir ./log/preview
-    uv run python scripts/preview_data_mail.py --send-to me@example.com
+    uv run gruenbeck-preview-mail --output-dir ./log/preview
+    uv run gruenbeck-preview-mail --send-to me@example.com
 
 Exit code 0 if the mail was built (and written or sent as asked), 1 on an error in the
 configuration, the data folder, the output folder or the sending.
@@ -33,11 +32,11 @@ import datetime
 import pathlib
 import sys
 
-# the package is installed into the virtual environment (uv sync)
-import gruenbeck.cli
+import gruenbeck.collector
 import gruenbeck.config
 import gruenbeck.errors
 import gruenbeck.mail
+import gruenbeck.version
 
 TEXT_FILE = "data-mail.txt"
 HTML_FILE = "data-mail.html"
@@ -69,7 +68,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="build the data mail from the stored data without asking the device"
     )
-    parser.add_argument("--config-file", "-c", default="./src/config.json", help="set config file")
+    gruenbeck.config.add_config_file_option(parser)
+    gruenbeck.version.add_version_option(parser)
     parser.add_argument(
         "--today",
         type=day_of,
@@ -94,7 +94,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def describe(
-    data_mail: gruenbeck.cli.DataMail, today: datetime.date, data_path: pathlib.Path
+    data_mail: gruenbeck.collector.DataMail, today: datetime.date, data_path: pathlib.Path
 ) -> list[str]:
     """the lines that tell what was built"""
     html = (
@@ -111,7 +111,9 @@ def describe(
     ]
 
 
-def write_output(output_dir: pathlib.Path, data_mail: gruenbeck.cli.DataMail) -> list[pathlib.Path]:
+def write_output(
+    output_dir: pathlib.Path, data_mail: gruenbeck.collector.DataMail
+) -> list[pathlib.Path]:
     """
     write the text and, if it was made, the HTML of the mail
     :return: the files written
@@ -131,7 +133,7 @@ def write_output(output_dir: pathlib.Path, data_mail: gruenbeck.cli.DataMail) ->
 
 
 def send_preview(
-    settings: gruenbeck.config.Mail, data_mail: gruenbeck.cli.DataMail, address: str
+    settings: gruenbeck.config.Mail, data_mail: gruenbeck.collector.DataMail, address: str
 ) -> str:
     """
     send the mail to the address only
@@ -153,7 +155,10 @@ def main(argv: list[str] | None = None) -> int:
     today = args.today or local_today()
 
     try:
-        config = gruenbeck.config.load_configuration(args.config_file)
+        # only sending the mail needs the SMTP password
+        config = gruenbeck.config.load_configuration(
+            args.config_file, password_required=args.send_to is not None
+        )
     except FileNotFoundError as err:
         print(f"[-] no configuration: {err}", file=sys.stderr)
         return 1
@@ -162,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        data_mail = gruenbeck.cli.compose_data_mail(config, config.data_path, today)
+        data_mail = gruenbeck.collector.compose_data_mail(config, config.data_path, today)
     except gruenbeck.errors.GruenbeckError as err:
         print(f"[-] {err}", file=sys.stderr)
         return 1
@@ -187,7 +192,3 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"[*] sent to {args.send_to}: {subject}", flush=True)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

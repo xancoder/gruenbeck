@@ -20,7 +20,6 @@
     "smtpServer": "smtp.example.com",
     "subject": "[data collector] - gruenbeck"
   },
-  "parameterFile": "../assets/Gruenbeck_Webserver_Dokumentation.csv",
   "softWaterSystem": {
     "host": "softliq-sc.example.lan"
   }

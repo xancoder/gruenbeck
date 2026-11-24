@@ -5,6 +5,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: build(deps)
     groups:
@@ -16,9 +18,25 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: ci(deps)
     groups:
       github-actions:
+        patterns:
+          - "*"
+
+  # the hook versions in .pre-commit-config.yaml (local hooks are skipped)
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build(deps)
+    groups:
+      pre-commit:
         patterns:
           - "*"

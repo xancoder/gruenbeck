@@ -1,29 +1,20 @@
-"""scripts/preview_data_mail.py: the data mail from the stored data, without the device (P008-S4)"""
+"""gruenbeck-preview-mail: the data mail from the stored data, without the device (P008-S4)"""
 
 import collections.abc
+import dataclasses
 import datetime
 import email.message
-import importlib.util
 import json
-import os
 import pathlib
 import smtplib
 import typing
 
 import pytest
 
-from gruenbeck import cli, config, device, report, storage
+from gruenbeck import collector, config, device, preview, report, report_html, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "preview_data_mail.py"
-
-spec = importlib.util.spec_from_file_location("preview_data_mail", SCRIPT)
-assert spec is not None and spec.loader is not None
-preview = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(preview)
 
 TODAY = "2026-11-23"
 SUBJECT = "[data collector] - gruenbeck"
@@ -102,10 +93,6 @@ def html_of(message: email.message.EmailMessage) -> str:
     return content
 
 
-def test_script_is_executable() -> None:
-    assert os.access(SCRIPT, os.X_OK)
-
-
 def test_output_files_are_what_the_data_mail_contains(
     tmp_path: pathlib.Path, smtp: "FakeSMTP", stored: config.Configuration
 ) -> None:
@@ -115,7 +102,7 @@ def test_output_files_are_what_the_data_mail_contains(
 
     assert sorted(path.name for path in output.iterdir()) == ["data-mail.html", "data-mail.txt"]
     # the data collector sends the same day's mail: both parts are the files, line for line
-    assert cli.get_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY)) is True
+    collector.send_data_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY))
     (message,) = smtp.messages()
     assert (output / "data-mail.txt").read_text(encoding="utf-8") == text_of(message)
     assert (output / "data-mail.html").read_text(encoding="utf-8") == html_of(message)
@@ -157,7 +144,8 @@ def test_nothing_is_written_and_no_mail_is_sent_by_default(
     out = capsys.readouterr().out.splitlines()
     assert out[0] == f"[*] data mail for the run on {TODAY} from {stored.data_path}"
     assert out[1].startswith("[*] text: ")
-    assert out[2].startswith("[*] html: ") and "characters" in out[2]
+    assert out[2].startswith("[*] html: ")
+    assert "characters" in out[2]
     prefix = stored.data_file.prefix
     assert out[3] == f"[*] attachments: {prefix}_2025.csv, {prefix}_2026.csv"
     assert len(out) == 4
@@ -177,6 +165,7 @@ def test_send_to_sends_the_mail_to_that_address_only(
         "send_message",
         "sendmail",
         "quit",
+        "close",
         "exit",
     ]
     (sendmail,) = [call for call in connection["calls"] if call[0] == "sendmail"]
@@ -198,7 +187,7 @@ def test_send_to_sends_what_the_data_mail_contains(
     smtp: "FakeSMTP", stored: config.Configuration
 ) -> None:
     assert run(stored, "--send-to", "me@example.org") == 0
-    assert cli.get_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY)) is True
+    collector.send_data_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY))
 
     preview_mail, data_mail = smtp.messages()
     assert text_of(preview_mail) == text_of(data_mail)
@@ -248,7 +237,7 @@ def test_data_mail_without_html_writes_the_text_only(
     def fail(stats: report.Report, svgs: object, notes: object) -> str:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(report, "format_html", fail)
+    monkeypatch.setattr(report_html, "format_html", fail)
 
     assert run(stored, "--output-dir", str(tmp_path / "out")) == 0
 
@@ -320,6 +309,48 @@ def test_invalid_configuration_exits_with_1(
 
     assert "[-] invalid configuration: " in capsys.readouterr().err
     assert not (tmp_path / "out").exists()
+    assert smtp.connections == []
+
+
+def without_password(
+    configuration: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> config.Configuration:
+    """the configuration of the tests without senderPassword and without a credential"""
+    del config_data["mail"]["senderPassword"]
+    return dataclasses.replace(configuration, file=write_config(config_data))
+
+
+def test_output_needs_no_password(
+    tmp_path: pathlib.Path,
+    smtp: "FakeSMTP",
+    stored: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    open_config = without_password(stored, write_config, config_data)
+
+    assert run(open_config, "--output-dir", str(tmp_path / "out")) == 0
+
+    assert (tmp_path / "out" / "data-mail.txt").exists()
+    assert smtp.connections == []
+
+
+def test_send_to_needs_the_password(
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+    smtp: "FakeSMTP",
+    stored: config.Configuration,
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    config_data: dict[str, typing.Any],
+) -> None:
+    open_config = without_password(stored, write_config, config_data)
+
+    assert run(open_config, "--send-to", "me@example.com") == 1
+
+    err = capsys.readouterr().err
+    assert "[-] invalid configuration: no SMTP password: " in err
     assert smtp.connections == []
 
 

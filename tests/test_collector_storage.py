@@ -138,6 +138,27 @@ def test_short_row_without_date_is_an_error(tmp_path: pathlib.Path) -> None:
         storage.read_data_file(path, FIELDNAMES, ISO)
 
 
+def test_short_row_without_value_is_an_error(tmp_path: pathlib.Path) -> None:
+    # a date without a comma: csv.DictReader gives None, not "" (an empty value stays text)
+    path = tmp_path / "p_2026.csv"
+    path.write_text("date,value\n2026-11-20,1\n2026-11-21\n2026-11-22,\n", encoding="utf-8")
+
+    with pytest.raises(storage.StorageError) as err:
+        storage.read_data_file(path, FIELDNAMES, ISO)
+
+    assert str(err.value) == f"{path}, line 3: no value in the column 'value'"
+
+
+def test_short_row_names_the_configured_value_column(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "p_2026.csv"
+    path.write_text("day,note,litres\n2026-11-22,x\n", encoding="utf-8")
+
+    with pytest.raises(storage.StorageError) as err:
+        storage.read_data_file(path, config.FieldNames(date="day", value="litres"), ISO)
+
+    assert str(err.value) == f"{path}, line 2: no value in the column 'litres'"
+
+
 def test_columns_are_read_by_the_configured_fieldnames(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "p_2026.csv"
     path.write_text("litres,note,day\n101,x,2026-11-22\n", encoding="utf-8")
@@ -287,7 +308,7 @@ def test_write_data_syncs_the_temporary_file_before_replacing(
         assert path.read_text(encoding="utf-8") == "date,value\n2026-11-01,1\n"
         replace(source, target)
 
-    # storage uses os.fsync and os.replace: the module os is the same object
+    # storage uses os.fsync and Path.replace (calls os.replace): the module os is the same object
     monkeypatch.setattr(os, "fsync", record_fsync)
     monkeypatch.setattr(os, "replace", record_replace)
 
@@ -348,7 +369,7 @@ def test_write_data_in_a_missing_folder_fails(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "fieldnames, date_pattern, data",
+    ("fieldnames", "date_pattern", "data"),
     [
         (FIELDNAMES, ISO, {"2026-11-21": 102, "2026-11-22": 101, "2026-11-23": "-"}),
         (config.FieldNames("day", "litres"), "%d.%m.%Y", {"30.11.2026": 1, "01.12.2026": 2}),

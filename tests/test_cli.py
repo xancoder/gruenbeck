@@ -8,6 +8,7 @@ import collections.abc
 import datetime
 import importlib.metadata
 import logging
+import os
 import pathlib
 import re
 import subprocess
@@ -16,7 +17,7 @@ import typing
 
 import pytest
 
-from gruenbeck import cli, device, mail
+from gruenbeck import analysis, cli, device, mail, preview, rollover
 
 # the commands are installed next to the interpreter of the virtual environment (uv sync)
 BIN = pathlib.Path(sys.executable).parent
@@ -35,7 +36,7 @@ def run_command(command: str, cwd: pathlib.Path, *args: str) -> subprocess.Compl
     )
 
 
-def test_commands_are_entry_points_of_the_cli_module() -> None:
+def test_commands_are_entry_points_of_the_package() -> None:
     scripts = {
         entry.name: entry.value
         for entry in importlib.metadata.entry_points(group="console_scripts")
@@ -45,7 +46,27 @@ def test_commands_are_entry_points_of_the_cli_module() -> None:
     assert scripts == {
         "gruenbeck-collect": "gruenbeck.cli:collect",
         "gruenbeck-analyse": "gruenbeck.cli:analyse",
+        "gruenbeck-preview-mail": "gruenbeck.preview:main",
+        "gruenbeck-log-rollover": "gruenbeck.rollover:main",
     }
+
+
+@pytest.mark.parametrize(
+    ("command", "options"),
+    [
+        ("gruenbeck-preview-mail", ("--config-file", "--today", "--output-dir", "--send-to")),
+        ("gruenbeck-log-rollover", ("--config-file", "--interval", "--hours", "--output")),
+    ],
+)
+def test_tools_list_their_options(
+    command: str, options: tuple[str, ...], tmp_path: pathlib.Path
+) -> None:
+    result = run_command(command, tmp_path, "--help")
+
+    assert result.returncode == 0
+    assert result.stdout.startswith(f"usage: {command} ")
+    for option in options:
+        assert option in result.stdout
 
 
 def test_help_lists_the_options(tmp_path: pathlib.Path) -> None:
@@ -117,7 +138,7 @@ def test_run_with_options(
     def fetch(
         host: str, parameters: list[str], timeout: float, session: object = None
     ) -> dict[str, str | None]:
-        return {"D_C_4_2": f"{now:%H:%M}", **{name: "1" for name in parameters[1:]}}
+        return {"D_C_4_2": f"{now:%H:%M}", **dict.fromkeys(parameters[1:], "1")}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
     monkeypatch.setattr(
@@ -137,3 +158,85 @@ def test_run_with_options(
     assert "gruenbeck.cli - INFO - Data collection completed" in err
     assert "gruenbeck.storage - INFO - data to write:" in err
     assert log_file.read_text() == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["gruenbeck-collect", "gruenbeck-analyse", "gruenbeck-preview-mail", "gruenbeck-log-rollover"],
+)
+def test_help_names_the_variable_and_the_default_of_the_config_file(
+    command: str, tmp_path: pathlib.Path
+) -> None:
+    result = run_command(command, tmp_path, "--help")
+
+    assert result.returncode == 0
+    assert "set config file" in result.stdout
+    assert "GRUENBECK_CONFIG" in result.stdout
+    assert "./src/config.json" in result.stdout
+
+
+def test_collect_uses_the_variable_as_config_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    files: list[str] = []
+
+    def main(config_file: str) -> int:
+        files.append(config_file)
+        return 0
+
+    monkeypatch.setattr(cli, "main", main)
+    monkeypatch.setattr(cli, "setup_logging", lambda *args, **kwargs: [])
+    monkeypatch.setenv("GRUENBECK_CONFIG", "/etc/gruenbeck/config.json")
+
+    assert cli.collect([]) == 0
+    assert cli.collect(["-c", "other.json"]) == 0
+
+    assert files == ["/etc/gruenbeck/config.json", "other.json"]
+
+
+def test_analyse_uses_the_variable_as_config_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    files: list[str] = []
+    monkeypatch.setattr(analysis, "main", files.append)
+    monkeypatch.setenv("GRUENBECK_CONFIG", "/etc/gruenbeck/config.json")
+
+    assert cli.analyse([]) == 0
+
+    assert files == ["/etc/gruenbeck/config.json"]
+
+
+def test_preview_and_rollover_use_the_variable_as_config_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GRUENBECK_CONFIG", "/etc/gruenbeck/config.json")
+
+    assert preview.parse_args([]).config_file == "/etc/gruenbeck/config.json"
+    assert rollover.parse_args([]).config_file == "/etc/gruenbeck/config.json"
+    assert preview.parse_args(["-c", "x.json"]).config_file == "x.json"
+    assert rollover.parse_args(["-c", "x.json"]).config_file == "x.json"
+
+
+def test_run_without_the_option_reads_the_file_of_the_variable(
+    tmp_path: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    """a real process: the variable replaces ./src/config.json, there is none in tmp_path"""
+    (tmp_path / "log").mkdir()
+    config_file = write_config(config_data, tmp_path / "elsewhere" / "config.json")
+    del config_data["mail"]
+    write_config(config_data, tmp_path / "other" / "config.json")
+
+    result = subprocess.run(
+        [str(BIN / "gruenbeck-collect"), "-l"],
+        cwd=tmp_path,
+        env={**os.environ, "GRUENBECK_CONFIG": str(tmp_path / "other" / "config.json")},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    # the configuration of the variable is read (and found invalid: no mail section)
+    assert result.returncode == 1
+    assert "no config parameter: 'mail'" in result.stderr
+    assert str(config_file) not in result.stderr

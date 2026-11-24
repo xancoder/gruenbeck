@@ -1,11 +1,11 @@
 """configuration file: loading, checking and the paths (P006-S3)"""
 
+import argparse
 import collections.abc
 import copy
 import datetime
 import json
 import logging
-import os
 import pathlib
 import typing
 
@@ -25,8 +25,6 @@ def test_example_configuration_is_valid(
     assert loaded.file == config_example_file
     # relative paths start at src/, the folder of the configuration file
     assert loaded.data_path == repo_root / "data"
-    assert loaded.parameter_file == repo_root / "assets" / "Gruenbeck_Webserver_Dokumentation.csv"
-    assert loaded.parameter_file.exists()
     assert loaded.data_file == configuration.DataFile(
         date_pattern="%Y-%m-%d",
         fieldnames=configuration.FieldNames(date="date", value="value"),
@@ -47,7 +45,6 @@ def test_values_are_typed(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
-    parameter_file: pathlib.Path,
 ) -> None:
     config_data["mail"].update(
         smtpPort=" 465 ", smtpSecurity=" SSL ", subject="", retries=2, retryDelay=1.5
@@ -60,7 +57,6 @@ def test_values_are_typed(
     assert loaded == configuration.Configuration(
         file=tmp_path / "config.json",
         data_path=tmp_path / "data",
-        parameter_file=parameter_file,
         data_file=configuration.DataFile(
             date_pattern="%Y-%m-%d",
             fieldnames=configuration.FieldNames(date="date", value="value"),
@@ -102,7 +98,7 @@ def test_retry_defaults(loaded_config: gruenbeck.config.Configuration) -> None:
 
 @pytest.mark.parametrize("section", ["softWaterSystem", "mail"])
 @pytest.mark.parametrize(
-    "key, value, expected",
+    ("key", "value", "expected"),
     [
         ("retries", 0, 0),
         ("retries", 1, 1),
@@ -145,7 +141,7 @@ def test_retries_of_the_sections_are_independent(
 
 
 @pytest.mark.parametrize(
-    "key, value, expected",
+    ("key", "value", "expected"),
     [
         ("timeout", 5, 5.0),
         ("timeout", 0.1, 0.1),
@@ -199,6 +195,279 @@ def test_mail_port_and_security_are_normalized(
     assert (loaded.mail.smtp_port, loaded.mail.smtp_security) == (465, "ssl")
 
 
+# --- the SMTP password: mail.senderPassword or the credential "smtp-password" ----------
+
+SECRET = "s3cret-from-the-credential"
+
+
+@pytest.fixture
+def credentials(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """the folder of $CREDENTIALS_DIRECTORY, still empty"""
+    folder = tmp_path / "credentials"
+    folder.mkdir()
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(folder))
+    return folder
+
+
+@pytest.mark.parametrize(
+    ("content", "password"),
+    [
+        (SECRET, SECRET),
+        (SECRET + "\n", SECRET),
+        (SECRET + "\r\n", SECRET),
+        # only one final line break belongs to the file, not to the password
+        (SECRET + "\n\n", SECRET + "\n"),
+        (" a b ", " a b "),
+    ],
+)
+def test_credential_is_the_password(
+    credentials: pathlib.Path,
+    content: str,
+    password: str,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    (credentials / "smtp-password").write_bytes(content.encode())
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.mail.sender_password == password
+    assert caplog.records == []
+
+
+def test_credential_wins_over_the_key_and_the_log_asks_to_remove_it(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    (credentials / "smtp-password").write_text(SECRET + "\n")
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.mail.sender_password == SECRET
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (
+            logging.WARNING,
+            "the credential 'smtp-password' is used as SMTP password;"
+            " remove 'mail.senderPassword' from the configuration file",
+        )
+    ]
+    assert SECRET not in caplog.text
+    assert "test-password" not in caplog.text
+
+
+def test_credential_folder_without_the_credential_falls_back_to_the_key(
+    credentials: pathlib.Path,
+    loaded_config: configuration.Configuration,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # systemd lists every credential of the unit in the folder, not only this one
+    (credentials / "other").write_text("x")
+
+    assert loaded_config.mail.sender_password == "test-password"
+    assert caplog.records == []
+
+
+@pytest.mark.parametrize("folder", [None, ""])
+def test_no_credential_folder_uses_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    folder: str | None,
+    loaded_config: configuration.Configuration,
+) -> None:
+    if folder is not None:
+        monkeypatch.setenv("CREDENTIALS_DIRECTORY", folder)
+
+    assert loaded_config.mail.sender_password == "test-password"
+
+
+@pytest.mark.parametrize("with_folder", [True, False])
+def test_missing_password_names_both_ways(
+    with_folder: bool,
+    request: pytest.FixtureRequest,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    if with_folder:
+        request.getfixturevalue("credentials")
+    del config_data["mail"]["senderPassword"]
+
+    assert problems(config_data, write_config) == [
+        "no SMTP password: set 'mail.senderPassword' in the configuration file or provide the"
+        " credential 'smtp-password' (systemd LoadCredential=, found through"
+        " $CREDENTIALS_DIRECTORY)"
+    ]
+
+
+def test_password_is_optional_where_it_is_not_needed(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    credentials: pathlib.Path,
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    path = write_config(config_data)
+
+    loaded = configuration.load_configuration(path, password_required=False)
+
+    assert loaded.mail.sender_password == ""
+    assert loaded.mail.sender_email == "sender@example.com"
+    # the default stays strict
+    with pytest.raises(configuration.ConfigurationError, match="no SMTP password"):
+        configuration.load_configuration(path)
+
+
+def test_password_that_is_there_is_used_and_checked_even_if_not_required(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    kept = configuration.load_configuration(write_config(config_data), password_required=False)
+    assert kept.mail.sender_password == "test-password"
+
+    (credentials / "smtp-password").write_text(SECRET)
+    from_credential = configuration.load_configuration(
+        write_config(config_data), password_required=False
+    )
+    assert from_credential.mail.sender_password == SECRET
+
+    (credentials / "smtp-password").write_text("")
+    with pytest.raises(configuration.ConfigurationError, match="is empty"):
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+    (credentials / "smtp-password").unlink()
+    config_data["mail"]["senderPassword"] = ""
+    with pytest.raises(configuration.ConfigurationError, match="expected a non-empty text"):
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+
+def test_other_problems_are_reported_if_the_password_is_not_required(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    del config_data["mail"]["senderPassword"]
+    del config_data["mail"]["smtpServer"]
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_configuration(write_config(config_data), password_required=False)
+
+    assert err.value.problems == ["no config parameter: 'mail.smtpServer'"]
+
+
+@pytest.mark.parametrize("content", [b"", b"\n", b"\r\n", b"  \n"])
+@pytest.mark.parametrize("with_key", [True, False])
+def test_empty_credential_is_a_problem(
+    credentials: pathlib.Path,
+    content: bytes,
+    with_key: bool,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    if not with_key:
+        del config_data["mail"]["senderPassword"]
+    (credentials / "smtp-password").write_bytes(content)
+
+    # not a silent fallback to the key: the credential is there, so it is meant
+    assert problems(config_data, write_config) == [
+        f"the credential {credentials / 'smtp-password'} is empty"
+    ]
+
+
+def test_unreadable_credential_is_a_problem(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").mkdir()
+
+    [problem] = problems(config_data, write_config)
+
+    assert problem.startswith(f"cannot read the credential {credentials / 'smtp-password'}: ")
+
+
+def test_credential_that_is_no_text_is_a_problem_without_its_content(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_bytes(b"\xff\xfe secret")
+
+    assert problems(config_data, write_config) == [
+        f"the credential {credentials / 'smtp-password'} is not valid UTF-8"
+    ]
+
+
+def test_problem_with_the_credential_leaves_no_mail_section_for_the_error_mail(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_text("")
+    config_data["softWaterSystem"] = {}
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_configuration(write_config(config_data))
+
+    # the password is missing, so no mail can be sent; the other problems are listed as well
+    assert err.value.mail is None
+    assert len(err.value.problems) == 2
+
+
+def test_credential_is_not_in_the_repr_or_in_a_problem(
+    credentials: pathlib.Path,
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    (credentials / "smtp-password").write_text(SECRET)
+    loaded = configuration.load_configuration(write_config(config_data))
+    config_data["softWaterSystem"] = {}
+
+    assert SECRET not in repr(loaded)
+    assert SECRET not in "; ".join(problems(config_data, write_config))
+
+
+# --- the default of --config-file ---------------------------------------------------
+
+
+def test_default_config_file_without_the_variable() -> None:
+    assert configuration.default_config_file() == "./src/config.json"
+
+
+def test_default_config_file_is_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRUENBECK_CONFIG", "/etc/gruenbeck/config.json")
+
+    assert configuration.default_config_file() == "/etc/gruenbeck/config.json"
+
+
+def test_empty_variable_means_the_default_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRUENBECK_CONFIG", "")
+
+    assert configuration.default_config_file() == "./src/config.json"
+
+
+@pytest.mark.parametrize(
+    ("variable", "argv", "expected"),
+    [
+        (None, [], "./src/config.json"),
+        ("", [], "./src/config.json"),
+        ("/etc/gruenbeck/config.json", [], "/etc/gruenbeck/config.json"),
+        # the option wins over the variable
+        ("/etc/gruenbeck/config.json", ["-c", "other.json"], "other.json"),
+        ("/etc/gruenbeck/config.json", ["--config-file", "other.json"], "other.json"),
+    ],
+)
+def test_option_uses_the_variable_as_its_default(
+    monkeypatch: pytest.MonkeyPatch, variable: str | None, argv: list[str], expected: str
+) -> None:
+    if variable is not None:
+        monkeypatch.setenv("GRUENBECK_CONFIG", variable)
+    parser = argparse.ArgumentParser()
+    configuration.add_config_file_option(parser)
+
+    assert parser.parse_args(argv).config_file == expected
+
+
 def test_password_is_not_in_the_repr(loaded_config: gruenbeck.config.Configuration) -> None:
     assert "test-password" not in repr(loaded_config)
 
@@ -217,6 +486,22 @@ def test_unknown_keys_are_ignored_with_a_warning(
     assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
         (logging.WARNING, "unknown config parameter 'mail.smtpSecurty' is ignored"),
         (logging.WARNING, "unknown config parameter 'comment' is ignored"),
+    ]
+
+
+def test_former_parameter_file_key_is_ignored_with_a_warning(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # configurations from before P009-S7 still have it; the file does not even have to exist
+    config_data["parameterFile"] = "../assets/missing.csv"
+
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.data_path == pathlib.Path(config_data["dataPath"])
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "unknown config parameter 'parameterFile' is ignored")
     ]
 
 
@@ -239,7 +524,7 @@ def test_missing_file_raises_file_not_found_error(tmp_path: pathlib.Path) -> Non
 
 
 @pytest.mark.parametrize(
-    "text, problem",
+    ("text", "problem"),
     [
         ("{not json", "is not valid JSON: Expecting property name enclosed in double quotes"),
         ("", "is not valid JSON: Expecting value: line 1 column 1 (char 0)"),
@@ -262,7 +547,6 @@ def test_file_has_to_be_a_json_object(tmp_path: pathlib.Path, text: str, problem
     "key",
     [
         "dataPath",
-        "parameterFile",
         "dataFile",
         "dataFile.datePattern",
         "dataFile.fieldnames",
@@ -273,7 +557,6 @@ def test_file_has_to_be_a_json_object(tmp_path: pathlib.Path, text: str, problem
         "mail.smtpServer",
         "mail.smtpPort",
         "mail.senderEmail",
-        "mail.senderPassword",
         "mail.recipients",
         "mail.subject",
         "softWaterSystem",
@@ -295,11 +578,10 @@ def test_missing_required_key_is_a_problem(
 
 
 @pytest.mark.parametrize(
-    "key, value, reason",
+    ("key", "value", "reason"),
     [
         ("dataPath", "", "expected a non-empty text"),
         ("dataPath", 5, "expected a non-empty text"),
-        ("parameterFile", None, "expected a non-empty text"),
         ("dataFile", "data", "expected an object"),
         ("dataFile.datePattern", "", "expected a non-empty text"),
         ("dataFile.datePattern", "%m-%d", "expected a date format with year, month and day"),
@@ -385,7 +667,7 @@ def test_invalid_value_is_a_problem(
 
 
 @pytest.mark.parametrize(
-    "value, reason",
+    ("value", "reason"),
     [
         ("20.11.2026", "expected a date YYYY-MM-DD"),
         # the text of the ValueError differs between Python versions
@@ -434,7 +716,7 @@ def test_error_has_the_mail_section_if_it_is_valid(
     loaded_config: gruenbeck.config.Configuration,
 ) -> None:
     invalid = copy.deepcopy(config_data)
-    del invalid["parameterFile"]
+    del invalid["dataPath"]
 
     with pytest.raises(configuration.ConfigurationError) as err:
         configuration.load_configuration(write_config(invalid))
@@ -445,7 +727,7 @@ def test_error_has_the_mail_section_if_it_is_valid(
 def test_error_has_no_mail_section_if_it_is_invalid(
     config_data: dict[str, typing.Any], write_config: collections.abc.Callable[..., pathlib.Path]
 ) -> None:
-    del config_data["parameterFile"]
+    del config_data["dataPath"]
     del config_data["mail"]["subject"]
 
     with pytest.raises(configuration.ConfigurationError) as err:
@@ -454,7 +736,7 @@ def test_error_has_no_mail_section_if_it_is_invalid(
     assert err.value.mail is None
     assert err.value.problems == [
         "no config parameter: 'mail.subject'",
-        "no config parameter: 'parameterFile'",
+        "no config parameter: 'dataPath'",
     ]
 
 
@@ -462,7 +744,7 @@ def test_error_has_no_mail_section_if_it_is_invalid(
 
 
 @pytest.mark.parametrize(
-    "data_path, expected",
+    ("data_path", "expected"),
     [("data", "repo/src/data"), ("./data", "repo/src/data"), ("../data", "repo/data")],
 )
 def test_relative_paths_start_at_the_folder_of_the_configuration(
@@ -473,9 +755,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
     data_path: str,
     expected: str,
 ) -> None:
-    (tmp_path / "repo" / "assets").mkdir(parents=True)
-    (tmp_path / "repo" / "assets" / "parameters.csv").write_text("")
-    config_data.update(dataPath=data_path, parameterFile="../assets/parameters.csv")
+    config_data["dataPath"] = data_path
     path = write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     monkeypatch.chdir(tmp_path)
 
@@ -484,7 +764,6 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
 
     assert loaded.file == path
     assert loaded.data_path == tmp_path / expected
-    assert loaded.parameter_file == tmp_path / "repo" / "assets" / "parameters.csv"
 
 
 def test_absolute_paths_stay(
@@ -492,44 +771,21 @@ def test_absolute_paths_stay(
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
 ) -> None:
-    config_data.update(dataPath="/srv/gruenbeck/data", parameterFile="/srv/gruenbeck/p.csv")
+    config_data["dataPath"] = "/srv/gruenbeck/data"
 
     loaded = configuration.load_configuration(write_config(config_data, tmp_path / "c.json"))
 
     assert loaded.data_path == pathlib.Path("/srv/gruenbeck/data")
-    assert loaded.parameter_file == pathlib.Path("/srv/gruenbeck/p.csv")
 
 
-def test_path_written_for_the_working_directory_is_an_error(
+def test_a_folder_of_the_working_directory_is_not_used(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # the configuration of P006-S2 and earlier: src/config.json, run from the repository
+    # only repo/data exists, the folder of the configuration file has no data folder (yet)
     (tmp_path / "repo" / "data").mkdir(parents=True)
-    config_data["dataPath"] = "./data"
-    write_config(config_data, tmp_path / "repo" / "src" / "config.json")
-    monkeypatch.chdir(tmp_path / "repo")
-
-    found = problems_of("src/config.json")
-
-    src = tmp_path / "repo" / "src"
-    assert found == [
-        f"invalid config parameter dataPath './data': relative paths start at the folder of"
-        f" the configuration file ({src}), not at the working directory: {src / 'data'} does"
-        f" not exist, but {tmp_path / 'repo' / 'data'} does; use '../data'"
-    ]
-
-
-def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
-    config_data: dict[str, typing.Any],
-    write_config: collections.abc.Callable[..., pathlib.Path],
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    (tmp_path / "repo" / "data").mkdir(parents=True)
-    (tmp_path / "repo" / "src" / "data").mkdir(parents=True)
     config_data["dataPath"] = "./data"
     write_config(config_data, tmp_path / "repo" / "src" / "config.json")
     monkeypatch.chdir(tmp_path / "repo")
@@ -537,28 +793,6 @@ def test_path_that_exists_from_both_folders_is_taken_from_the_configuration(
     loaded = configuration.load_configuration("src/config.json")
 
     assert loaded.data_path == tmp_path / "repo" / "src" / "data"
-
-
-def test_path_that_exists_nowhere_is_taken_from_the_configuration(
-    config_data: dict[str, typing.Any],
-    write_config: collections.abc.Callable[..., pathlib.Path],
-    tmp_path: pathlib.Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # the first run: the data folder is created later
-    config_data["dataPath"] = "data"
-    write_config(config_data, tmp_path / "repo" / "src" / "config.json")
-    monkeypatch.chdir(tmp_path / "repo")
-
-    loaded = configuration.load_configuration("src/config.json")
-
-    assert loaded.data_path == tmp_path / "repo" / "src" / "data"
-
-
-def problems_of(path: str | os.PathLike[str]) -> list[str]:
-    with pytest.raises(configuration.ConfigurationError) as err:
-        configuration.load_configuration(path)
-    return err.value.problems
 
 
 # --- the file without checks --------------------------------------------------------

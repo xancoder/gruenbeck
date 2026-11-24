@@ -1,6 +1,6 @@
 [project]
 name = "gruenbeck"
-version = "0.1.0"
+version = "0.2.0"
 description = "Collects water consumption data from a Grünbeck soft water system and stores it as CSV"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -18,6 +18,8 @@ analysis = [
 [project.scripts]
 gruenbeck-collect = "gruenbeck.cli:collect"
 gruenbeck-analyse = "gruenbeck.cli:analyse"
+gruenbeck-preview-mail = "gruenbeck.preview:main"
+gruenbeck-log-rollover = "gruenbeck.rollover:main"
 
 [build-system]
 requires = ["uv_build>=0.11.24,<0.12"]
@@ -25,12 +27,16 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "git-cliff>=2.14.2",
+    "hypothesis>=6.170.17",
     "mypy>=2.4.1",
     "pre-commit>=4.7.0",
     "pytest>=9",
     "pytest-cov>=6",
+    "pytest-randomly>=5.1.0",
     "responses>=0.26.3",
     "ruff>=0.17.6",
+    "rust-just>=1.59.0",
     "types-requests>=2.33.0.20261030",
 ]
 
@@ -43,11 +49,22 @@ quote-style = "double"
 
 [tool.ruff.lint]
 # G (flake8-logging-format): %-style arguments instead of f-strings in logging calls
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
+# PT (flake8-pytest-style): parametrize names as tuple, one condition per assert, a match for
+#   pytest.raises
+# C4 (flake8-comprehensions), PIE (flake8-pie): needless comprehensions, ranges and the like
+# PTH (flake8-use-pathlib): pathlib instead of the os functions
+# PERF (perflint): needless work in loops
+# LOG (flake8-logging): correct use of the logging functions
+# A (flake8-builtins): no names that shadow a builtin
+# TRY400: logger.error in an except block where logger.exception would add the traceback
+select = [
+    "E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G",
+    "PT", "C4", "PIE", "PTH", "PERF", "LOG", "A", "TRY400",
+]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests"]
+files = ["src", "tests", "deploy"]
 mypy_path = "src"
 strict = true
 
@@ -62,3 +79,82 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--import-mode=importlib"]
 strict = true
+
+[tool.coverage.run]
+branch = true
+# the code only, not the tests
+source = ["src", "deploy"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 95
+
+# CHANGELOG.md is generated from the commit messages (Conventional Commits):
+#   uv run git-cliff --tag v<version> --output CHANGELOG.md
+# the <!-- n --> prefixes only set the order of the groups; the template strips them
+[tool.git-cliff.changelog]
+header = "# Changelog\n\nAll notable changes of this project. The file is generated from the commit messages with git-cliff (see \"release\" in the README); do not edit it by hand.\n\n"
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits %}\
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}\
+{{ commit.message | upper_first }}\
+{% if commit.breaking %} (**breaking**){% endif %}
+{% endfor %}\
+{% endfor %}
+"""
+trim = true
+
+[tool.git-cliff.git]
+conventional_commits = true
+# the merge commit of the first pull request and "Initial commit" are no conventional commits;
+# any other commit with an unknown type shows up under "Other" instead of being dropped silently
+filter_unconventional = false
+sort_commits = "newest"
+commit_parsers = [
+    { message = "^Merge ", skip = true },
+    { message = "^Initial commit", skip = true },
+    # the commit of a release only holds the generated changelog and the new version
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^docs", group = "<!-- 4 -->Documentation" },
+    { message = "^test", group = "<!-- 5 -->Tests" },
+    { message = "^build", group = "<!-- 6 -->Build" },
+    { message = "^ci", group = "<!-- 7 -->CI" },
+    { message = "^style", group = "<!-- 8 -->Style" },
+    { message = "^chore", group = "<!-- 9 -->Miscellaneous" },
+    { message = ".*", group = "<!-- 10 -->Other" },
+]
+
+# spelling check (pre-commit hook typos); every exception has its reason
+[tool.typos.files]
+extend-exclude = [
+    # the documentation of the manufacturer and its conversion: not our text
+    "assets/",
+    # package names and hashes
+    "uv.lock",
+    # generated from the commit messages (git-cliff): fix the message, not the file
+    "CHANGELOG.md",
+]
+
+[tool.typos.default.extend-identifiers]
+# names of the standard library: smtplib.SMTPHeloError and the method of the fake server
+# that replaces smtplib.SMTP.ehlo_or_helo_if_needed
+SMTPHeloError = "SMTPHeloError"
+ehlo_or_helo_if_needed = "ehlo_or_helo_if_needed"
+# the misspelled key of the test that unknown keys are ignored with a warning
+smtpSecurty = "smtpSecurty"
+
+[tool.typos.default.extend-words]
+# HELO is the SMTP command of the greeting (the text of an error of the fake server)
+helo = "helo"

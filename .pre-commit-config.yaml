@@ -1,10 +1,24 @@
+# the hooks check a commit and a push (and run by hand); the commit-msg hook at the end has its
+# own stage, so installing it adds no second run of the others
+default_stages: [pre-commit, pre-push, manual]
+
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    # keep in sync with the ruff version in uv.lock
-    rev: v0.17.6
+  # ruff runs from the virtual environment, so its version comes from uv.lock and
+  # Dependabot updates it there (uv sync first, or start pre-commit with uv run)
+  - repo: local
     hooks:
       - id: ruff-check
+        name: ruff check
+        entry: uv run --no-sync ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: ruff-format
+        name: ruff format
+        entry: uv run --no-sync ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -17,7 +31,26 @@ repos:
         exclude: ^assets/
       - id: check-yaml
       - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
       - id: check-added-large-files
+
+  # spelling of code, comments and documentation; settings in pyproject.toml ([tool.typos])
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.52.2
+    hooks:
+      - id: typos
+        # only report: the hook writes its corrections into the files by default, and a
+        # name of the standard library or a typo that a test wants would be "corrected"
+        args: [--force-exclude]
+
+  # audits the GitHub Actions workflows (unpinned actions, excessive permissions, injection);
+  # offline: the audits that ask the GitHub API need a token and are left out
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: v1.33.1
+    hooks:
+      - id: zizmor
+        args: [--offline]
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
@@ -32,3 +65,13 @@ repos:
         entry: gitleaks git --redact --no-banner --verbose
         stages: [manual]
         always_run: true
+
+  # the type of the commit message (Conventional Commits, as in the history; the changelog is
+  # generated from it); it only runs once the hook type is installed:
+  #   uv run pre-commit install --hook-type commit-msg
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.5.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, refactor, test, docs, style, chore, build, ci, perf]

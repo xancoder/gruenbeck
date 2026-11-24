@@ -9,7 +9,6 @@ session of urllib3 repeats). The waiting time (time.sleep) is recorded, not wait
 import collections.abc
 import http.server
 import logging
-import pathlib
 import socket
 import threading
 import typing
@@ -18,19 +17,13 @@ import pytest
 import requests
 import urllib3.exceptions
 
-import gruenbeck.device
 from gruenbeck import device
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
-ANSWER = {"D_C_4_2": "16:00", **{name: "1" for name in MEMORY}}
+ANSWER = {"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1")}
 VALID_XML = (
     "<data>" + "".join(f"<{key}>{value}</{key}>" for key, value in ANSWER.items()) + "</data>"
 )
-
-
-@pytest.fixture
-def parameter(parameter_file: pathlib.Path) -> device.Parameter:
-    return device.Parameter(str(parameter_file))
 
 
 type LogRecords = collections.abc.Callable[[], list[tuple[str, str]]]
@@ -86,9 +79,9 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> Fake:
 
 
 def test_the_device_is_asked_for_the_clock_and_the_memory_with_a_session(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    fake: Fake, sleeps: list[float]
 ) -> None:
-    result = device.get_device_data("device.lan", parameter, 7.0, 5, 5.0)
+    result = device.get_device_data("device.lan", 7.0, 5, 5.0)
 
     assert result == ANSWER
     ((host, parameters, timeout, session),) = fake.calls
@@ -104,14 +97,13 @@ def test_the_device_is_asked_for_the_clock_and_the_memory_with_a_session(
 )
 def test_invalid_response_is_asked_again(
     fake: Fake,
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     logs: LogRecords,
     error: Exception,
 ) -> None:
     fake.errors = [error, error]
 
-    result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+    result = device.get_device_data("device.lan", 30, 5, 5.0)
 
     assert result == ANSWER
     assert len(fake.calls) == 3
@@ -124,14 +116,12 @@ def test_invalid_response_is_asked_again(
     ]
 
 
-def test_invalid_response_fails_after_all_attempts(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_invalid_response_fails_after_all_attempts(fake: Fake, sleeps: list[float]) -> None:
     errors = [ValueError(f"bad {n}") for n in range(5)]
     fake.errors = list(errors)
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data("device.lan", parameter, 30, 3, 5.0)
+        device.get_device_data("device.lan", 30, 3, 5.0)
 
     assert len(fake.calls) == 4
     assert sleeps == [5.0, 5.0, 5.0]
@@ -140,9 +130,7 @@ def test_invalid_response_fails_after_all_attempts(
     assert err.value.__cause__ is errors[3]
 
 
-def test_missing_place_is_asked_again(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float], logs: LogRecords
-) -> None:
+def test_missing_place_is_asked_again(fake: Fake, sleeps: list[float], logs: LogRecords) -> None:
     without_place: dict[str, str | None] = {
         key: value for key, value in ANSWER.items() if key != "D_Y_2_5"
     }
@@ -151,7 +139,7 @@ def test_missing_place_is_asked_again(
     }
     fake.answers = [without_place, without_three, without_place]
 
-    result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+    result = device.get_device_data("device.lan", 30, 5, 5.0)
 
     assert result == ANSWER
     assert len(fake.calls) == 4
@@ -167,13 +155,11 @@ def test_missing_place_is_asked_again(
     ]
 
 
-def test_missing_place_fails_after_all_attempts(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_missing_place_fails_after_all_attempts(fake: Fake, sleeps: list[float]) -> None:
     fake.answers = [{key: value for key, value in ANSWER.items() if key != "D_Y_2_14"}] * 3
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data("device.lan", parameter, 30, 2, 5.0)
+        device.get_device_data("device.lan", 30, 2, 5.0)
 
     assert str(err.value) == (
         "failed to get device data after 3 attempts: device response lacks D_Y_2_14"
@@ -183,13 +169,11 @@ def test_missing_place_fails_after_all_attempts(
     assert sleeps == [5.0, 5.0]
 
 
-def test_missing_device_clock_is_no_invalid_response(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_missing_device_clock_is_no_invalid_response(fake: Fake, sleeps: list[float]) -> None:
     # the clock only gives a warning, see check_device_clock()
     fake.answers = [{key: value for key, value in ANSWER.items() if key != "D_C_4_2"}]
 
-    result = device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+    result = device.get_device_data("device.lan", 30, 5, 5.0)
 
     assert "D_C_4_2" not in result
     assert len(fake.calls) == 1
@@ -197,41 +181,37 @@ def test_missing_device_clock_is_no_invalid_response(
 
 
 def test_extra_parameters_in_the_response_are_not_an_invalid_response(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    fake: Fake, sleeps: list[float]
 ) -> None:
     # read_consumption() reports an unknown consumption parameter
     fake.answers = [{**ANSWER, "D_Y_1": "5"}]
 
-    assert device.get_device_data("device.lan", parameter, 30, 5, 5.0)["D_Y_1"] == "5"
+    assert device.get_device_data("device.lan", 30, 5, 5.0)["D_Y_1"] == "5"
     assert len(fake.calls) == 1
 
 
-def test_number_of_retries_and_delay_are_parameters(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_number_of_retries_and_delay_are_parameters(fake: Fake, sleeps: list[float]) -> None:
     fake.errors = [ValueError("bad")] * 2
 
     with pytest.raises(device.DeviceError, match=r"^failed to get device data after 2 attempts"):
-        device.get_device_data("device.lan", parameter, 30, 1, 0.5)
+        device.get_device_data("device.lan", 30, 1, 0.5)
 
     assert len(fake.calls) == 2
     assert sleeps == [0.5]
 
 
-def test_no_retry_with_retries_zero(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_no_retry_with_retries_zero(fake: Fake, sleeps: list[float]) -> None:
     fake.errors = [ValueError("bad")]
 
     with pytest.raises(device.DeviceError, match=r"^failed to get device data after 1 attempts"):
-        device.get_device_data("device.lan", parameter, 30, 0, 5.0)
+        device.get_device_data("device.lan", 30, 0, 5.0)
 
     assert len(fake.calls) == 1
     assert sleeps == []
 
 
 @pytest.mark.parametrize(
-    "error, text",
+    ("error", "text"),
     [
         (requests.exceptions.ConnectTimeout("connect timed out"), "connect timed out"),
         (requests.exceptions.ReadTimeout("read timed out"), "read timed out"),
@@ -242,7 +222,6 @@ def test_no_retry_with_retries_zero(
 )
 def test_request_error_is_not_asked_again_by_the_query(
     fake: Fake,
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     error: typing.Any,
     text: str,
@@ -251,7 +230,7 @@ def test_request_error_is_not_asked_again_by_the_query(
     fake.errors = [error]
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+        device.get_device_data("device.lan", 30, 5, 5.0)
 
     assert str(err.value) == f"failed to get device data: {text}"
     assert err.value.__cause__ is error
@@ -259,14 +238,12 @@ def test_request_error_is_not_asked_again_by_the_query(
     assert sleeps == []
 
 
-def test_unexpected_error_is_not_asked_again(
-    fake: Fake, parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_unexpected_error_is_not_asked_again(fake: Fake, sleeps: list[float]) -> None:
     # up to P006-S6 any error was repeated; now only cli.main() reports it
     fake.errors = [KeyError("text")]
 
     with pytest.raises(KeyError):
-        device.get_device_data("device.lan", parameter, 30, 5, 5.0)
+        device.get_device_data("device.lan", 30, 5, 5.0)
 
     assert len(fake.calls) == 1
     assert sleeps == []
@@ -350,7 +327,7 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, format: str, *args: typing.Any) -> None:
+        def log_message(self, fmt: str, *args: typing.Any) -> None:
             pass
 
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -368,13 +345,12 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
 
 def test_success_needs_one_request(
     server: tuple[str, Script],
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     logs: LogRecords,
 ) -> None:
     host, script = server
 
-    assert device.get_device_data(host, parameter, 5, 5, 5.0) == {
+    assert device.get_device_data(host, 5, 5, 5.0) == {
         key: str(value) for key, value in ANSWER.items()
     }
 
@@ -386,14 +362,13 @@ def test_success_needs_one_request(
 
 def test_aborted_connection_is_asked_again_at_once_then_with_growing_waits(
     server: tuple[str, Script],
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["reset", "reset", "reset", "reset"]
 
-    assert device.get_device_data(host, parameter, 5, 5, 5.0)["D_C_4_2"] == "16:00"
+    assert device.get_device_data(host, 5, 5, 5.0)["D_C_4_2"] == "16:00"
 
     assert len(script.bodies) == 5
     # urllib3: no wait before the first repeat, then 2, 4, 8 times the backoff factor
@@ -410,12 +385,12 @@ def test_aborted_connection_is_asked_again_at_once_then_with_growing_waits(
 
 
 def test_repeated_requests_are_the_same_post(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["reset", "503"]
 
-    device.get_device_data(host, parameter, 5, 5, 5.0)
+    device.get_device_data(host, 5, 5, 5.0)
 
     assert len(script.bodies) == 3
     # only the request id may differ: it is random
@@ -425,14 +400,13 @@ def test_repeated_requests_are_the_same_post(
 
 def test_server_error_is_asked_again(
     server: tuple[str, Script],
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["503", "503"]
 
-    device.get_device_data(host, parameter, 5, 5, 5.0)
+    device.get_device_data(host, 5, 5, 5.0)
 
     assert len(script.bodies) == 3
     assert sleeps == [10.0]
@@ -443,13 +417,13 @@ def test_server_error_is_asked_again(
 
 
 def test_server_error_fails_after_all_attempts(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["503"] * 10
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data(host, parameter, 5, 2, 5.0)
+        device.get_device_data(host, 5, 2, 5.0)
 
     assert str(err.value) == (
         f"failed to get device data: 503 Server Error: Service Unavailable for url:"
@@ -459,14 +433,12 @@ def test_server_error_fails_after_all_attempts(
     assert sleeps == [10.0]
 
 
-def test_client_error_is_not_asked_again(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_client_error_is_not_asked_again(server: tuple[str, Script], sleeps: list[float]) -> None:
     host, script = server
     script.items = ["404"]
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data(host, parameter, 5, 5, 5.0)
+        device.get_device_data(host, 5, 5, 5.0)
 
     assert str(err.value).startswith("failed to get device data: 404 Client Error")
     assert len(script.bodies) == 1
@@ -474,13 +446,13 @@ def test_client_error_is_not_asked_again(
 
 
 def test_aborted_connection_fails_after_all_attempts(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["reset"] * 10
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data(host, parameter, 5, 2, 5.0)
+        device.get_device_data(host, 5, 2, 5.0)
 
     # the last error, without the pool and url that urllib3 adds
     assert str(err.value) == (
@@ -493,30 +465,27 @@ def test_aborted_connection_fails_after_all_attempts(
 
 def test_no_answer_in_time_is_asked_again(
     server: tuple[str, Script],
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     logs: LogRecords,
 ) -> None:
     host, script = server
     script.items = ["slow"]
 
-    device.get_device_data(host, parameter, 0.5, 5, 5.0)
+    device.get_device_data(host, 0.5, 5, 5.0)
 
     assert len(script.bodies) == 2
     assert "Read timed out" in logs()[0][1]
     assert sleeps == []
 
 
-def test_unreachable_device_fails_after_all_attempts(
-    parameter: gruenbeck.device.Parameter, sleeps: list[float]
-) -> None:
+def test_unreachable_device_fails_after_all_attempts(sleeps: list[float]) -> None:
     # a port nothing listens on
     with socket.socket() as unused:
         unused.bind(("127.0.0.1", 0))
         host = f"127.0.0.1:{unused.getsockname()[1]}"
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data(host, parameter, 5, 3, 5.0)
+        device.get_device_data(host, 5, 3, 5.0)
 
     assert str(err.value).startswith("failed to get device data: ")
     assert "Failed to establish a new connection" in str(err.value)
@@ -527,14 +496,13 @@ def test_unreachable_device_fails_after_all_attempts(
 @pytest.mark.parametrize("item", ["xml", "empty"])
 def test_invalid_answer_is_asked_again_over_the_network(
     server: tuple[str, Script],
-    parameter: gruenbeck.device.Parameter,
     sleeps: list[float],
     item: str,
 ) -> None:
     host, script = server
     script.items = [item, item]
 
-    assert device.get_device_data(host, parameter, 5, 5, 5.0)["D_C_4_2"] == "16:00"
+    assert device.get_device_data(host, 5, 5, 5.0)["D_C_4_2"] == "16:00"
 
     assert len(script.bodies) == 3
     # the wait of the query itself, not of the session
@@ -542,38 +510,38 @@ def test_invalid_answer_is_asked_again_over_the_network(
 
 
 def test_answer_without_all_places_is_asked_again_over_the_network(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["partial"]
 
-    assert device.get_device_data(host, parameter, 5, 5, 5.0)["D_Y_2_14"] == "1"
+    assert device.get_device_data(host, 5, 5, 5.0)["D_Y_2_14"] == "1"
 
     assert len(script.bodies) == 2
     assert sleeps == [5.0]
 
 
 def test_invalid_answer_fails_after_all_attempts_over_the_network(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["xml"] * 10
 
     with pytest.raises(device.DeviceError) as err:
-        device.get_device_data(host, parameter, 5, 2, 5.0)
+        device.get_device_data(host, 5, 2, 5.0)
 
     assert str(err.value).startswith("failed to get device data after 3 attempts: failed to parse")
     assert len(script.bodies) == 3
 
 
 def test_no_retry_with_retries_zero_over_the_network(
-    server: tuple[str, Script], parameter: gruenbeck.device.Parameter, sleeps: list[float]
+    server: tuple[str, Script], sleeps: list[float]
 ) -> None:
     host, script = server
     script.items = ["reset", "ok"]
 
     with pytest.raises(device.DeviceError):
-        device.get_device_data(host, parameter, 5, 0, 5.0)
+        device.get_device_data(host, 5, 0, 5.0)
 
     assert len(script.bodies) == 1
     assert sleeps == []

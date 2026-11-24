@@ -1,4 +1,4 @@
-"""report: the statistics as HTML document of the data mail (P007-S4)"""
+"""report_html: the statistics as HTML document of the data mail (P007-S4)"""
 
 import collections
 import datetime
@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from gruenbeck import report
+from gruenbeck import report, report_html, report_text
 
 D = datetime.date
 Stored = dict[datetime.date, int | str]
@@ -125,7 +125,7 @@ def page_of(
     stored: Stored, charts: dict[str, str] | None = None, today: datetime.date = MONDAY
 ) -> tuple[Page, report.Report]:
     stats = stats_of(stored, today)
-    return Page(report.format_html(stats, charts)), stats
+    return Page(report_html.format_html(stats, charts)), stats
 
 
 # --- document --------------------------------------------------------------------------------
@@ -135,7 +135,7 @@ def page_of(
 def test_document_is_well_formed_html_with_inline_css_and_no_external_resource(
     stored: Stored,
 ) -> None:
-    document = report.format_html(stats_of(stored), CHARTS)
+    document = report_html.format_html(stats_of(stored), CHARTS)
 
     page = Page(document)
     assert page.problems == []
@@ -156,7 +156,7 @@ def test_document_is_well_formed_html_with_inline_css_and_no_external_resource(
 
 def test_head_style_only_switches_the_colors_for_a_dark_color_scheme() -> None:
     # with a period that is not complete, so the class of its note is used
-    document = report.format_html(stats_of(with_gaps()), CHARTS)
+    document = report_html.format_html(stats_of(with_gaps()), CHARTS)
 
     (style,) = re.findall(r"<style>(.*?)</style>", document)
     assert style.startswith("@media (prefers-color-scheme: dark) {")
@@ -171,7 +171,7 @@ def test_head_style_only_switches_the_colors_for_a_dark_color_scheme() -> None:
 
 
 def test_charts_follow_the_text_color_of_the_card() -> None:
-    document = report.format_html(stats_of(full_data()), CHARTS)
+    document = report_html.format_html(stats_of(full_data()), CHARTS)
 
     # the cell with the content sets `color`, which the SVG of a chart inherits (currentColor)
     assert re.search(r'<td class="gb-card" style="[^"]*color:#1f2937', document)
@@ -227,8 +227,8 @@ def test_days_of_the_week_are_a_table_of_seven_columns() -> None:
 )
 def test_html_has_the_rows_and_the_notes_of_the_text(stored: Stored) -> None:
     stats = stats_of(stored)
-    text = report.format_text(stats)
-    page = Page(report.format_html(stats))
+    text = report_text.format_text(stats)
+    page = Page(report_html.format_html(stats))
 
     text_rows = [
         re.split(r"\s{2,}", line.strip())
@@ -251,13 +251,15 @@ def test_html_has_the_rows_and_the_notes_of_the_text(stored: Stored) -> None:
     assert html_notes == notes
     # the notes about the earlier years that are left out (the text wraps them)
     hints = r"\d+ earlier years? (?:is|are) not shown \([^)]*\)\."
-    assert re.findall(hints, report.format_html(stats)) == re.findall(hints, " ".join(text.split()))
+    assert re.findall(hints, report_html.format_html(stats)) == re.findall(
+        hints, " ".join(text.split())
+    )
 
 
 def test_interpolated_values_are_marked_and_explained() -> None:
     stored = stored_days(WEEK_START, 100, "-", 300, 300, 300, 300, 300)
 
-    document = report.format_html(stats_of(stored))
+    document = report_html.format_html(stats_of(stored))
 
     page = Page(document)
     _, values = page.rows_of(7)
@@ -268,7 +270,7 @@ def test_interpolated_values_are_marked_and_explained() -> None:
 
 
 def test_legend_of_interpolated_days_is_only_there_if_needed() -> None:
-    document = report.format_html(stats_of(full_data()))
+    document = report_html.format_html(stats_of(full_data()))
 
     assert "*" not in document
     assert "includes interpolated" not in document
@@ -302,7 +304,7 @@ def test_period_without_values_has_dashes() -> None:
 
 
 def test_without_an_earlier_year_every_table_says_so() -> None:
-    document = report.format_html(stats_of(fill(D(2026, 1, 1), D(2026, 11, 22))))
+    document = report_html.format_html(stats_of(fill(D(2026, 1, 1), D(2026, 11, 22))))
 
     assert document.count("No earlier year has enough values for this period.") == 4
     assert "No earlier year has enough values." in document
@@ -315,14 +317,14 @@ def test_long_history_has_at_most_five_earlier_years_per_table_and_says_what_is_
     years = [row[0] for row in page.rows_of(6) if re.fullmatch(r"\d{4}", row[0])]
     five = ["2025", "2024", "2023", "2022", "2021"]
     assert years == ["2026", *five] * 4 + five
-    document = report.format_html(stats)
+    document = report_html.format_html(stats)
     note = "earlier years are not shown (older than the latest 5, or with values on less than half"
     assert document.count(f"4 {note} of the days).") == 4
     assert document.count(f"5 {note} of the days).") == 1
 
 
 def test_one_earlier_year_that_is_left_out_is_named_in_the_singular() -> None:
-    document = report.format_html(stats_of(fill(D(2020, 1, 1), D(2026, 11, 22))))
+    document = report_html.format_html(stats_of(fill(D(2020, 1, 1), D(2026, 11, 22))))
 
     assert document.count("1 earlier year is not shown (") == 5
     assert "earlier years are not shown" not in document
@@ -346,7 +348,7 @@ def test_no_current_month_on_the_first_of_a_month_and_no_year_on_the_first_of_ja
 
 
 def test_dates_in_a_heading_do_not_break_at_their_hyphens() -> None:
-    document = report.format_html(stats_of(full_data()))
+    document = report_html.format_html(stats_of(full_data()))
 
     assert (
         '<span style="white-space:nowrap;">2026-11-16</span> .. '
@@ -358,7 +360,7 @@ def test_dates_in_a_heading_do_not_break_at_their_hyphens() -> None:
 
 
 def test_charts_are_put_in_their_sections_unchanged() -> None:
-    document = report.format_html(stats_of(full_data()), CHARTS)
+    document = report_html.format_html(stats_of(full_data()), CHARTS)
 
     order = [
         document.index("Last week: week"),
@@ -380,7 +382,7 @@ def test_charts_are_put_in_their_sections_unchanged() -> None:
 def test_a_chart_that_is_not_given_is_left_out() -> None:
     charts = {name: svg for name, svg in CHARTS.items() if name != "monthly"}
 
-    document = report.format_html(stats_of(full_data()), charts)
+    document = report_html.format_html(stats_of(full_data()), charts)
 
     assert 'id="monthly"' not in document
     assert Page(document).tags["svg"] == 3
@@ -388,9 +390,9 @@ def test_a_chart_that_is_not_given_is_left_out() -> None:
 
 
 def test_without_charts_the_tables_are_all_there_is() -> None:
-    with_charts = Page(report.format_html(stats_of(full_data()), CHARTS))
-    without = Page(report.format_html(stats_of(full_data())))
-    none_given = Page(report.format_html(stats_of(full_data()), {}))
+    with_charts = Page(report_html.format_html(stats_of(full_data()), CHARTS))
+    without = Page(report_html.format_html(stats_of(full_data())))
+    none_given = Page(report_html.format_html(stats_of(full_data()), {}))
 
     assert without.tags["svg"] == 0
     assert without.tables == with_charts.tables == none_given.tables
@@ -400,7 +402,7 @@ def test_without_charts_the_tables_are_all_there_is() -> None:
 
 
 def test_notes_are_paragraphs_at_the_top_and_escaped() -> None:
-    document = report.format_html(stats_of(full_data()), notes=["No <data> & files"])
+    document = report_html.format_html(stats_of(full_data()), notes=["No <data> & files"])
 
     assert "<p" in document
     assert "No &lt;data&gt; &amp; files" in document
@@ -414,7 +416,7 @@ def test_failure_document_has_the_note_and_no_statistics() -> None:
         "Details are in the log file."
     )
 
-    document = report.format_failure_html(message, ["No data files found to attach."])
+    document = report_html.format_failure_html(message, ["No data files found to attach."])
 
     page = Page(document)
     assert page.problems == []
@@ -432,7 +434,7 @@ def test_failure_document_has_the_note_and_no_statistics() -> None:
 
 
 def test_cells_of_the_tables_have_no_markup_of_their_own() -> None:
-    document = report.format_html(stats_of(with_gaps()), CHARTS)
+    document = report_html.format_html(stats_of(with_gaps()), CHARTS)
 
     # all texts come from numbers and dates: no value can bring its own markup
     cells = [cell for table in Page(document).tables for row in table for cell in row]
