@@ -14,7 +14,7 @@ git clone https://github.com/xancoder/gruenbeck.git
 
 ### install dependencies into a virtual environment
 
-The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `.python-version` pins `3.15`, the version on the Raspberry Pi, for the virtual environment; CI tests 3.12 (the lowest supported version), 3.14 and 3.15. `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock` and installs the package `gruenbeck` (from `src/gruenbeck/`) with the commands `gruenbeck-collect` and `gruenbeck-analyse` into `./.venv/bin`:
+The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer (uv installs it if missing). `.python-version` pins `3.15`, the version on the Raspberry Pi, for the virtual environment; CI tests 3.12 (the lowest supported version), 3.14 and 3.15. `uv sync` creates the virtual environment `./.venv` from `pyproject.toml` and `uv.lock` and installs the package `gruenbeck` (from `src/gruenbeck/`) with the commands `gruenbeck-collect`, `gruenbeck-analyse`, `gruenbeck-preview-mail` and `gruenbeck-log-rollover` into `./.venv/bin`:
 
 ```shell script
 cd gruenbeck
@@ -207,18 +207,18 @@ The data is stored before the mail is made, so the mail goes out whatever happen
 
 #### preview of the data mail
 
-`scripts/preview_data_mail.py` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. It uses the package like the data collector does, so run it from the repository root or pass the configuration file:
+`gruenbeck-preview-mail` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. Like the data collector it takes the configuration relative to the current directory, so run it from the repository root or pass the configuration file:
 
 ```shell script
-uv run python scripts/preview_data_mail.py --output-dir ./log/preview
-uv run python scripts/preview_data_mail.py --send-to me@example.com
+uv run gruenbeck-preview-mail --output-dir ./log/preview
+uv run gruenbeck-preview-mail --send-to me@example.com
 ```
 
 | option | meaning |
 |--------|---------|
 | `--config-file` / `-c` | configuration file (default `./src/config.json`) |
 | `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
-| `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the script only reports what it built (lines of text, size of the HTML, attachments) |
+| `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the command only reports what it built (lines of text, size of the HTML, attachments) |
 | `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
 
 Warnings of the statistics and the charts go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
@@ -247,8 +247,8 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/report_html.py` | the statistics as HTML document for the data mail |
 | `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
-| `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
-| `scripts/preview_data_mail.py` | read-only preview of the data mail without the device (files, or a mail to your own address) |
+| `src/gruenbeck/rollover.py` | the command `gruenbeck-log-rollover`: read-only diagnostic tool for the daily rollover of the device |
+| `src/gruenbeck/preview.py` | the command `gruenbeck-preview-mail`: read-only preview of the data mail without the device (files, or a mail to your own address) |
 | `deploy/systemd/` | systemd units and their setup |
 
 ### tests
@@ -266,8 +266,8 @@ The dev tools (`uv sync`) include ruff, mypy and pre-commit; their settings are 
 ```shell script
 uv run ruff format   # format the code (double quotes, line length 100)
 uv run ruff check    # lint
-uv run mypy          # check the types of src, tests, scripts and deploy (strict)
-uv run pytest --cov  # tests with line and branch coverage of the code (src, scripts, deploy)
+uv run mypy          # check the types of src, tests and deploy (strict)
+uv run pytest --cov  # tests with line and branch coverage of the code (src, deploy)
 ```
 
 The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
@@ -321,6 +321,6 @@ The script should run once a week. Three ways are described in [deploy/systemd/R
 - **systemd user service**: the alternative without root access
 - **cron**: for machines without systemd; when switching to systemd, remove the cron entry, otherwise the data is collected twice
 
-NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the run has to take place after the daily rollover of the soft water system, when `D_Y_2_1` is the consumption of the day before. The rollover does not follow the device clock: this device moves its values on every day at about 10:05, before and after its clock was set on 2026-11-19 (measured with `scripts/log_device_rollover.py`). A value therefore covers the 24 hours from one rollover to the next and is stored under the day it starts. The weekly run (Monday 16:00) is well after the rollover and is based on the 14-day memory of the soft water system.
+NOTE: The data collector stores the value of `D_Y_2_n` under today minus n days, so the run has to take place after the daily rollover of the soft water system, when `D_Y_2_1` is the consumption of the day before. The rollover does not follow the device clock: this device moves its values on every day at about 10:05, before and after its clock was set on 2026-11-19 (measured with `gruenbeck-log-rollover`). A value therefore covers the 24 hours from one rollover to the next and is stored under the day it starts. The weekly run (Monday 16:00) is well after the rollover and is based on the 14-day memory of the soft water system.
 
 Before it writes anything, the data collector compares the new values with the days that are stored already (7 days for weekly runs); values of past days do not change on the device. If they differ, it writes nothing and fails with an error mail and exit code 1. If every new value equals the stored value of the day before, the run was probably before the rollover, for example a missed run that the systemd timer makes up (`Persistent=true`) in the morning; run it again later. A run before the rollover is not detected when there is no stored day to compare with (the first run, or after a pause of more than 14 days). The data collector also reads the device clock (`D_C_4_2`) and logs a warning in `log/gruenbeck_error.log` if it is missing, invalid or more than 15 minutes off; it is unknown whether the device switches to daylight saving time by itself.

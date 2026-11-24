@@ -13,7 +13,7 @@ The weekly run (Monday 16:00) follows the 14 day memory of the soft water system
 runs cause more writes, rarer runs leave less time to react to a failure. The run has to be
 after the daily rollover of the soft water system. The rollover does not follow the device
 clock: this device moves its values on every day at about 10:05 (measured with
-`scripts/log_device_rollover.py`), so 16:00 is well after it. Before it writes anything,
+`gruenbeck-log-rollover`), so 16:00 is well after it. Before it writes anything,
 the collector compares the new values with the days that are stored already. If they
 differ, for example because a missed run that `Persistent=true` makes up in the morning
 comes before the rollover, the run writes nothing and fails with an error mail; the next

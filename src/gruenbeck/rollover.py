@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Log the daily rollover of the 14 day consumption values of the soft water system.
 
@@ -13,16 +12,16 @@ time loses nothing.
 
 Usage on the Raspberry Pi, from the repository root (same place as the data collector):
 
-    uv run python scripts/log_device_rollover.py --config-file ./src/config.json
+    uv run gruenbeck-log-rollover --config-file ./src/config.json
 
 Keep it running after logout (e.g. over night):
 
-    nohup uv run python scripts/log_device_rollover.py > /dev/null 2>&1 &
+    nohup uv run gruenbeck-log-rollover > /dev/null 2>&1 &
 
 or as a transient user unit (needs "loginctl enable-linger" to survive logout):
 
     systemd-run --user --unit=gruenbeck-rollover --working-directory="$PWD" \\
-        "$(command -v uv)" run python scripts/log_device_rollover.py
+        "$(command -v uv)" run gruenbeck-log-rollover
 
 Stop it with Ctrl+C, "kill <pid>" or "systemctl --user stop gruenbeck-rollover".
 The result is in ./log/device_rollover.csv.
@@ -36,7 +35,6 @@ import sys
 import time
 import typing
 
-# the package is installed into the virtual environment (uv sync)
 import gruenbeck.config
 import gruenbeck.device
 
@@ -55,7 +53,7 @@ STATUS_ROLLOVER = "rollover"
 Row = dict[str, str]
 # rollover values of a response, in the order of ROLLOVER_PARAMETERS
 RolloverValues = tuple[str, ...]
-Fetch = typing.Callable[..., dict[str, str | None]]
+Fetch = typing.Callable[..., typing.Mapping[str, str | None]]
 
 
 def local_now() -> datetime.datetime:
@@ -276,7 +274,3 @@ def main(argv: typing.Sequence[str] | None = None) -> int:
         return 0
     print(f"[*] finished after {rows} requests", flush=True)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

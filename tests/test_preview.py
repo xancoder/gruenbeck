@@ -1,29 +1,19 @@
-"""scripts/preview_data_mail.py: the data mail from the stored data, without the device (P008-S4)"""
+"""gruenbeck-preview-mail: the data mail from the stored data, without the device (P008-S4)"""
 
 import collections.abc
 import datetime
 import email.message
-import importlib.util
 import json
-import os
 import pathlib
 import smtplib
 import typing
 
 import pytest
 
-from gruenbeck import collector, config, device, report, report_html, storage
+from gruenbeck import collector, config, device, preview, report, report_html, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-SCRIPT = REPO_ROOT / "scripts" / "preview_data_mail.py"
-
-spec = importlib.util.spec_from_file_location("preview_data_mail", SCRIPT)
-assert spec is not None and spec.loader is not None
-preview = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(preview)
 
 TODAY = "2026-11-23"
 SUBJECT = "[data collector] - gruenbeck"
@@ -100,10 +90,6 @@ def html_of(message: email.message.EmailMessage) -> str:
     content = body.get_content()
     assert isinstance(content, str)
     return content
-
-
-def test_script_is_executable() -> None:
-    assert os.access(SCRIPT, os.X_OK)
 
 
 def test_output_files_are_what_the_data_mail_contains(

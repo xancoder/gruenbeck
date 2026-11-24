@@ -18,6 +18,8 @@ analysis = [
 [project.scripts]
 gruenbeck-collect = "gruenbeck.cli:collect"
 gruenbeck-analyse = "gruenbeck.cli:analyse"
+gruenbeck-preview-mail = "gruenbeck.preview:main"
+gruenbeck-log-rollover = "gruenbeck.rollover:main"
 
 [build-system]
 requires = ["uv_build>=0.11.24,<0.12"]
@@ -47,7 +49,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests", "scripts", "deploy"]
+files = ["src", "tests", "deploy"]
 mypy_path = "src"
 strict = true
 
@@ -66,7 +68,7 @@ strict = true
 [tool.coverage.run]
 branch = true
 # the code only, not the tests
-source = ["src", "scripts", "deploy"]
+source = ["src", "deploy"]
 
 [tool.coverage.report]
 show_missing = true

@@ -379,7 +379,7 @@ def test_errors_of_the_package_have_a_common_base_class() -> None:
         analysis.AnalysisError,
     ):
         assert issubclass(error, errors.GruenbeckError)
-    # read_configuration_file() callers (scripts/log_device_rollover.py) catch ValueError
+    # read_configuration_file() callers (gruenbeck.rollover) catch ValueError
     assert issubclass(config.ConfigurationError, ValueError)
 
 

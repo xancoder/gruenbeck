@@ -40,8 +40,7 @@ class ConfigurationError(errors.GruenbeckError, ValueError):
     the configuration file is invalid; str() lists every problem
 
     `mail` is the mail section if that part is valid (to send the error mail), else None.
-    Also a ValueError for callers of read_configuration_file() such as
-    scripts/log_device_rollover.py.
+    Also a ValueError for callers of read_configuration_file() such as gruenbeck.rollover.
     """
 
     def __init__(self, problems: list[str], mail: "Mail | None" = None):

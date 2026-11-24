@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Preview the data mail without asking the device.
 
@@ -20,8 +19,8 @@ Options:
 
 Usage from the repository root (same place as the data collector):
 
-    uv run python scripts/preview_data_mail.py --output-dir ./log/preview
-    uv run python scripts/preview_data_mail.py --send-to me@example.com
+    uv run gruenbeck-preview-mail --output-dir ./log/preview
+    uv run gruenbeck-preview-mail --send-to me@example.com
 
 Exit code 0 if the mail was built (and written or sent as asked), 1 on an error in the
 configuration, the data folder, the output folder or the sending.
@@ -33,7 +32,6 @@ import datetime
 import pathlib
 import sys
 
-# the package is installed into the virtual environment (uv sync)
 import gruenbeck.collector
 import gruenbeck.config
 import gruenbeck.errors
@@ -189,7 +187,3 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"[*] sent to {args.send_to}: {subject}", flush=True)
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -35,7 +35,7 @@ def run_command(command: str, cwd: pathlib.Path, *args: str) -> subprocess.Compl
     )
 
 
-def test_commands_are_entry_points_of_the_cli_module() -> None:
+def test_commands_are_entry_points_of_the_package() -> None:
     scripts = {
         entry.name: entry.value
         for entry in importlib.metadata.entry_points(group="console_scripts")
@@ -45,7 +45,27 @@ def test_commands_are_entry_points_of_the_cli_module() -> None:
     assert scripts == {
         "gruenbeck-collect": "gruenbeck.cli:collect",
         "gruenbeck-analyse": "gruenbeck.cli:analyse",
+        "gruenbeck-preview-mail": "gruenbeck.preview:main",
+        "gruenbeck-log-rollover": "gruenbeck.rollover:main",
     }
+
+
+@pytest.mark.parametrize(
+    ("command", "options"),
+    [
+        ("gruenbeck-preview-mail", ("--config-file", "--today", "--output-dir", "--send-to")),
+        ("gruenbeck-log-rollover", ("--config-file", "--interval", "--hours", "--output")),
+    ],
+)
+def test_tools_list_their_options(
+    command: str, options: tuple[str, ...], tmp_path: pathlib.Path
+) -> None:
+    result = run_command(command, tmp_path, "--help")
+
+    assert result.returncode == 0
+    assert result.stdout.startswith(f"usage: {command} ")
+    for option in options:
+        assert option in result.stdout
 
 
 def test_help_lists_the_options(tmp_path: pathlib.Path) -> None:
