@@ -94,6 +94,36 @@ def test_data_mail_has_the_statistics_in_the_text_and_the_csv_files_attached(
     assert warnings() == []
 
 
+def test_composing_the_data_mail_sends_and_writes_nothing(
+    smtp: "FakeSMTP", loaded_config: config.Configuration
+) -> None:
+    path = write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
+    before = path.read_bytes()
+
+    data_mail = cli.compose_data_mail(loaded_config, loaded_config.data_path, TODAY)
+
+    assert data_mail.files == (path,)
+    assert data_mail.text.startswith(
+        "your stored data\n\nWater consumption in liters, run on 2026-11-23\n"
+    )
+    assert data_mail.html is not None
+    assert data_mail.html.startswith("<!DOCTYPE html>")
+    assert smtp.connections == []
+    assert path.read_bytes() == before
+    assert list(loaded_config.data_path.iterdir()) == [path]
+
+
+def test_composing_the_data_mail_without_data_folder_fails(
+    tmp_path: pathlib.Path, loaded_config: config.Configuration
+) -> None:
+    folder = tmp_path / "missing"
+
+    with pytest.raises(storage.StorageError, match="data folder does not exist"):
+        cli.compose_data_mail(loaded_config, folder, TODAY)
+
+    assert not folder.exists()
+
+
 def test_data_mail_marks_interpolated_and_missing_days(
     smtp: "FakeSMTP", loaded_config: config.Configuration
 ) -> None:

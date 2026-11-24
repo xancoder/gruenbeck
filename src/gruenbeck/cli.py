@@ -306,6 +306,35 @@ def check_stored_overlap(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class DataMail:
+    """the data mail as it goes out, before it is sent"""
+
+    text: str
+    html: str | None
+    """the HTML document, None if it could not be made (the mail has the text only)"""
+    files: tuple[pathlib.Path, ...]
+    """the csv files to attach"""
+
+
+def compose_data_mail(
+    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
+) -> DataMail:
+    """
+    make the data mail from the csv files of the data folder and the statistics
+
+    Only reads the data folder: nothing is written and nothing is sent. The statistics
+    never fail the mail, see get_statistics().
+    :param today: day of the run, for the statistics
+    :raises storage.StorageError: the data folder does not exist or is not a folder
+    """
+    files = storage.list_csv_files(data_path)
+    notes = [] if files else [NO_DATA_FILES_TEXT]
+    statistics = get_statistics(config, data_path, today, notes)
+    text = "\n\n".join([DATA_MAIL_TEXT, *notes, statistics.text])
+    return DataMail(text, statistics.html, tuple(files))
+
+
 def get_mail(
     config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
 ) -> bool:
@@ -315,11 +344,14 @@ def get_mail(
     :return: True if the mail was sent; a failure is logged and gives False
     """
     try:
-        files = storage.list_csv_files(data_path)
-        notes = [] if files else [NO_DATA_FILES_TEXT]
-        statistics = get_statistics(config, data_path, today, notes)
-        text = "\n\n".join([DATA_MAIL_TEXT, *notes, statistics.text])
-        mail.send_mail(config.mail, config.mail.subject, text, files, html=statistics.html)
+        data_mail = compose_data_mail(config, data_path, today)
+        mail.send_mail(
+            config.mail,
+            config.mail.subject,
+            data_mail.text,
+            data_mail.files,
+            html=data_mail.html,
+        )
         logger.info("mail sent successfully")
         return True
     except errors.GruenbeckError as error:

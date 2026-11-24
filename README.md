@@ -194,6 +194,24 @@ The data is stored before the mail is made, so the mail goes out whatever happen
 - a chart cannot be drawn: the HTML is made without that chart
 - the HTML cannot be made: the mail has the text only
 
+#### preview of the data mail
+
+`scripts/preview_data_mail.py` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. It uses the package like the data collector does, so run it from the repository root or pass the configuration file:
+
+```shell script
+uv run python scripts/preview_data_mail.py --output-dir ./log/preview
+uv run python scripts/preview_data_mail.py --send-to me@example.com
+```
+
+| option | meaning |
+|--------|---------|
+| `--config-file` / `-c` | configuration file (default `./src/config.json`) |
+| `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
+| `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the script only reports what it built (lines of text, size of the HTML, attachments) |
+| `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
+
+Warnings of the statistics and the charts go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
+
 ### analysis
 
 `gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
@@ -215,6 +233,7 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
+| `scripts/preview_data_mail.py` | read-only preview of the data mail without the device (files, or a mail to your own address) |
 | `deploy/systemd/` | systemd units and their setup |
 
 ### tests
