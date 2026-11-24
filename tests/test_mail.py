@@ -46,8 +46,9 @@ def send(
     subject: str = "subject",
     text: str = "text",
     attachments: collections.abc.Iterable[pathlib.Path] = (),
+    html: str | None = None,
 ) -> None:
-    mail.send_mail(settings, subject, text, attachments)
+    mail.send_mail(settings, subject, text, attachments, html)
 
 
 def parts(message: email.message.EmailMessage) -> list[tuple[str, str | None, typing.Any]]:
@@ -402,3 +403,102 @@ def test_other_errors_are_not_retried(
 
     assert str(err.value) == f"Unexpected error while sending email: {error}"
     assert sleeps == []
+
+
+# --- HTML part (P007-S4) ------------------------------------------------------------
+
+HTML = "<!DOCTYPE html><html><body><p>the <b>stored</b> data</p></body></html>"
+
+
+def test_mail_with_html_is_multipart_alternative_with_the_html_last(smtp: "FakeSMTP") -> None:
+    send(text="the text", html=HTML)
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "multipart/alternative"
+    assert parts(message) == [("text/plain", None, "the text\n"), ("text/html", None, HTML + "\n")]
+    # the mail program shows the last part it can, so the HTML is the preferred one
+    body = message.get_body(preferencelist=("html", "plain"))
+    assert body is not None
+    assert body.get_content_type() == "text/html"
+
+
+def test_mail_with_html_and_attachments_keeps_both_in_one_multipart_mixed_mail(
+    smtp: "FakeSMTP", tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / "a.csv").write_text("date,value\n")
+    (tmp_path / "b.csv").write_text("date,value\n")
+
+    send(text="the text", html=HTML, attachments=sorted(tmp_path.glob("*.csv")))
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "multipart/mixed"
+    alternative, *attachments = message.iter_parts()
+    assert alternative.get_content_type() == "multipart/alternative"
+    assert [(part.get_content_type(), part.get_content()) for part in alternative.iter_parts()] == [
+        ("text/plain", "the text\n"),
+        ("text/html", HTML + "\n"),
+    ]
+    assert [(part.get_content_type(), part.get_filename()) for part in attachments] == [
+        ("application/octet-stream", "a.csv"),
+        ("application/octet-stream", "b.csv"),
+    ]
+
+
+def test_html_with_non_ascii_text_is_sent_as_utf8(smtp: "FakeSMTP") -> None:
+    html = "<html><body><p>11-16 \N{EN DASH} 11-22 \N{NO-BREAK SPACE}</p></body></html>"
+
+    send(text="11-16 - 11-22", html=html)
+
+    (message,) = smtp.messages()
+    _, html_part = message.iter_parts()
+    assert html_part.get_content_charset() == "utf-8"
+    assert html_part.get_content() == html + "\n"
+
+
+def test_long_lines_of_the_html_survive_the_transmission(smtp: "FakeSMTP") -> None:
+    html = "<html><body>" + '<svg><line x1="1" /></svg>' * 2000 + "</body></html>"
+
+    send(text="the text", html=html)
+
+    (raw,) = smtp.raw_messages()
+    assert max(len(line) for line in raw.split(b"\r\n")) <= 998
+    (message,) = smtp.messages()
+    assert parts(message)[1][2] == html + "\n"
+
+
+def test_unreadable_attachment_is_named_in_the_text_and_in_the_html(
+    smtp: "FakeSMTP", tmp_path: pathlib.Path
+) -> None:
+    (tmp_path / "a<b>&.csv").mkdir()  # cannot be read as a file
+
+    send(text="body", html=HTML, attachments=[tmp_path / "a<b>&.csv"])
+
+    (message,) = smtp.messages()
+    # no attachment is left, so the mail is the text and the HTML
+    assert message.get_content_type() == "multipart/alternative"
+    text, html = (part.get_content() for part in message.iter_parts())
+    assert text.startswith("body\n\nError attaching file a<b>&.csv: [Errno 21]")
+    # the note is escaped and inside the body of the document
+    assert (
+        '<p style="margin:12px 16px;font-size:13px;">Error attaching file a&lt;b&gt;&amp;.csv:'
+        in html
+    )
+    assert html.index("Error attaching file") < html.index("</body>")
+    assert html.rstrip().endswith("</body></html>")
+
+
+def test_notes_go_to_the_end_of_a_html_without_body() -> None:
+    assert mail.add_notes_to_html("<p>x</p>", ["a & b"]) == (
+        '<p>x</p><p style="margin:12px 16px;font-size:13px;">a &amp; b</p>'
+    )
+    assert mail.add_notes_to_html("<p>x</p>", []) == "<p>x</p>"
+
+
+def test_mail_without_html_stays_as_before(smtp: "FakeSMTP", tmp_path: pathlib.Path) -> None:
+    (tmp_path / "a.csv").write_text("a")
+
+    send(text="the text", attachments=[tmp_path / "a.csv"], html=None)
+
+    (message,) = smtp.messages()
+    assert message.get_content_type() == "multipart/mixed"
+    assert [kind for kind, _, _ in parts(message)] == ["text/plain", "application/octet-stream"]

@@ -6,6 +6,7 @@ import datetime
 import logging
 import os
 import pathlib
+import re
 import shutil
 
 from gruenbeck import config, errors
@@ -45,6 +46,20 @@ def get_data_file(data_path: str | os.PathLike[str], prefix: str, year: int | st
     return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
 
 
+def list_year_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:
+    """
+    find the yearly data files written by the data collector
+    :param data_path: data folder (dataPath)
+    :param prefix: dataFile.prefix
+    :return: sorted list of pathlib.Path of '<prefix>_<year>.csv' in the data folder
+    """
+    data_path = pathlib.Path(data_path)
+    year_file = re.compile(rf"{re.escape(prefix)}_\d{{4}}\.csv")
+    return sorted(
+        input_file for input_file in data_path.glob("*.csv") if year_file.fullmatch(input_file.name)
+    )
+
+
 def list_csv_files(data_folder: pathlib.Path) -> list[pathlib.Path]:
     """
     the csv files directly in the data folder (not in subfolders), sorted by name
@@ -60,9 +75,15 @@ def read_data_file(
 ) -> dict[str, int | str]:
     """
     stored values of one yearly file
+
+    A value is a number if it is made of decimal digits only (str.isdecimal(): exactly the
+    characters int() accepts, also digits of other scripts). Anything else stays text without
+    an error: "-", an empty value, a sign, a decimal point or blanks, and characters such as
+    "²" or "½" that str.isnumeric() accepts but int() does not.
     :param fieldnames: column names of date and value (dataFile.fieldnames)
     :param date_pattern: format of the dates (dataFile.datePattern)
-    :return: dictionary of date text and value (int if numeric), empty without file
+    :return: dictionary of date text and value (int if a number, else the text), empty without
+        file
     :raises StorageError: a column is missing, or a date does not match date_pattern
     """
     data: dict[str, int | str] = {}
@@ -87,7 +108,7 @@ def read_data_file(
                         f" dataFile.datePattern {date_pattern!r}"
                     ) from None
                 value = row[fieldnames.value]
-                data[text] = int(value) if value.isnumeric() else value
+                data[text] = int(value) if value.isdecimal() else value
     return data
 
 

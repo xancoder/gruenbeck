@@ -52,3 +52,33 @@ def test_list_csv_files_without_a_data_folder_is_an_error(
         storage.list_csv_files(folder)
 
     assert str(err.value) == f"data folder does not exist or is not a directory: {folder}"
+
+
+def test_year_files_are_the_yearly_files_of_the_prefix(tmp_path: pathlib.Path) -> None:
+    for name in (
+        "p_2026.csv",
+        "p_2025.csv",
+        "p_2025.csv.20261121.bak",
+        "p_26.csv",
+        "q_2026.csv",
+        "p_2026_copy.csv",
+        "notes.txt",
+    ):
+        (tmp_path / name).write_text("date,value\n")
+
+    files = storage.list_year_files(tmp_path, "p")
+
+    assert files == [tmp_path / "p_2025.csv", tmp_path / "p_2026.csv"]
+
+
+def test_prefix_is_not_a_pattern(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "p.x_2026.csv").write_text("")
+    (tmp_path / "pax_2026.csv").write_text("")
+
+    files = storage.list_year_files(str(tmp_path), "p.x")
+
+    assert files == [tmp_path / "p.x_2026.csv"]
+
+
+def test_year_files_of_a_missing_folder_is_empty(tmp_path: pathlib.Path) -> None:
+    assert storage.list_year_files(tmp_path / "missing", "p") == []

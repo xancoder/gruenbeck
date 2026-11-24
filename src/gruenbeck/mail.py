@@ -8,6 +8,7 @@ import socket
 import ssl
 import time
 from collections.abc import Iterable
+from html import escape
 
 from gruenbeck import config, errors
 
@@ -57,15 +58,21 @@ def build_message(
     subject: str,
     text: str,
     attachments: Iterable[pathlib.Path] = (),
+    html: str | None = None,
 ) -> email.message.EmailMessage:
     """
     build the mail from the sender and the recipients of the configuration
+
+    Text only is a text/plain mail. With `html` it is multipart/alternative (the text first,
+    the HTML as the preferred part), and with attachments multipart/mixed with that as its
+    first part.
 
     :param settings: mail section of the configuration
     :param subject: subject of the mail
     :param text: body of the mail
     :param attachments: files to attach; a file that cannot be read is left out and named
-        at the end of the body
+        at the end of the body (and of the HTML)
+    :param html: the same mail as a complete HTML document (None for no HTML part)
     :raises MailError: a header is invalid (e.g. a line break in the subject)
     """
     files = []
@@ -85,9 +92,22 @@ def build_message(
     except ValueError as error:
         raise MailError(f"Cannot build the email: {error}") from error
     message.set_content("\n\n".join([text, *notes]))
+    if html is not None:
+        message.add_alternative(add_notes_to_html(html, notes), subtype="html")
     for name, data in files:
         message.add_attachment(data, maintype="application", subtype="octet-stream", filename=name)
     return message
+
+
+def add_notes_to_html(html: str, notes: Iterable[str]) -> str:
+    """the notes (plain texts) as paragraphs at the end of the body of a HTML document"""
+    paragraphs = "".join(
+        f'<p style="margin:12px 16px;font-size:13px;">{escape(note)}</p>' for note in notes
+    )
+    if not paragraphs:
+        return html
+    before, found, after = html.rpartition("</body>")
+    return f"{before}{paragraphs}</body>{after}" if found else html + paragraphs
 
 
 def send_mail(
@@ -95,6 +115,7 @@ def send_mail(
     subject: str,
     text: str,
     attachments: Iterable[pathlib.Path] = (),
+    html: str | None = None,
 ) -> None:
     """
     send a mail to the recipients of the configuration, with or without attachments
@@ -107,9 +128,10 @@ def send_mail(
     :param subject: subject of the mail
     :param text: body of the mail
     :param attachments: files to attach (see build_message)
+    :param html: the mail as HTML document, sent next to the text (see build_message)
     :raises MailError: the mail cannot be built or sent
     """
-    message = build_message(settings, subject, text, attachments)
+    message = build_message(settings, subject, text, attachments, html)
     security = get_smtp_security(settings)
 
     attempts = 0

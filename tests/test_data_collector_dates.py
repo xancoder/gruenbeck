@@ -46,6 +46,7 @@ def mails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, typing.Any]]:
         subject: str,
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
     ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append(("error", text))
@@ -887,6 +888,27 @@ def test_run_with_a_text_value_stored_for_a_new_day_writes_nothing(
         (
             "error",
             "the new values differ from the stored ones (2026-11-15: stored -,"
+            f" new {true_value(day('2026-11-15'))}): nothing written; check the data"
+            " files and the device",
+        )
+    ]
+
+
+@pytest.mark.parametrize("stored", ["\u00b2", "\u00bd"], ids=["superscript-two", "one-half"])
+def test_run_with_a_character_int_rejects_stored_for_a_new_day_writes_nothing(
+    run: Run, tmp_path: pathlib.Path, mails: list[tuple[str, typing.Any]], stored: str
+) -> None:
+    # a text value, not an unexpected ValueError of int()
+    rows = stored_rows(day("2026-11-02"), day("2026-11-15"))
+    rows[-1] = ("2026-11-15", stored)
+    write_year(tmp_path, 2026, rows)
+
+    assert run(memory(true_value)) == 1
+
+    assert mails == [
+        (
+            "error",
+            f"the new values differ from the stored ones (2026-11-15: stored {stored},"
             f" new {true_value(day('2026-11-15'))}): nothing written; check the data"
             " files and the device",
         )

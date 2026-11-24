@@ -44,6 +44,7 @@ def mails(
         subject: str,
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
     ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append((subject, settings, text))
@@ -354,11 +355,13 @@ def device(monkeypatch: pytest.MonkeyPatch) -> FakeDevice:
 # --- data mail: get_mail ------------------------------------------------------------
 
 
-def parts(message: email.message.EmailMessage) -> list[tuple[str, str | None, typing.Any]]:
-    """(content type, filename, content) of every part of a multipart mail"""
+def attachments_of(
+    message: email.message.EmailMessage,
+) -> list[tuple[str, str | None, typing.Any]]:
+    """(content type, filename, content) of every attachment of a multipart/mixed mail"""
     return [
         (part.get_content_type(), part.get_filename(), part.get_content())
-        for part in message.iter_parts()
+        for part in list(message.iter_parts())[1:]
     ]
 
 
@@ -374,15 +377,23 @@ def test_get_mail_sends_the_csv_files_of_the_data_folder(
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "deeper.csv").write_text("not attached")
 
-    assert cli.get_mail(loaded_config, tmp_path) is True
+    assert cli.get_mail(loaded_config, tmp_path, TODAY) is True
 
     (message,) = smtp.messages()
     # the subject is the one of the mail section
     assert message["Subject"] == "[data collector] - gruenbeck"
     assert message.get_content_type() == "multipart/mixed"
-    # attachments sorted by name
-    assert parts(message) == [
-        ("text/plain", None, "your stored data\n"),
+    # the first part is the text and the HTML next to each other (tests/test_data_mail.py): the
+    # text starts with the line of the mail, the statistics follow; attachments sorted by name
+    body = next(message.iter_parts())
+    assert body.get_content_type() == "multipart/alternative"
+    text, html = body.iter_parts()
+    assert (text.get_content_type(), html.get_content_type()) == ("text/plain", "text/html")
+    assert text.get_content().startswith(
+        "your stored data\n\nWater consumption in liters, run on 2026-11-23\n"
+    )
+    assert html.get_content().startswith("<!DOCTYPE html>")
+    assert attachments_of(message) == [
         ("application/octet-stream", "gruenbeck_2025.csv", b"date,value\r\n2025-12-31,3\r\n"),
         ("application/octet-stream", "gruenbeck_2026.csv", b"date,value\n2026-11-22,101\n"),
     ]
@@ -397,11 +408,17 @@ def test_get_mail_without_csv_files_says_so(
 ) -> None:
     (tmp_path / "notes.txt").write_text("not attached")
 
-    assert cli.get_mail(loaded_config, tmp_path) is True
+    assert cli.get_mail(loaded_config, tmp_path, TODAY) is True
 
     (message,) = smtp.messages()
-    assert message.get_content_type() == "text/plain"
-    assert message.get_content() == "your stored data\n\nNo data files found to attach.\n"
+    # nothing to attach: the text and the HTML are the whole mail
+    assert message.get_content_type() == "multipart/alternative"
+    text, html = message.iter_parts()
+    assert text.get_content().startswith(
+        "your stored data\n\nNo data files found to attach.\n\n"
+        "Water consumption in liters, run on 2026-11-23\n"
+    )
+    assert "No data files found to attach." in html.get_content()
     assert logs() == [("INFO", "mail sent successfully")]
 
 
@@ -413,7 +430,7 @@ def test_get_mail_without_data_folder_returns_false(
 ) -> None:
     folder = tmp_path / "missing"
 
-    assert cli.get_mail(loaded_config, folder) is False
+    assert cli.get_mail(loaded_config, folder, TODAY) is False
 
     assert logs() == [
         (
@@ -448,12 +465,13 @@ def test_failed_data_mail_returns_false(
         subject: str,
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
     ) -> typing.NoReturn:
         raise error
 
     monkeypatch.setattr(mail, "send_mail", fail)
 
-    assert cli.get_mail(loaded_config, tmp_path) is False
+    assert cli.get_mail(loaded_config, tmp_path, TODAY) is False
     assert logs() == [("ERROR", message)]
 
 
@@ -466,7 +484,7 @@ def test_data_mail_over_smtp_with_rejected_login_returns_false(
 ) -> None:
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
-    assert cli.get_mail(loaded_config, tmp_path) is False
+    assert cli.get_mail(loaded_config, tmp_path, TODAY) is False
     assert logs() == [
         ("ERROR", "mail sending failed: Authentication failed: (535, b'bad credentials')")
     ]
@@ -536,6 +554,7 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
         subject: str,
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
     ) -> typing.NoReturn:
         subjects.append(subject)
         raise mail.MailError("Authentication failed: refused")

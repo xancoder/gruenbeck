@@ -120,7 +120,7 @@ In every failing case nothing is written, not even one of two yearly files, and 
 
 | exit code | meaning |
 |-----------|---------|
-| `0` | data collected, stored and sent by mail |
+| `0` | data collected, stored and sent by mail (also if only the [statistics in the data mail](#data-mail) failed) |
 | `1` | any failure: configuration or data folder invalid, device not reachable or without values, new values that differ from the stored ones, e.g. a run before the daily rollover of the device (see the note under [Scheduling](#scheduling)), error while processing or writing data, or the data mail could not be sent (the collected data is stored anyway) |
 
 Cron and systemd can therefore detect a failed run by its exit code.
@@ -139,6 +139,86 @@ Scheduled runs call the command of the virtual environment directly (`./.venv/bi
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
+### data mail
+
+Every run ends with the data mail to the `recipients`: the subject is `mail.subject`, every CSV file directly in the data folder is attached, and the mail holds the statistics of the stored consumption as text and as HTML. They are calculated after the yearly files have been written, so they include the values of the run. All figures are whole liters.
+
+The mail is `multipart/alternative` (text and HTML, the mail program shows the HTML) inside `multipart/mixed` with the CSV files. The **text** is plain ASCII with tables of a fixed column width (at most 78 characters per line). The **HTML** has the same tables, a table layout of at most 640 px with inline CSS that fits a phone, and four charts. There is no configuration key for it: the data mail always has both parts.
+
+The statistics cover, for the day of the run:
+
+| part | period |
+|------|--------|
+| Last week | the last complete calendar week (Monday to Sunday) before the day of the run, with the value of every day. A run on another weekday (e.g. a missed run that the systemd timer makes up) reports the same week |
+| Current month so far | the 1st up to yesterday; left out on the 1st of a month |
+| Last month | the last complete month |
+| Year so far | 1 January up to yesterday; left out on 1 January |
+| Earlier years as a whole | the earlier years, each from 1 January to 31 December (with the limits below) |
+
+Each of the first four parts is compared with the same period of the earlier years, latest year first: the calendar week with the same number (ISO week; week 53 only in years that have one), the same days of the month, the same days of the year (29 February counts only in leap years, so an earlier year ends at 28 February if the year of the run does not have the 29th), and for the last month the complete month. The table shows total, mean per day, and the minimum and maximum with their day (`MM-DD`):
+
+```text
+Year  Period          Total    Mean          Min          Max
+----  ------------  --------  -----  -----------  -----------
+2026  11-16..11-22     1100     157     90 11-21    300 11-20
+2025  11-17..11-23      140      20     20 11-17     20 11-17
+```
+
+The comparisons stay short with two limits (constants `MIN_COVERAGE` and `MAX_COMPARED_YEARS` in `src/gruenbeck/report.py`, not configuration keys):
+
+- An earlier period is only shown if at least **half of its days have a value** (measured or interpolated): 4 of 7 days for a week, 183 of 365 or 366 days for a year. An earlier year with fewer values is left out, and so is an earlier year without any value in the period. The period of the run itself is always shown, however few values it has.
+- Of the earlier years that remain, each table shows **at most the 5 latest**.
+
+A note below the table says how many earlier years with values in the period are left out, e.g. `4 earlier years are not shown (older than the latest 5, or with values on less than half of the days).` If no earlier year is left to show, the note is `No earlier year has enough values for this period.`
+
+#### missing values and interpolation
+
+A day is **missing** if no value is stored for it (no row, or a value that is not a number such as `-` from older runs), from the first stored day up to yesterday. Days before the first stored day and the day of the run itself are **without data**: the collector was not running yet, or the day is not over.
+
+- A gap of up to 3 missing days with a measured day on both sides is **interpolated**: a straight line between the two values, in whole liters. The value counts for the total and the mean, is marked with `*` (in the list of days and at the total of the period) and is not used for the minimum and maximum, which are measured days only. Interpolated values exist for the statistics only; they are never written to the data files.
+- Longer gaps and gaps at the edge of the data (for example no value for yesterday, which has no measured day after it) stay missing: total and mean cover the days with a value, and the period is marked below its row as `incomplete: 4 days missing` and, if it starts before the first stored day, `n days without data`.
+
+#### charts
+
+The HTML part has four charts, drawn as SVG directly in the HTML (no image, script, font or other external resource, and no extra package):
+
+| chart | content |
+|-------|---------|
+| Daily consumption | the liters of every day of the last week as bars |
+| Weekly consumption | the liters of the last 52 calendar weeks as a line with points |
+| Monthly consumption by year | grouped bars per month for the current year and up to 3 earlier years that have values on at least half of their days |
+| Cumulative consumption | a line per year (the years of the monthly chart) from 1 January, with the day of the run marked |
+
+The current year has the strong color, the earlier years muted ones, the same color for a year in every chart. Text and axes take the text color of the mail, so the charts are readable on a light and on a dark background (the HTML switches its own colors with `prefers-color-scheme`). Marks: an interpolated day is a light bar with `*` (a ring in the lines), a missing day is a gap with a dash, a month with missing days is only an outline, a week with missing days is a hollow point.
+
+**Gmail and Outlook do not show SVG in mails.** There the charts are simply not displayed, and the tables of the HTML part (or the text) still hold every figure. Thunderbird and Apple Mail show the charts.
+
+#### if a part cannot be made
+
+The data is stored before the mail is made, so the mail goes out whatever happens to its parts; the exit code stays `0` and the log file gets a warning with the traceback:
+
+- the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`): a note takes the place of the statistics in the text and in the HTML, without charts
+- a chart cannot be drawn: the HTML is made without that chart
+- the HTML cannot be made: the mail has the text only
+
+#### preview of the data mail
+
+`scripts/preview_data_mail.py` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. It uses the package like the data collector does, so run it from the repository root or pass the configuration file:
+
+```shell script
+uv run python scripts/preview_data_mail.py --output-dir ./log/preview
+uv run python scripts/preview_data_mail.py --send-to me@example.com
+```
+
+| option | meaning |
+|--------|---------|
+| `--config-file` / `-c` | configuration file (default `./src/config.json`) |
+| `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
+| `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the script only reports what it built (lines of text, size of the HTML, attachments) |
+| `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
+
+Warnings of the statistics and the charts go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
+
 ### analysis
 
 `gruenbeck-analyse` (formerly `src/data-analyse.py`) prints monthly statistics per year and plots the mean consumption. It needs the extra `analysis` (pandas, matplotlib) and reads the yearly files `<prefix>_<year>.csv` from the `dataPath` of the configuration; other files in the data folder are ignored. Like the data collector it takes `--config-file` / `-c` (default `./src/config.json`, relative to the current directory) and uses `datePattern` and `fieldnames` of `dataFile`, so run it from the repository root or pass the configuration file:
@@ -155,9 +235,12 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/config.py` | reading the configuration file |
 | `src/gruenbeck/device.py` | web server of the soft water system: parameter file, request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |
-| `src/gruenbeck/mail.py` | data mail and error mail |
+| `src/gruenbeck/mail.py` | data mail (text, HTML, CSV attachments) and error mail |
+| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation, text and HTML tables) |
+| `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `scripts/log_device_rollover.py` | read-only diagnostic tool for the daily rollover of the device |
+| `scripts/preview_data_mail.py` | read-only preview of the data mail without the device (files, or a mail to your own address) |
 | `deploy/systemd/` | systemd units and their setup |
 
 ### tests

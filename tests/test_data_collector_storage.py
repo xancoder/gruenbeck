@@ -67,6 +67,45 @@ def test_numeric_values_become_int_others_stay_text(tmp_path: pathlib.Path) -> N
     }
 
 
+def test_characters_that_int_rejects_stay_text_without_an_error(tmp_path: pathlib.Path) -> None:
+    # str.isnumeric() accepts these (int() raises ValueError), str.isdecimal() does not
+    path = tmp_path / "p_2026.csv"
+    path.write_text(
+        "date,value\n"
+        "2026-11-20,\u00b2\n"  # superscript two
+        "2026-11-21,\u00bd\n"  # vulgar fraction one half
+        "2026-11-22,\u2460\n"  # circled digit one
+        "2026-11-23,-\n"
+        "2026-11-24,1\u00b2\n",
+        encoding="utf-8",
+    )
+
+    assert storage.read_data_file(path, FIELDNAMES, ISO) == {
+        "2026-11-20": "\u00b2",
+        "2026-11-21": "\u00bd",
+        "2026-11-22": "\u2460",
+        "2026-11-23": "-",
+        "2026-11-24": "1\u00b2",
+    }
+
+
+def test_decimal_digits_of_other_scripts_are_numbers(tmp_path: pathlib.Path) -> None:
+    path = tmp_path / "p_2026.csv"
+    path.write_text(
+        "date,value\n"
+        "2026-11-20,\u0663\n"  # arabic-indic digit three
+        "2026-11-21,\u0967\u0968\n"  # devanagari digits one and two
+        "2026-11-22,\uff11\uff12\uff13\n",  # fullwidth digits one, two and three
+        encoding="utf-8",
+    )
+
+    assert storage.read_data_file(path, FIELDNAMES, ISO) == {
+        "2026-11-20": 3,
+        "2026-11-21": 12,
+        "2026-11-22": 123,
+    }
+
+
 def test_dates_are_kept_as_text(tmp_path: pathlib.Path) -> None:
     path = tmp_path / "p_2026.csv"
     path.write_text("date,value\n22.11.2026,101\n01.12.2026,7\n", encoding="utf-8")
