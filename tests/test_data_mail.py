@@ -13,7 +13,17 @@ import typing
 
 import pytest
 
-from gruenbeck import charts, cli, config, device, report, report_html, report_text, storage
+from gruenbeck import (
+    charts,
+    cli,
+    collector,
+    config,
+    device,
+    report,
+    report_html,
+    report_text,
+    storage,
+)
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
@@ -81,7 +91,7 @@ def test_data_mail_has_the_statistics_in_the_text_and_the_csv_files_attached(
     write_year(loaded_config, 2025, week_rows(50, 50, 50, 50, 50, 50, 50, first="2025-11-17"))
     write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, attachments = sent(smtp)
     assert text.startswith("your stored data\n\nWater consumption in liters, run on 2026-11-23\n")
@@ -100,7 +110,7 @@ def test_composing_the_data_mail_sends_and_writes_nothing(
     path = write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
     before = path.read_bytes()
 
-    data_mail = cli.compose_data_mail(loaded_config, loaded_config.data_path, TODAY)
+    data_mail = collector.compose_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     assert data_mail.files == (path,)
     assert data_mail.text.startswith(
@@ -119,7 +129,7 @@ def test_composing_the_data_mail_without_data_folder_fails(
     folder = tmp_path / "missing"
 
     with pytest.raises(storage.StorageError, match="data folder does not exist"):
-        cli.compose_data_mail(loaded_config, folder, TODAY)
+        collector.compose_data_mail(loaded_config, folder, TODAY)
 
     assert not folder.exists()
 
@@ -130,7 +140,7 @@ def test_data_mail_marks_interpolated_and_missing_days(
     # Tuesday is no number: interpolated; Thursday to Sunday have no value: missing
     write_year(loaded_config, 2026, week_rows(100, "-", 300))
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, _ = sent(smtp)
     lines = text.splitlines()
@@ -147,7 +157,7 @@ def test_data_mail_without_an_earlier_year_says_so(
 ) -> None:
     write_year(loaded_config, 2026, week_rows(100, 100, 100, 100, 100, 100, 100))
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, _ = sent(smtp)
     assert text.count("No earlier year has enough values for this period.") == 4
@@ -167,7 +177,7 @@ def test_data_mail_with_a_long_history_compares_with_the_latest_five_years(
             {(first + datetime.timedelta(days=n)).isoformat(): 100 for n in range(days)},
         )
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, attachments = sent(smtp)
     years = re.findall(r"^(\d{4})  \d\d-\d\d\.\.", text, flags=re.MULTILINE)
@@ -193,7 +203,7 @@ def test_data_mail_with_a_superscript_in_a_data_file_has_a_missing_day(
     # "\u00b2" is no number for int(): the day is missing, the statistics are made as usual
     write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, "\u00b2"))
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, attachments = sent(smtp)
     lines = text.splitlines()
@@ -215,7 +225,7 @@ def test_unusable_data_file_gives_a_note_instead_of_the_statistics(
     old_file = storage.get_data_file(loaded_config.data_path, prefix, 2024)
     old_file.write_text("day,litres\n2024-11-18,5\n", encoding="utf-8")
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, attachments = sent(smtp)
     assert text.startswith(
@@ -241,7 +251,7 @@ def test_data_file_with_a_row_without_value_gives_the_note(
     old_file = storage.get_data_file(loaded_config.data_path, loaded_config.data_file.prefix, 2024)
     old_file.write_text("date,value\n2024-11-18,5\n2024-11-19\n", encoding="utf-8")
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, _ = sent(smtp)
     assert text.startswith(
@@ -266,7 +276,7 @@ def test_unexpected_error_of_the_statistics_gives_the_note_too(
 
     monkeypatch.setattr(report_text, "format_text", fail)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, attachments = sent(smtp)
     assert text == f"your stored data\n\n{STATISTICS_FAILED}boom\nDetails are in the log file.\n"
@@ -291,7 +301,9 @@ def test_failed_statistics_do_not_fail_the_run(
 
     # the collector part of the run is not under test: the data is stored already
     monkeypatch.setattr(
-        cli, "collect_and_store", lambda config: cli.CollectResult(loaded_config.data_path, TODAY)
+        collector,
+        "collect_and_store",
+        lambda config: collector.CollectResult(loaded_config.data_path, TODAY),
     )
     monkeypatch.setattr(report, "build_report", fail)
 
@@ -314,9 +326,9 @@ def test_run_calculates_the_statistics_for_the_day_of_the_run(
     # Thursday: the week of the statistics is the one before the week of the run
     thursday = datetime.date(2026, 11, 26)
     monkeypatch.setattr(
-        cli,
+        collector,
         "collect_and_store",
-        lambda config: cli.CollectResult(loaded_config.data_path, thursday),
+        lambda config: collector.CollectResult(loaded_config.data_path, thursday),
     )
 
     assert cli.main(str(loaded_config.file)) == 0
@@ -350,7 +362,7 @@ def test_run_past_midnight_calculates_the_statistics_for_the_day_of_the_stored_v
         return {"D_C_4_2": "23:59", **{f"D_Y_2_{place}": "100" for place in range(1, 15)}}
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
-    monkeypatch.setattr(cli, "local_now", now)
+    monkeypatch.setattr(collector, "local_now", now)
 
     assert cli.main(str(loaded_config.file)) == 0
 
@@ -382,7 +394,7 @@ def test_data_mail_is_text_and_html_with_the_four_charts_and_the_csv_files(
     write_year(loaded_config, 2025, week_rows(50, 50, 50, 50, 50, 50, 50, first="2025-11-17"))
     write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     (message,) = smtp.messages()
     assert message.get_content_type() == "multipart/mixed"
@@ -424,7 +436,7 @@ def test_failed_statistics_give_a_note_in_the_html_too(
 
     monkeypatch.setattr(report, "build_report", fail)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     (message,) = smtp.messages()
     assert message.get_content_type() == "multipart/mixed"
@@ -456,7 +468,7 @@ def test_special_characters_of_a_data_file_name_are_escaped_in_the_html(
     bad_file = storage.get_data_file(configuration.data_path, "w&<b>", 2024)
     bad_file.write_text("day,litres\n2024-11-18,5\n", encoding="utf-8")
 
-    assert cli.get_mail(configuration, configuration.data_path, TODAY) is True
+    collector.send_data_mail(configuration, configuration.data_path, TODAY)
 
     text, _ = sent(smtp)
     document = html_of(smtp)
@@ -478,7 +490,7 @@ def test_failed_chart_is_left_out_of_the_html(
 
     monkeypatch.setitem(charts.CHARTS, "monthly", fail)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     text, _ = sent(smtp)
     document = html_of(smtp)
@@ -511,7 +523,7 @@ def test_without_any_chart_the_html_has_the_tables(
     for name in list(charts.CHARTS):
         monkeypatch.setitem(charts.CHARTS, name, fail)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     document = html_of(smtp)
     assert "<svg" not in document
@@ -537,7 +549,7 @@ def test_failed_html_leaves_the_mail_with_the_text(
 
     monkeypatch.setattr(report_html, "format_html", fail)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     (message,) = smtp.messages()
     # the text and the attachment, without a multipart/alternative
@@ -564,7 +576,7 @@ def test_failed_statistics_and_failed_note_leave_the_note_in_the_text(
     monkeypatch.setattr(report_html, "format_failure_html", fail)
     storage.check_data_folder(loaded_config.data_path)
 
-    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
 
     (message,) = smtp.messages()
     # no csv file and no HTML: a plain text mail
@@ -589,7 +601,9 @@ def test_run_with_a_failed_chart_still_exits_with_0(
 
     monkeypatch.setitem(charts.CHARTS, "cumulative", fail)
     monkeypatch.setattr(
-        cli, "collect_and_store", lambda config: cli.CollectResult(loaded_config.data_path, TODAY)
+        collector,
+        "collect_and_store",
+        lambda config: collector.CollectResult(loaded_config.data_path, TODAY),
     )
 
     assert cli.main(str(loaded_config.file)) == 0

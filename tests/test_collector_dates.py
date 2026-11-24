@@ -9,7 +9,7 @@ import typing
 import pytest
 
 import gruenbeck.config
-from gruenbeck import cli, device, mail
+from gruenbeck import cli, collector, device, mail
 
 PREFIX = "gruenbeck_water_consumption"
 TODAY = datetime.date(2026, 11, 23)
@@ -94,7 +94,7 @@ def test_days_are_calendar_dates_of_the_current_day() -> None:
 
 def test_run_time_is_the_local_time_without_time_zone() -> None:
     before = datetime.datetime.now()
-    now = cli.local_now()
+    now = collector.local_now()
     after = datetime.datetime.now()
 
     assert type(now) is datetime.datetime
@@ -141,7 +141,7 @@ def test_unknown_parameter_is_an_error(name: str) -> None:
 def test_first_date_filters_earlier_days(
     caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
 ) -> None:
-    caplog.set_level(logging.INFO, logger=cli.logger.name)
+    caplog.set_level(logging.INFO, logger=collector.logger.name)
     device_data = {
         day("2026-11-22"): "101",
         day("2026-11-20"): "103",
@@ -149,7 +149,7 @@ def test_first_date_filters_earlier_days(
         day("2026-11-18"): "9",
     }
 
-    result = cli.filter_first_date(device_data, day("2026-11-20"))
+    result = collector.filter_first_date(device_data, day("2026-11-20"))
 
     assert result == {day("2026-11-22"): "101", day("2026-11-20"): "103"}
     assert "2 values before dataFile.firstDate 2026-11-20 are not written" in (caplog.text)
@@ -158,11 +158,11 @@ def test_first_date_filters_earlier_days(
 def test_without_first_date_nothing_is_filtered(
     caplog: pytest.LogCaptureFixture, loaded_config: gruenbeck.config.Configuration
 ) -> None:
-    caplog.set_level(logging.INFO, logger=cli.logger.name)
+    caplog.set_level(logging.INFO, logger=collector.logger.name)
     device_data = {day("2025-01-01"): "1", day("2026-11-22"): "101"}
 
-    assert cli.filter_first_date(device_data, None) == device_data
-    assert cli.filter_first_date(device_data, day("2025-01-01")) == device_data
+    assert collector.filter_first_date(device_data, None) == device_data
+    assert collector.filter_first_date(device_data, day("2025-01-01")) == device_data
     assert "firstDate" not in caplog.text
 
 
@@ -173,8 +173,8 @@ def test_all_values_before_first_date_fail_the_run(
 ) -> None:
     device_data = {day("2026-11-19"): "9", day("2026-11-18"): "105"}
 
-    with pytest.raises(cli.CollectError) as err:
-        cli.filter_first_date(device_data, day("2026-11-20"))
+    with pytest.raises(collector.CollectError) as err:
+        collector.filter_first_date(device_data, day("2026-11-20"))
 
     assert str(err.value) == (
         "no data was processed: all 2 values are before dataFile.firstDate 2026-11-20"
@@ -224,7 +224,7 @@ def run(
 
         now = datetime.datetime.combine(today, datetime.time.fromisoformat(local_time))
         monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
-        monkeypatch.setattr(cli, "local_now", lambda: now)
+        monkeypatch.setattr(collector, "local_now", lambda: now)
         return cli.main(str(config_file))
 
     run_main.requests = requests  # type: ignore[attr-defined]  # read by the tests
@@ -1097,7 +1097,7 @@ def test_relative_paths_start_at_the_folder_of_the_configuration(
         lambda host, parameters, timeout, session=None: {"D_C_4_2": "16:00", **response},
     )
     monkeypatch.setattr(
-        cli, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
+        collector, "local_now", lambda: datetime.datetime.combine(TODAY, datetime.time(16, 0))
     )
 
     cli.main(str(config_file))

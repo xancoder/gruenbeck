@@ -235,7 +235,8 @@ uv run --extra analysis gruenbeck-analyse
 
 | path | content |
 |------|---------|
-| `src/gruenbeck/cli.py` | the commands `gruenbeck-collect` and `gruenbeck-analyse` and the run of the data collector |
+| `src/gruenbeck/cli.py` | the commands `gruenbeck-collect` and `gruenbeck-analyse`: options, logging, error mail and exit code |
+| `src/gruenbeck/collector.py` | the run of the data collector: request the device, store the new values, compose and send the data mail |
 | `src/gruenbeck/config.py` | reading the configuration file |
 | `src/gruenbeck/device.py` | web server of the soft water system: request, meaning of the values |
 | `src/gruenbeck/storage.py` | data folder and yearly data files |

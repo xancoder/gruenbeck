@@ -17,7 +17,7 @@ import typing
 import pytest
 import requests
 
-from gruenbeck import analysis, cli, config, device, errors, mail, storage
+from gruenbeck import analysis, cli, collector, config, device, errors, mail, storage
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 TODAY = datetime.date(2026, 11, 23)
@@ -70,7 +70,7 @@ def answers(
 
     monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
     now = datetime.datetime.combine(TODAY, datetime.time(16, 0))
-    monkeypatch.setattr(cli, "local_now", lambda: now)
+    monkeypatch.setattr(collector, "local_now", lambda: now)
     return queue
 
 
@@ -375,7 +375,7 @@ def test_errors_of_the_package_have_a_common_base_class() -> None:
         config.ConfigurationError,
         device.DeviceError,
         storage.StorageError,
-        cli.CollectError,
+        collector.CollectError,
         analysis.AnalysisError,
     ):
         assert issubclass(error, errors.GruenbeckError)
@@ -422,6 +422,7 @@ def test_analyse_exits_with_0(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_every_module_logs_with_its_own_name() -> None:
     assert cli.logger.name == "gruenbeck.cli"
+    assert collector.logger.name == "gruenbeck.collector"
     assert config.logger.name == "gruenbeck.config"
     assert device.logger.name == "gruenbeck.device"
     assert mail.logger.name == "gruenbeck.mail"
@@ -432,7 +433,7 @@ def test_every_module_logs_with_its_own_name() -> None:
 def test_importing_the_package_configures_no_logging() -> None:
     # a new interpreter: the tests of this process call setup_logging()
     code = (
-        "import logging, gruenbeck.analysis, gruenbeck.cli, gruenbeck.config,"
+        "import logging, gruenbeck.analysis, gruenbeck.cli, gruenbeck.collector, gruenbeck.config,"
         " gruenbeck.device, gruenbeck.mail, gruenbeck.storage;"
         " logger = logging.getLogger('gruenbeck');"
         " print(logger.level, logger.handlers, logging.getLogger().handlers)"

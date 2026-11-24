@@ -12,7 +12,7 @@ import typing
 
 import pytest
 
-from gruenbeck import cli, config, device, report, report_html, storage
+from gruenbeck import collector, config, device, report, report_html, storage
 
 if typing.TYPE_CHECKING:
     from conftest import FakeSMTP
@@ -115,7 +115,7 @@ def test_output_files_are_what_the_data_mail_contains(
 
     assert sorted(path.name for path in output.iterdir()) == ["data-mail.html", "data-mail.txt"]
     # the data collector sends the same day's mail: both parts are the files, line for line
-    assert cli.get_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY)) is True
+    collector.send_data_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY))
     (message,) = smtp.messages()
     assert (output / "data-mail.txt").read_text(encoding="utf-8") == text_of(message)
     assert (output / "data-mail.html").read_text(encoding="utf-8") == html_of(message)
@@ -199,7 +199,7 @@ def test_send_to_sends_what_the_data_mail_contains(
     smtp: "FakeSMTP", stored: config.Configuration
 ) -> None:
     assert run(stored, "--send-to", "me@example.org") == 0
-    assert cli.get_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY)) is True
+    collector.send_data_mail(stored, stored.data_path, datetime.date.fromisoformat(TODAY))
 
     preview_mail, data_mail = smtp.messages()
     assert text_of(preview_mail) == text_of(data_mail)

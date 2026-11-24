@@ -34,7 +34,7 @@ import pathlib
 import sys
 
 # the package is installed into the virtual environment (uv sync)
-import gruenbeck.cli
+import gruenbeck.collector
 import gruenbeck.config
 import gruenbeck.errors
 import gruenbeck.mail
@@ -94,7 +94,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def describe(
-    data_mail: gruenbeck.cli.DataMail, today: datetime.date, data_path: pathlib.Path
+    data_mail: gruenbeck.collector.DataMail, today: datetime.date, data_path: pathlib.Path
 ) -> list[str]:
     """the lines that tell what was built"""
     html = (
@@ -111,7 +111,9 @@ def describe(
     ]
 
 
-def write_output(output_dir: pathlib.Path, data_mail: gruenbeck.cli.DataMail) -> list[pathlib.Path]:
+def write_output(
+    output_dir: pathlib.Path, data_mail: gruenbeck.collector.DataMail
+) -> list[pathlib.Path]:
     """
     write the text and, if it was made, the HTML of the mail
     :return: the files written
@@ -131,7 +133,7 @@ def write_output(output_dir: pathlib.Path, data_mail: gruenbeck.cli.DataMail) ->
 
 
 def send_preview(
-    settings: gruenbeck.config.Mail, data_mail: gruenbeck.cli.DataMail, address: str
+    settings: gruenbeck.config.Mail, data_mail: gruenbeck.collector.DataMail, address: str
 ) -> str:
     """
     send the mail to the address only
@@ -162,7 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        data_mail = gruenbeck.cli.compose_data_mail(config, config.data_path, today)
+        data_mail = gruenbeck.collector.compose_data_mail(config, config.data_path, today)
     except gruenbeck.errors.GruenbeckError as err:
         print(f"[-] {err}", file=sys.stderr)
         return 1

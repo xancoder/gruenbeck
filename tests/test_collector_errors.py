@@ -1,6 +1,6 @@
 """
 error paths of the data collector (characterization of P006-S1): handle_error, the
-configuration and the data folder, the retries of the device request, get_mail and main
+configuration and the data folder, the retries of the device request, send_data_mail and main
 
 Since P006-S3 the configuration is checked when it is loaded (tests/test_config.py).
 """
@@ -21,7 +21,7 @@ import gruenbeck.config
 
 # the fixture device is the fake device, so the module is used as gruenbeck.device
 import gruenbeck.device
-from gruenbeck import cli, mail, storage
+from gruenbeck import cli, collector, mail, storage
 from gruenbeck import config as configuration
 
 if typing.TYPE_CHECKING:
@@ -250,7 +250,7 @@ def test_data_folder_is_created(
 ) -> None:
     folder = tmp_path / "data"
 
-    assert cli.get_data_folder(loaded_config) == folder
+    assert collector.get_data_folder(loaded_config) == folder
     assert folder.is_dir()
 
 
@@ -265,7 +265,7 @@ def test_data_folder_without_permission_is_an_error(
     monkeypatch.setattr(storage, "check_data_folder", denied)
 
     with pytest.raises(storage.StorageError) as err:
-        cli.get_data_folder(loaded_config)
+        collector.get_data_folder(loaded_config)
 
     assert str(err.value) == (
         f"creation data folder failed: [Errno 13] Permission denied: '{tmp_path / 'data'}'"
@@ -282,7 +282,7 @@ def test_data_folder_in_a_missing_folder_is_an_error(
 
     # only the last folder is created; up to P006-S4 a traceback without error mail
     with pytest.raises(storage.StorageError) as err:
-        cli.get_data_folder(loaded)
+        collector.get_data_folder(loaded)
 
     assert str(err.value) == (
         "creation data folder failed: [Errno 2] No such file or directory:"
@@ -328,7 +328,7 @@ def device(monkeypatch: pytest.MonkeyPatch) -> FakeDevice:
     return fake
 
 
-# --- data mail: get_mail ------------------------------------------------------------
+# --- data mail: send_data_mail ---------------------------------------------------------
 
 
 def attachments_of(
@@ -341,7 +341,7 @@ def attachments_of(
     ]
 
 
-def test_get_mail_sends_the_csv_files_of_the_data_folder(
+def test_send_data_mail_sends_the_csv_files_of_the_data_folder(
     smtp: "FakeSMTP",
     logs: collections.abc.Callable[[], list[tuple[str, str]]],
     tmp_path: pathlib.Path,
@@ -353,7 +353,7 @@ def test_get_mail_sends_the_csv_files_of_the_data_folder(
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "deeper.csv").write_text("not attached")
 
-    assert cli.get_mail(loaded_config, tmp_path, TODAY) is True
+    collector.send_data_mail(loaded_config, tmp_path, TODAY)
 
     (message,) = smtp.messages()
     # the subject is the one of the mail section
@@ -376,7 +376,7 @@ def test_get_mail_sends_the_csv_files_of_the_data_folder(
     assert logs() == [("INFO", "mail sent successfully")]
 
 
-def test_get_mail_without_csv_files_says_so(
+def test_send_data_mail_without_csv_files_says_so(
     smtp: "FakeSMTP",
     logs: collections.abc.Callable[[], list[tuple[str, str]]],
     tmp_path: pathlib.Path,
@@ -384,7 +384,7 @@ def test_get_mail_without_csv_files_says_so(
 ) -> None:
     (tmp_path / "notes.txt").write_text("not attached")
 
-    assert cli.get_mail(loaded_config, tmp_path, TODAY) is True
+    collector.send_data_mail(loaded_config, tmp_path, TODAY)
 
     (message,) = smtp.messages()
     # nothing to attach: the text and the HTML are the whole mail
@@ -398,7 +398,7 @@ def test_get_mail_without_csv_files_says_so(
     assert logs() == [("INFO", "mail sent successfully")]
 
 
-def test_get_mail_without_data_folder_returns_false(
+def test_send_data_mail_without_data_folder_raises_storage_error(
     smtp: "FakeSMTP",
     logs: collections.abc.Callable[[], list[tuple[str, str]]],
     tmp_path: pathlib.Path,
@@ -406,29 +406,26 @@ def test_get_mail_without_data_folder_returns_false(
 ) -> None:
     folder = tmp_path / "missing"
 
-    assert cli.get_mail(loaded_config, folder, TODAY) is False
+    with pytest.raises(
+        storage.StorageError, match=r"^data folder does not exist or is not a directory: "
+    ) as err:
+        collector.send_data_mail(loaded_config, folder, TODAY)
 
-    assert logs() == [
-        (
-            "ERROR",
-            f"mail sending failed: data folder does not exist or is not a directory: {folder}",
-        )
-    ]
+    assert str(err.value) == f"data folder does not exist or is not a directory: {folder}"
+    # cli.main logs the error (test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1)
+    assert logs() == []
     assert smtp.connections == []
 
 
 @pytest.mark.parametrize(
     "error, message",
     [
-        (
-            mail.MailError("Authentication failed: x"),
-            "mail sending failed: Authentication failed: x",
-        ),
-        (RuntimeError("boom"), "unexpected error during mail sending: boom"),
+        (mail.MailError("Authentication failed: x"), "Authentication failed: x"),
+        (RuntimeError("boom"), "unexpected error: RuntimeError: boom"),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
-def test_failed_data_mail_returns_false(
+def test_failed_data_mail_raises_mail_error(
     monkeypatch: pytest.MonkeyPatch,
     logs: collections.abc.Callable[[], list[tuple[str, str]]],
     tmp_path: pathlib.Path,
@@ -447,11 +444,16 @@ def test_failed_data_mail_returns_false(
 
     monkeypatch.setattr(mail, "send_mail", fail)
 
-    assert cli.get_mail(loaded_config, tmp_path, TODAY) is False
-    assert logs() == [("ERROR", message)]
+    with pytest.raises(mail.MailError) as err:
+        collector.send_data_mail(loaded_config, tmp_path, TODAY)
+
+    assert str(err.value) == message
+    # an unexpected error is the cause of the MailError, an expected one is raised as it is
+    assert err.value is error or err.value.__cause__ is error
+    assert logs() == []
 
 
-def test_data_mail_over_smtp_with_rejected_login_returns_false(
+def test_data_mail_over_smtp_with_rejected_login_raises_mail_error(
     smtp: "FakeSMTP",
     sleeps: list[float],
     logs: collections.abc.Callable[[], list[tuple[str, str]]],
@@ -460,10 +462,11 @@ def test_data_mail_over_smtp_with_rejected_login_returns_false(
 ) -> None:
     smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
 
-    assert cli.get_mail(loaded_config, tmp_path, TODAY) is False
-    assert logs() == [
-        ("ERROR", "mail sending failed: Authentication failed: (535, b'bad credentials')")
-    ]
+    with pytest.raises(
+        mail.MailError, match=r"^Authentication failed: \(535, b'bad credentials'\)$"
+    ):
+        collector.send_data_mail(loaded_config, tmp_path, TODAY)
+    assert logs() == []
 
 
 # --- complete run -------------------------------------------------------------------
@@ -483,7 +486,7 @@ def run(
         configuration, None removes it
     """
     now = datetime.datetime.combine(TODAY, datetime.time(16, 0))
-    monkeypatch.setattr(cli, "local_now", lambda: now)
+    monkeypatch.setattr(collector, "local_now", lambda: now)
 
     def run_main(**changes: typing.Any) -> int:
         config = copy.deepcopy(config_data)
