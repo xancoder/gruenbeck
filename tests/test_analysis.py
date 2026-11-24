@@ -108,3 +108,62 @@ def test_statistics_use_the_columns_and_the_date_pattern_of_the_configuration(
         ["2026", "-", "73", "50", "100", "25", "220"],
     ]
     assert plots == [([11, 12], [100.0, 60.0], "2026")]
+
+
+def test_output_and_lines_of_two_years(
+    plots: list[tuple[list[typing.Any], list[typing.Any], str]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """characterization (P009-S11): the exact output, whatever the code looks like inside"""
+    prefix = config_data["dataFile"]["prefix"]
+    data_folder = tmp_path / "data"
+    data_folder.mkdir()
+    (data_folder / f"{prefix}_2025.csv").write_text(
+        "date,value\n2025-11-30,100\n2025-12-01,50\n2025-12-02,70\n2025-12-03,33\n"
+    )
+    (data_folder / f"{prefix}_2026.csv").write_text(
+        "date,value\n2026-01-01,120\n2026-01-02,90\n2026-02-01,200\n"
+        "2026-03-01,10\n2026-03-02,11\n2026-03-03,12\n"
+    )
+    (data_folder / "other_2026.csv").write_text("date,value\n2026-01-01,999\n")
+
+    analysis.main(str(write_config(config_data)))
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"data folder: {data_folder}",
+        "year month mean min max std sum  ",
+        "2025    11  100 100 100 nan   100",
+        "2025    12   51  33  70  19   153",
+        "2025     -   63  33 100  29   253",
+        "",
+        "year month mean min max std sum  ",
+        "2026     1  105  90 120  21   210",
+        "2026     2  200 200 200 nan   200",
+        "2026     3   11  10  12   1    33",
+        "2026     -   74  10 200  78   443",
+        "",
+    ]
+    assert plots == [
+        ([11, 12], [100.0, 51.0], "2025"),
+        ([1, 2, 3], [105.0, 200.0, 11.0], "2026"),
+    ]
+
+
+def test_folder_without_yearly_files_is_an_error(
+    plots: list[tuple[list[typing.Any], list[typing.Any], str]],
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    tmp_path: pathlib.Path,
+) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "other_2026.csv").write_text("date,value\n2026-01-01,1\n")
+
+    with pytest.raises(analysis.AnalysisError) as excinfo:
+        analysis.main(str(write_config(config_data)))
+
+    prefix = config_data["dataFile"]["prefix"]
+    assert str(excinfo.value) == f"no data files '{prefix}_<year>.csv' in {tmp_path / 'data'}"
+    assert plots == []
