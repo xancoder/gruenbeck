@@ -22,6 +22,12 @@ Every day has one status (DayStatus):
 A period counts its days by status. Total and mean per day cover the measured and the
 interpolated days; minimum and maximum only the measured ones. A period is complete if
 none of its days is missing or without data.
+
+The comparisons with earlier years stay short and meaningful with two limits: an earlier
+period is only shown if at least MIN_COVERAGE of its days have a value (measured or
+interpolated), and at most the MAX_COMPARED_YEARS latest of those years are shown. The
+period of the run itself is always shown. The number of the earlier years that have values in
+a period but are not shown is part of the result, so the mail can say so.
 """
 
 import calendar
@@ -41,7 +47,11 @@ ONE_DAY = datetime.timedelta(days=1)
 ONE_WEEK = datetime.timedelta(days=7)
 # gaps of more days stay missing
 MAX_INTERPOLATED_GAP = 3
-# the charts show the current year and up to this many earlier years with values
+# an earlier period (and a year of the charts) needs a value on at least this share of its days
+MIN_COVERAGE = 0.5
+# every comparison shows up to this many earlier years, the latest ones (see MIN_COVERAGE)
+MAX_COMPARED_YEARS = 5
+# the charts show the current year and up to this many earlier years with enough values
 CHART_EARLIER_YEARS = 3
 CHART_WEEKS = 52
 
@@ -93,18 +103,27 @@ class Period:
         """no day is missing or without data (interpolated days do not count as such)"""
         return self.missing == 0 and self.no_data == 0
 
+    @property
+    def coverage(self) -> float:
+        """the share of the days that have a value, measured or interpolated (0 to 1)"""
+        return (self.measured + self.interpolated) / len(self.days)
+
 
 @dataclasses.dataclass(frozen=True)
 class Comparison:
     """
     a period of the run and the same period of the earlier years
 
-    :param previous: one period per earlier year that has at least one value in it, the
-        latest year first; empty if there is none
+    :param previous: the periods of the earlier years to show, the latest year first: those
+        with a value on at least MIN_COVERAGE of their days, at most MAX_COMPARED_YEARS of
+        them; empty if there is none
+    :param omitted: the number of earlier years that have at least one value in the period
+        but are not in `previous` (too few values, or older than the years shown)
     """
 
     current: Period
     previous: tuple[Period, ...]
+    omitted: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -147,12 +166,14 @@ class Report:
     :param current_month: the current month up to yesterday, None on the 1st of a month
     :param last_month: the last complete month before the month of `today`
     :param year_to_date: the current year up to yesterday, None on 1 January
-    :param previous_years: the earlier years as a whole that have at least one value, the
-        latest year first
+    :param previous_years: the earlier years as a whole to show, the latest year first (the
+        limits of Comparison.previous apply)
     :param monthly: the months of the current year and of up to CHART_EARLIER_YEARS earlier
-        years with values, the current year last
+        years with a value on at least MIN_COVERAGE of their days, the current year last
     :param cumulative: the same years, the current year last
     :param weekly: the last CHART_WEEKS complete weeks, the last week last
+    :param omitted_previous_years: the earlier years with at least one value that are not in
+        `previous_years` (see Comparison.omitted)
     """
 
     today: datetime.date
@@ -164,6 +185,7 @@ class Report:
     monthly: tuple[YearMonths, ...]
     cumulative: tuple[YearCumulative, ...]
     weekly: tuple[Period, ...]
+    omitted_previous_years: int = 0
 
 
 def read_stored_days(
@@ -208,36 +230,34 @@ def compute_report(
     yesterday = today - ONE_DAY
 
     last_week = today - datetime.timedelta(days=today.weekday()) - ONE_WEEK
-    week = Comparison(_week(series, last_week), _earlier_weeks(series, last_week))
+    week = _compare(_week(series, last_week), _earlier_weeks(series, last_week))
 
     current_month = None
     if today.day > 1:
         first = today.replace(day=1)
-        current_month = Comparison(
+        current_month = _compare(
             _period(series, today.year, first, yesterday),
-            _with_values(
+            (
                 _month(series, year, today.month, through_day=yesterday.day)
                 for year in _earlier_years(series, today.year)
             ),
         )
     month_end = today.replace(day=1) - ONE_DAY
-    last_month = Comparison(
+    last_month = _compare(
         _month(series, month_end.year, month_end.month),
-        _with_values(
-            _month(series, year, month_end.month) for year in _earlier_years(series, month_end.year)
-        ),
+        (_month(series, year, month_end.month) for year in _earlier_years(series, month_end.year)),
     )
 
     year_to_date = None
     if yesterday.year == today.year:
-        year_to_date = Comparison(
+        year_to_date = _compare(
             _period(series, today.year, datetime.date(today.year, 1, 1), yesterday),
-            _with_values(
+            (
                 _period(series, year, datetime.date(year, 1, 1), _same_day(yesterday, year))
                 for year in _earlier_years(series, today.year)
             ),
         )
-    previous_years = _with_values(
+    previous_years, omitted_previous_years = _select_earlier(
         _year(series, year) for year in _earlier_years(series, today.year)
     )
 
@@ -255,6 +275,7 @@ def compute_report(
         ),
         cumulative=tuple(_cumulative(series, year) for year in chart_years),
         weekly=tuple(_week(series, last_week - n * ONE_WEEK) for n in reversed(range(CHART_WEEKS))),
+        omitted_previous_years=omitted_previous_years,
     )
 
 
@@ -282,6 +303,12 @@ class _Series:
 
     def years_with_values(self) -> set[int]:
         return {day.year for day in (*self.measured, *self.interpolated)}
+
+    def years_with_enough_values(self) -> set[int]:
+        """the years with a value on at least MIN_COVERAGE of their days"""
+        return {
+            year for year in self.years_with_values() if _year(self, year).coverage >= MIN_COVERAGE
+        }
 
 
 def _interpolate(
@@ -381,7 +408,7 @@ def _earlier_years(series: _Series, year: int) -> range:
     return range(year - 1, series.first.year - 2, -1)
 
 
-def _earlier_weeks(series: _Series, monday: datetime.date) -> tuple[Period, ...]:
+def _earlier_weeks(series: _Series, monday: datetime.date) -> list[Period]:
     """the calendar week with the same number in the earlier years that have such a week"""
     iso_year, iso_week, _ = monday.isocalendar()
     periods = []
@@ -390,17 +417,34 @@ def _earlier_weeks(series: _Series, monday: datetime.date) -> tuple[Period, ...]
             periods.append(_week(series, datetime.date.fromisocalendar(year, iso_week, 1)))
         except ValueError:  # week 53 only exists in some years
             continue
-    return _with_values(periods)
+    return periods
 
 
-def _with_values(periods: collections.abc.Iterable[Period]) -> tuple[Period, ...]:
-    """the periods with at least one measured or interpolated day"""
-    return tuple(period for period in periods if period.total is not None)
+def _compare(current: Period, earlier: collections.abc.Iterable[Period]) -> Comparison:
+    """the period of the run with the earlier years to show (see _select_earlier)"""
+    previous, omitted = _select_earlier(earlier)
+    return Comparison(current, previous, omitted)
+
+
+def _select_earlier(
+    periods: collections.abc.Iterable[Period],
+) -> tuple[tuple[Period, ...], int]:
+    """
+    the earlier periods to show, and how many with values are left out
+    :param periods: the same period of the earlier years, the latest year first
+    :return: the periods with a value on at least MIN_COVERAGE of their days, the first
+        MAX_COMPARED_YEARS of them; the number of periods with at least one value that
+        are not among them (a period without any value is no earlier year to report)
+    """
+    with_values = [period for period in periods if period.total is not None]
+    enough = [period for period in with_values if period.coverage >= MIN_COVERAGE]
+    shown = tuple(enough[:MAX_COMPARED_YEARS])
+    return shown, len(with_values) - len(shown)
 
 
 def _chart_years(series: _Series, year: int) -> tuple[int, ...]:
-    """up to CHART_EARLIER_YEARS earlier years with values, then the current year"""
-    earlier = sorted(y for y in series.years_with_values() if y < year)
+    """up to CHART_EARLIER_YEARS earlier years with enough values, then the current year"""
+    earlier = sorted(y for y in series.years_with_enough_values() if y < year)
     return (*earlier[-CHART_EARLIER_YEARS:], year)
 
 
@@ -429,7 +473,13 @@ TABLE_RULE = TABLE_ROW.format(
 )
 # a note about an incomplete period is indented to the column "Period"
 NOTE_INDENT = " " * 6
-NO_EARLIER_YEAR_TEXT = "No earlier year has values for this period."
+NO_EARLIER_YEAR_TEXT = "No earlier year has enough values for this period."
+NO_EARLIER_YEARS_TEXT = "No earlier year has enough values."
+# keep "half" in step with MIN_COVERAGE
+OMITTED_YEARS_TEXT = (
+    "{count} earlier {years} not shown (older than the latest {latest},"
+    " or with values on less than half of the days)."
+)
 LEGEND_INTERPOLATED = (
     "* includes interpolated days: a gap of up to {gap} days between measured days is filled"
     " with a straight line (whole liters), not stored in the data files."
@@ -478,7 +528,9 @@ def _sections(report: Report) -> list[_Section]:
             "years",
             "Earlier years as a whole",
             report.previous_years,
-            note=None if report.previous_years else "No earlier year has values.",
+            note=_earlier_years_note(
+                bool(report.previous_years), report.omitted_previous_years, NO_EARLIER_YEARS_TEXT
+            ),
         )
     )
     return sections
@@ -492,8 +544,26 @@ def _comparison_section(
         title,
         (comparison.current, *comparison.previous),
         daily,
-        None if comparison.previous else NO_EARLIER_YEAR_TEXT,
+        _earlier_years_note(bool(comparison.previous), comparison.omitted, NO_EARLIER_YEAR_TEXT),
     )
+
+
+def _earlier_years_note(shown: bool, omitted: int, nothing_to_show: str) -> str | None:
+    """
+    the note below a table about the earlier years that are not in it
+    :param shown: the table has earlier years
+    :param omitted: the number of earlier years with values that are left out
+    :param nothing_to_show: the note if the table has no earlier year
+    """
+    if not shown:
+        return nothing_to_show
+    if omitted:
+        return OMITTED_YEARS_TEXT.format(
+            count=omitted,
+            years="year is" if omitted == 1 else "years are",
+            latest=MAX_COMPARED_YEARS,
+        )
+    return None
 
 
 def format_text(report: Report) -> str:
@@ -528,9 +598,9 @@ def _text_section(section: _Section) -> str:
     if section.periods:
         lines += _table(section.periods)
         if section.note:
-            lines += ["", section.note]
+            lines += ["", textwrap.fill(section.note, 78)]
     elif section.note:
-        lines.append(section.note)
+        lines.append(textwrap.fill(section.note, 78))
     return "\n".join(lines)
 
 

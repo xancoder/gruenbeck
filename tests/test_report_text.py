@@ -160,9 +160,65 @@ def test_missing_days_and_days_without_data_are_both_named() -> None:
 def test_without_an_earlier_year_every_table_says_so() -> None:
     text = text_of(fill(D(2026, 1, 1), D(2026, 11, 22)))
 
-    assert text.count("No earlier year has values for this period.") == 4
-    assert "\nNo earlier year has values.\n" in text
+    assert text.count("No earlier year has enough values for this period.") == 4
+    assert "\nNo earlier year has enough values.\n" in text
     assert "2025" not in text
+
+
+def test_long_history_has_at_most_five_earlier_years_per_table() -> None:
+    text = text_of(fill(D(2016, 12, 31), D(2026, 11, 22)))
+
+    lines = text.splitlines()
+    assert all(len(line) <= 78 for line in lines)
+    years = [line[:4] for line in lines if re.match(r"\d{4}  \d\d-\d\d\.\.", line)]
+    five = ["2025", "2024", "2023", "2022", "2021"]
+    # the week, the two months and the year so far with the year of the run, then the years
+    assert years == ["2026", *five] * 4 + five
+    assert "2016" not in text
+    assert "2017" not in text
+    # the note is wrapped and says how many years are left out
+    flat = " ".join(text.split())
+    note = "earlier years are not shown (older than the latest 5, or with values on less than half"
+    assert flat.count(f"4 {note} of the days).") == 4
+    assert flat.count(f"5 {note} of the days).") == 1
+    assert "\n4 earlier years are not shown (older than the latest 5, or with values on less\n" in (
+        text
+    )
+
+
+def test_one_earlier_year_that_is_left_out_is_named_in_the_singular() -> None:
+    text = text_of(fill(D(2020, 1, 1), D(2026, 11, 22)))
+
+    flat = " ".join(text.split())
+    assert flat.count("1 earlier year is not shown (") == 5
+    assert "earlier years are not shown" not in flat
+    assert "2020" not in text
+
+
+def test_no_note_if_every_earlier_year_with_values_is_shown() -> None:
+    text = text_of(fill(D(2021, 1, 1), D(2026, 11, 22)))
+
+    assert "not shown" not in text
+    assert "2021" in text
+
+
+def test_earlier_years_without_enough_values_are_not_listed_and_say_so() -> None:
+    # 2025 has 10 values in June only: not enough for the year, no value in the other periods
+    text = text_of({**fill(D(2025, 6, 1), D(2025, 6, 10)), **fill(D(2026, 1, 1), D(2026, 11, 22))})
+
+    assert text.count("No earlier year has enough values for this period.") == 4
+    assert "\nNo earlier year has enough values.\n" in text
+    assert "2025" not in text
+    assert "not shown" not in text
+
+
+def test_the_period_of_the_run_is_listed_with_few_values() -> None:
+    text = text_of(stored_days(D(2026, 11, 20), 100, 100, 100))
+
+    lines = text.splitlines()
+    assert "2026  11-16..11-22      300     100    100 11-20    100 11-20" in lines
+    assert "      incomplete: 4 days without data" in lines
+    assert text.count("No earlier year has enough values for this period.") == 4
 
 
 def test_a_period_without_values_has_dashes() -> None:

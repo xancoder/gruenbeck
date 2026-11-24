@@ -153,9 +153,9 @@ The statistics cover, for the day of the run:
 | Current month so far | the 1st up to yesterday; left out on the 1st of a month |
 | Last month | the last complete month |
 | Year so far | 1 January up to yesterday; left out on 1 January |
-| Earlier years as a whole | every earlier year with values, from 1 January to 31 December |
+| Earlier years as a whole | the earlier years, each from 1 January to 31 December (with the limits below) |
 
-Each of the first four parts is compared with the same period of every earlier year that has values in it, latest year first: the calendar week with the same number (ISO week; week 53 only in years that have one), the same days of the month, the same days of the year (29 February counts only in leap years, so an earlier year ends at 28 February if the year of the run does not have the 29th), and for the last month the complete month. A year without any value in the period is left out. The table shows total, mean per day, and the minimum and maximum with their day (`MM-DD`):
+Each of the first four parts is compared with the same period of the earlier years, latest year first: the calendar week with the same number (ISO week; week 53 only in years that have one), the same days of the month, the same days of the year (29 February counts only in leap years, so an earlier year ends at 28 February if the year of the run does not have the 29th), and for the last month the complete month. The table shows total, mean per day, and the minimum and maximum with their day (`MM-DD`):
 
 ```text
 Year  Period          Total    Mean          Min          Max
@@ -163,6 +163,13 @@ Year  Period          Total    Mean          Min          Max
 2026  11-16..11-22     1100     157     90 11-21    300 11-20
 2025  11-17..11-23      140      20     20 11-17     20 11-17
 ```
+
+The comparisons stay short with two limits (constants `MIN_COVERAGE` and `MAX_COMPARED_YEARS` in `src/gruenbeck/report.py`, not configuration keys):
+
+- An earlier period is only shown if at least **half of its days have a value** (measured or interpolated): 4 of 7 days for a week, 183 of 365 or 366 days for a year. An earlier year with fewer values is left out, and so is an earlier year without any value in the period. The period of the run itself is always shown, however few values it has.
+- Of the earlier years that remain, each table shows **at most the 5 latest**.
+
+A note below the table says how many earlier years with values in the period are left out, e.g. `4 earlier years are not shown (older than the latest 5, or with values on less than half of the days).` If no earlier year is left to show, the note is `No earlier year has enough values for this period.`
 
 #### missing values and interpolation
 
@@ -179,8 +186,8 @@ The HTML part has four charts, drawn as SVG directly in the HTML (no image, scri
 |-------|---------|
 | Daily consumption | the liters of every day of the last week as bars |
 | Weekly consumption | the liters of the last 52 calendar weeks as a line with points |
-| Monthly consumption by year | grouped bars per month for the current year and up to 3 earlier years |
-| Cumulative consumption | a line per year from 1 January, with the day of the run marked |
+| Monthly consumption by year | grouped bars per month for the current year and up to 3 earlier years that have values on at least half of their days |
+| Cumulative consumption | a line per year (the years of the monthly chart) from 1 January, with the day of the run marked |
 
 The current year has the strong color, the earlier years muted ones, the same color for a year in every chart. Text and axes take the text color of the mail, so the charts are readable on a light and on a dark background (the HTML switches its own colors with `prefers-color-scheme`). Marks: an interpolated day is a light bar with `*` (a ring in the lines), a missing day is a gap with a dash, a month with missing days is only an outline, a week with missing days is a hollow point.
 

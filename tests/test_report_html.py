@@ -216,7 +216,14 @@ def test_days_of_the_week_are_a_table_of_seven_columns() -> None:
 
 
 @pytest.mark.parametrize(
-    "stored", [full_data(), with_gaps(), fill(D(2026, 1, 1), D(2026, 11, 22)), {}]
+    "stored",
+    [
+        full_data(),
+        with_gaps(),
+        fill(D(2026, 1, 1), D(2026, 11, 22)),
+        fill(D(2016, 12, 31), D(2026, 11, 22)),
+        {},
+    ],
 )
 def test_html_has_the_rows_and_the_notes_of_the_text(stored: Stored) -> None:
     stats = stats_of(stored)
@@ -242,6 +249,9 @@ def test_html_has_the_rows_and_the_notes_of_the_text(stored: Stored) -> None:
     notes = [line.strip() for line in text.splitlines() if line.strip().startswith("incomplete:")]
     html_notes = [row[0] for row in page.rows_of(1) if row[0].startswith("incomplete:")]
     assert html_notes == notes
+    # the notes about the earlier years that are left out (the text wraps them)
+    hints = r"\d+ earlier years? (?:is|are) not shown \([^)]*\)\."
+    assert re.findall(hints, report.format_html(stats)) == re.findall(hints, " ".join(text.split()))
 
 
 def test_interpolated_values_are_marked_and_explained() -> None:
@@ -294,9 +304,28 @@ def test_period_without_values_has_dashes() -> None:
 def test_without_an_earlier_year_every_table_says_so() -> None:
     document = report.format_html(stats_of(fill(D(2026, 1, 1), D(2026, 11, 22))))
 
-    assert document.count("No earlier year has values for this period.") == 4
-    assert "No earlier year has values." in document
+    assert document.count("No earlier year has enough values for this period.") == 4
+    assert "No earlier year has enough values." in document
     assert "2025" not in document
+
+
+def test_long_history_has_at_most_five_earlier_years_per_table_and_says_what_is_left_out() -> None:
+    page, stats = page_of(fill(D(2016, 12, 31), D(2026, 11, 22)))
+
+    years = [row[0] for row in page.rows_of(6) if re.fullmatch(r"\d{4}", row[0])]
+    five = ["2025", "2024", "2023", "2022", "2021"]
+    assert years == ["2026", *five] * 4 + five
+    document = report.format_html(stats)
+    note = "earlier years are not shown (older than the latest 5, or with values on less than half"
+    assert document.count(f"4 {note} of the days).") == 4
+    assert document.count(f"5 {note} of the days).") == 1
+
+
+def test_one_earlier_year_that_is_left_out_is_named_in_the_singular() -> None:
+    document = report.format_html(stats_of(fill(D(2020, 1, 1), D(2026, 11, 22))))
+
+    assert document.count("1 earlier year is not shown (") == 5
+    assert "earlier years are not shown" not in document
 
 
 def test_no_current_month_on_the_first_of_a_month_and_no_year_on_the_first_of_january() -> None:

@@ -150,8 +150,39 @@ def test_data_mail_without_an_earlier_year_says_so(
     assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
 
     text, _ = sent(smtp)
-    assert text.count("No earlier year has values for this period.") == 4
-    assert "No earlier year has values.\n" in text
+    assert text.count("No earlier year has enough values for this period.") == 4
+    assert "No earlier year has enough values.\n" in text
+
+
+def test_data_mail_with_a_long_history_compares_with_the_latest_five_years(
+    smtp: "FakeSMTP", loaded_config: config.Configuration
+) -> None:
+    for year in range(2017, 2027):
+        last = datetime.date(2026, 11, 22) if year == 2026 else datetime.date(year, 12, 31)
+        first = datetime.date(year, 1, 1)
+        days = (last - first).days + 1
+        write_year(
+            loaded_config,
+            year,
+            {(first + datetime.timedelta(days=n)).isoformat(): 100 for n in range(days)},
+        )
+
+    assert cli.get_mail(loaded_config, loaded_config.data_path, TODAY) is True
+
+    text, attachments = sent(smtp)
+    years = re.findall(r"^(\d{4})  \d\d-\d\d\.\.", text, flags=re.MULTILINE)
+    # four tables with the year of the run and five earlier years, the years as a whole with five
+    assert years == ["2026", "2025", "2024", "2023", "2022", "2021"] * 4 + [
+        "2025",
+        "2024",
+        "2023",
+        "2022",
+        "2021",
+    ]
+    assert " ".join(text.split()).count("4 earlier years are not shown (") == 5
+    assert html_of(smtp).count("4 earlier years are not shown (") == 5
+    # the data files of all years are still attached
+    assert len(attachments) == 10
 
 
 def test_unusable_data_file_gives_a_note_instead_of_the_statistics(

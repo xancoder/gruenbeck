@@ -281,23 +281,132 @@ def test_week_one_starting_in_the_old_year_belongs_to_the_new_year() -> None:
 
 def test_earlier_year_without_values_in_the_period_is_not_compared() -> None:
     stored = {
-        **fill(D(2024, 11, 1), D(2024, 12, 31), 10),  # the weeks and the November of 2024
-        **fill(D(2025, 12, 1), D(2025, 12, 31), 20),  # 2025 starts after the period
+        **fill(D(2024, 1, 1), D(2024, 12, 31), 10),
+        **fill(D(2025, 12, 1), D(2025, 12, 31), 20),  # 2025 starts after the periods
         **fill(D(2026, 1, 1), D(2026, 11, 22), 30),
     }
 
     result = report.compute_report(stored, MONDAY)
 
+    # 2025 has no value in any of these periods: it is not an earlier year to report
     assert [p.year for p in result.week.previous] == [2024]
     assert result.current_month is not None
     assert [p.year for p in result.current_month.previous] == [2024]
-    # October: no value in 2025 (the data starts in December) and none in 2024 (before November)
-    assert result.last_month.previous == ()
+    assert [p.year for p in result.last_month.previous] == [2024]
     assert result.year_to_date is not None
-    # 2025 up to the 22nd of November has no value; 2024 has the 22 days of November
     assert [p.year for p in result.year_to_date.previous] == [2024]
-    assert counts(result.year_to_date.previous[0]) == (22, 0, 0, 305)
-    assert [p.year for p in result.previous_years] == [2025, 2024]
+    assert counts(result.year_to_date.previous[0]) == (327, 0, 0, 0)
+    comparisons = (result.week, result.current_month, result.last_month, result.year_to_date)
+    assert [comparison.omitted for comparison in comparisons] == [0, 0, 0, 0]
+    # as a whole, 2025 has values, but on 31 of 365 days only: it is counted as left out
+    assert [p.year for p in result.previous_years] == [2024]
+    assert result.omitted_previous_years == 1
+
+
+# --- limits of the comparisons with earlier years (P008-S6) ---------------------------------
+
+
+def test_coverage_counts_the_measured_and_the_interpolated_days() -> None:
+    # Tuesday is interpolated, Friday to Sunday are missing (no measured day after them)
+    stored = stored_days(WEEK_START, 100, None, 100, 100)
+
+    week = report.compute_report(stored, MONDAY).week.current
+
+    assert counts(week) == (3, 1, 3, 0)
+    assert week.coverage == 4 / 7
+
+
+def test_comparisons_show_at_most_the_five_latest_earlier_years() -> None:
+    # a single day of 2016, then every day up to yesterday
+    stored = fill(D(2016, 12, 31), D(2026, 11, 22))
+
+    result = report.compute_report(stored, MONDAY)
+
+    latest = [2025, 2024, 2023, 2022, 2021]
+    assert result.current_month is not None
+    assert result.year_to_date is not None
+    comparisons = (result.week, result.current_month, result.last_month, result.year_to_date)
+    for comparison in comparisons:
+        assert [p.year for p in comparison.previous] == latest
+        # 2017 to 2020; 2016 has no value in these periods and is no earlier year to report
+        assert comparison.omitted == 4
+    assert [p.year for p in result.previous_years] == latest
+    # 2016 has a value in the year as a whole, but on 1 of 366 days
+    assert result.omitted_previous_years == 5
+
+
+def test_a_year_with_few_values_does_not_take_a_place_of_the_five_years() -> None:
+    # 2024 has 62 of 366 days: it is skipped, the five latest years with enough values show
+    stored = {
+        **fill(D(2020, 1, 1), D(2023, 12, 31)),
+        **fill(D(2024, 1, 1), D(2024, 3, 2)),
+        **fill(D(2025, 1, 1), D(2026, 11, 22)),
+    }
+
+    result = report.compute_report(stored, MONDAY)
+
+    assert [p.year for p in result.previous_years] == [2025, 2023, 2022, 2021, 2020]
+    assert result.omitted_previous_years == 1
+
+
+@pytest.mark.parametrize(("days", "shown"), [(4, True), (3, False)], ids=["4-of-7", "3-of-7"])
+def test_earlier_week_needs_values_on_half_of_its_days(days: int, shown: bool) -> None:
+    # week 47 of 2025 is 2025-11-17 ... 2025-11-23
+    stored = {
+        **fill(D(2025, 11, 17), D(2025, 11, 16) + datetime.timedelta(days=days)),
+        **fill(D(2026, 1, 1), D(2026, 11, 22)),
+    }
+
+    week = report.compute_report(stored, MONDAY).week
+
+    assert [p.year for p in week.previous] == ([2025] if shown else [])
+    assert week.omitted == (0 if shown else 1)
+    assert week.current.complete
+
+
+@pytest.mark.parametrize(
+    ("year", "days", "shown"),
+    [(2024, 183, True), (2024, 182, False), (2025, 183, True), (2025, 182, False)],
+    ids=["leap-year-183-of-366", "leap-year-182-of-366", "183-of-365", "182-of-365"],
+)
+def test_earlier_year_needs_values_on_half_of_its_days(year: int, days: int, shown: bool) -> None:
+    stored = {
+        **fill(D(year, 1, 1), D(year, 1, 1) + datetime.timedelta(days=days - 1)),
+        **fill(D(2026, 1, 1), D(2026, 11, 22)),
+    }
+
+    result = report.compute_report(stored, MONDAY)
+
+    assert [p.year for p in result.previous_years] == ([year] if shown else [])
+    assert result.omitted_previous_years == (0 if shown else 1)
+
+
+def test_period_of_the_run_is_shown_with_few_values() -> None:
+    stored = {**fill(D(2025, 1, 1), D(2025, 12, 31)), D(2026, 11, 22): 10}
+
+    result = report.compute_report(stored, MONDAY)
+
+    assert result.current_month is not None
+    assert result.year_to_date is not None
+    comparisons = (result.week, result.current_month, result.last_month, result.year_to_date)
+    assert [c.current.total for c in comparisons] == [10, 10, None, 10]
+    assert [c.current.coverage < report.MIN_COVERAGE for c in comparisons] == [True] * 4
+    # the earlier year is complete in these periods
+    assert [[p.year for p in c.previous] for c in comparisons] == [[2025]] * 4
+    # nothing but the day of the run: no earlier year to compare with is no reason to hide it
+    alone = report.compute_report({D(2026, 11, 22): 10}, MONDAY)
+    assert alone.week.current.total == 10
+    assert (alone.week.previous, alone.week.omitted) == ((), 0)
+
+
+def test_periods_without_enough_values_are_counted_as_left_out_not_shown() -> None:
+    stored = {**fill(D(2025, 6, 1), D(2025, 6, 10)), **fill(D(2026, 1, 1), D(2026, 11, 22))}
+
+    result = report.compute_report(stored, MONDAY)
+
+    # June 2025 has values, but the periods of the run do not reach them: only the year does
+    assert result.week.previous == () and result.week.omitted == 0
+    assert result.previous_years == () and result.omitted_previous_years == 1
 
 
 # --- month and year -------------------------------------------------------------------------
@@ -417,7 +526,7 @@ def test_leap_day_of_an_earlier_year_is_not_part_of_the_same_period() -> None:
 def test_gap_over_the_turn_of_the_year_is_interpolated_in_both_years() -> None:
     # 31 December to 2 January are missing: a straight line from 100 to 400 in four steps
     stored = {
-        **fill(D(2025, 12, 20), D(2025, 12, 30), 100),
+        **fill(D(2025, 1, 1), D(2025, 12, 30), 100),
         **fill(D(2026, 1, 3), D(2026, 1, 9), 400),
     }
 
@@ -429,7 +538,7 @@ def test_gap_over_the_turn_of_the_year_is_interpolated_in_both_years() -> None:
         D(2025, 12, 31),
         INTERPOLATED,
     )
-    assert year_2025.points[-1].cumulative == 11 * 100 + 175
+    assert year_2025.points[-1].cumulative == 364 * 100 + 175
     assert [(p.date.day, p.status, p.cumulative) for p in year_2026.points[:3]] == [
         (1, INTERPOLATED, 250),
         (2, INTERPOLATED, 575),
@@ -582,13 +691,52 @@ def test_monthly_series_has_the_current_year_and_up_to_three_earlier_years_with_
     assert (current[11].total, counts(current[11])) == (None, (0, 0, 0, 31))
 
 
-def test_monthly_series_leaves_out_earlier_years_without_values() -> None:
+def test_monthly_series_leaves_out_earlier_years_with_few_values() -> None:
+    # 30 days of 365 in 2021: no year of the charts
     stored = {**fill(D(2021, 6, 1), D(2021, 6, 30)), **fill(D(2025, 1, 1), D(2026, 11, 22))}
 
     result = report.compute_report(stored, MONDAY)
 
-    assert [series.year for series in result.monthly] == [2021, 2025, 2026]
-    assert [series.year for series in result.cumulative] == [2021, 2025, 2026]
+    assert [series.year for series in result.monthly] == [2025, 2026]
+    assert [series.year for series in result.cumulative] == [2025, 2026]
+
+
+@pytest.mark.parametrize(
+    ("year", "days", "shown"),
+    [(2024, 183, True), (2024, 182, False), (2025, 183, True), (2025, 182, False)],
+    ids=["leap-year-183-of-366", "leap-year-182-of-366", "183-of-365", "182-of-365"],
+)
+def test_chart_year_needs_values_on_half_of_its_days(year: int, days: int, shown: bool) -> None:
+    stored = {
+        **fill(D(year, 1, 1), D(year, 1, 1) + datetime.timedelta(days=days - 1)),
+        **fill(D(2026, 1, 1), D(2026, 11, 22)),
+    }
+
+    result = report.compute_report(stored, MONDAY)
+
+    expected = [year, 2026] if shown else [2026]
+    assert [series.year for series in result.monthly] == expected
+    assert [series.year for series in result.cumulative] == expected
+
+
+def test_chart_years_skip_years_with_few_values_and_always_have_the_current_year() -> None:
+    stored = {
+        **fill(D(2022, 1, 1), D(2022, 12, 31)),
+        **fill(D(2023, 1, 1), D(2023, 3, 2)),
+        **fill(D(2024, 1, 1), D(2024, 12, 31)),
+        **fill(D(2025, 1, 1), D(2025, 12, 31)),
+        **fill(D(2026, 11, 20), D(2026, 11, 22)),
+    }
+
+    result = report.compute_report(stored, MONDAY)
+
+    # three earlier years with enough values at most, and 2026 with its 3 days of 365
+    assert [series.year for series in result.monthly] == [2022, 2024, 2025, 2026]
+    assert [series.year for series in result.cumulative] == [2022, 2024, 2025, 2026]
+    # a year of the charts is not a year of the tables: those have their own limit
+    assert [p.year for p in result.previous_years] == [2025, 2024, 2022]
+    nothing = report.compute_report({D(2025, 1, 1): 10}, MONDAY)
+    assert [series.year for series in nothing.monthly] == [2026]
 
 
 def test_monthly_series_marks_interpolated_and_missing_values() -> None:
