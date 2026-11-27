@@ -2,10 +2,13 @@
 
 All notable changes of this project. The file is generated from the commit messages with git-cliff (see "release" in the README); do not edit it by hand.
 
-## [0.2.0] - 2026-11-24
+## [0.2.0] - 2026-11-27
 
 ### Features
 
+- **mail:** Embed the charts as data URI or cid image
+- **charts:** Add SVG image conversion for charts
+- **cli:** Add --version to commands and log package version
 - **config:** Read the config file from GRUENBECK_CONFIG and the SMTP password from a systemd credential
 - **deploy:** Harden the collector service and limit it to the data and log folders
 - **report:** Limit earlier year comparisons
@@ -45,6 +48,8 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Bug fixes
 
+- **mail:** Log unexpected data mail errors with traceback
+- **analysis:** Report missing analysis extra without traceback
 - Reject data rows without values and do not resend accepted mails
 - **storage:** Keep non-decimal numeric characters as text
 - **cli:** Use collection date for data mail statistics
@@ -64,6 +69,8 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Refactoring
 
+- **report:** Remove chart series from reports
+- **charts:** Remove custom SVG chart rendering
 - **config:** Remove the migration of paths relative to the working directory
 - **analysis:** Name the statistics, aggregate once per file and split output from calculation
 - **scripts:** Turn the tools in scripts/ into package commands
@@ -106,6 +113,7 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Documentation
 
+- **readme:** Remove outdated parameterFile note
 - Clarify collector timing and migration recovery
 - Move scheduling guide to systemd deploy directory
 - **collector:** Update README.md
@@ -115,6 +123,7 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Tests
 
+- Add property tests with hypothesis and run the tests in random order
 - Cover configured CSV columns and date patterns
 - Characterize collector and gruenbeck behavior
 - Make tests cwd-independent
@@ -126,11 +135,14 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Build
 
+- **deps:** Update uv-build requirement
 - **collector:** Add pytest to python requirements
 - **collector:** Add python requirements
 
 ### CI
 
+- Run checks through just recipes
+- Add typos and conventional commit hooks
 - Enable more ruff lint rules
 - Pin actions to commit SHAs, cancel superseded runs, audit workflows with zizmor
 - Run ruff pre-commit hooks from uv
