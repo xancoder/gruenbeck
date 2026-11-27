@@ -144,7 +144,9 @@ def test_run_with_options(
     monkeypatch.setattr(
         mail,
         "send_mail",
-        lambda settings, subject, text, attachments=(), html=None: sent.extend(attachments),
+        lambda settings, subject, text, attachments=(), html=None, images=(): sent.extend(
+            attachments
+        ),
     )
 
     cli.collect(["-c", str(config_file), "-e", str(log_file), "-l"])

@@ -37,6 +37,7 @@ def mails(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, typing.Any]]:
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append((subject, text))
@@ -309,6 +310,7 @@ def test_failed_data_mail_exits_with_1_without_error_mail(
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> typing.NoReturn:
         raise mail.MailError("Authentication failed: refused")
 
@@ -332,6 +334,7 @@ def test_failed_error_mail_keeps_exit_code_1(
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> typing.NoReturn:
         raise mail.MailError("Authentication failed: refused")
 

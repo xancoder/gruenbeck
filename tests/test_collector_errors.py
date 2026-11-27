@@ -45,6 +45,7 @@ def mails(
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> None:
         if subject == cli.ERROR_MAIL_SUBJECT:
             sent.append((subject, settings, text))
@@ -439,6 +440,7 @@ def test_failed_data_mail_raises_mail_error(
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> typing.NoReturn:
         raise error
 
@@ -534,6 +536,7 @@ def test_run_with_failed_data_mail_keeps_the_data_and_exits_with_1(
         text: str,
         attachments: collections.abc.Iterable[pathlib.Path] = (),
         html: str | None = None,
+        images: collections.abc.Iterable[mail.InlineImage] = (),
     ) -> typing.NoReturn:
         subjects.append(subject)
         raise mail.MailError("Authentication failed: refused")

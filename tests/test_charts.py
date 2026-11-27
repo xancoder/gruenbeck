@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from gruenbeck import charts, report
+from gruenbeck import charts, report, report_html
 
 D = datetime.date
 Stored = dict[datetime.date, int | str]
@@ -665,3 +665,145 @@ def test_all_charts_of_the_report_together_are_small_enough_for_a_mail() -> None
 
     assert sum(sizes.values()) < 80_000, sizes
     assert all(size > 1000 for size in sizes.values())
+
+
+# --- a chart as image ------------------------------------------------------------------------
+
+
+def image_of(name: str, dataset: str) -> tuple[str, str]:
+    """(the chart, the chart as image)"""
+    svg = build(name, stats_of(DATASETS[dataset]))
+    return svg, charts.as_image(svg)
+
+
+def elements(root: ET.Element) -> list[tuple[str, dict[str, str], str | None, str | None]]:
+    """every element below the root in document order: tag, attributes, text and tail"""
+    return [
+        (element.tag, dict(element.attrib), element.text, element.tail)
+        for element in root.iter()
+        if element is not root
+    ]
+
+
+@pytest.mark.parametrize("name", CHART_NAMES)
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_image_has_the_size_of_its_view_box_and_no_relative_size(name: str, dataset: str) -> None:
+    _, image = image_of(name, dataset)
+
+    root = parse(image)
+    assert root.tag == SVG + "svg"
+    _, _, width, height = root.get("viewBox", "").split()
+    assert root.get("width") == width == str(charts.WIDTH)
+    assert root.get("height") == height
+    assert height.isdigit()
+    assert "style" not in root.attrib
+    assert "max-width" not in image
+    assert not [
+        (element.tag, value)
+        for element in root.iter()
+        for value in element.attrib.values()
+        if "%" in value
+    ]
+
+
+@pytest.mark.parametrize("name", CHART_NAMES)
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_image_has_one_style_as_first_child_with_both_text_colors(name: str, dataset: str) -> None:
+    _, image = image_of(name, dataset)
+
+    root = parse(image)
+    styles = list(root.iter(SVG + "style"))
+    assert styles == [root[0]]
+    css = styles[0].text or ""
+    assert f"svg {{ color: {charts.IMAGE_TEXT_COLOR}; }}" in css
+    dark = css.partition("@media (prefers-color-scheme: dark)")[2]
+    assert f"svg {{ color: {charts.IMAGE_TEXT_COLOR_DARK}; }}" in dark
+    assert charts.IMAGE_TEXT_COLOR_DARK not in css.partition("@media")[0]
+
+
+@pytest.mark.parametrize("name", CHART_NAMES)
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_image_keeps_everything_else_of_the_chart(name: str, dataset: str) -> None:
+    svg, image = image_of(name, dataset)
+
+    chart, picture = parse(svg), parse(image)
+    # the elements in the same order with the same attributes and texts, only the style is new
+    assert elements(picture)[1:] == elements(chart)
+    # the attributes of the root: the same apart from the size
+    unchanged = {key: value for key, value in chart.attrib.items() if key not in {"width", "style"}}
+    assert {k: v for k, v in picture.attrib.items() if k not in {"width", "height"}} == unchanged
+    # the namespace of the chart, written as in the chart (no prefix)
+    assert image.startswith(f'<svg xmlns="{charts.SVG_NAMESPACE}" ')
+    assert "ns0" not in image
+    # after the start tag and the style, the text is the one of the chart, character by character
+    _, style, rest = image.partition(f"<style>{charts.IMAGE_STYLE}</style>")
+    assert style
+    assert rest == svg.partition(">")[2]
+
+
+@pytest.mark.parametrize("name", CHART_NAMES)
+def test_image_leaves_the_chart_as_it_is_and_is_the_same_every_time(name: str) -> None:
+    stats = stats_of(with_gaps())
+    svg = build(name, stats)
+
+    image = charts.as_image(svg)
+
+    assert svg == build(name, stats)
+    assert charts.as_image(svg) == image
+    assert image != svg
+
+
+@pytest.mark.parametrize("name", CHART_NAMES)
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_image_has_no_script_or_external_resource(name: str, dataset: str) -> None:
+    _, image = image_of(name, dataset)
+
+    root = parse(image)
+    tags = {element.tag.removeprefix(SVG) for element in root.iter()}
+    assert "style" in tags
+    assert not tags & {"script", "image", "foreignObject", "a", "use"}
+    without_namespace = image.replace(f'xmlns="{charts.SVG_NAMESPACE}"', "")
+    assert "http" not in without_namespace
+    assert "url(" not in image
+    assert "@import" not in image
+
+
+def test_image_has_the_text_colors_of_the_card_of_the_mail() -> None:
+    # light: the inline style of the card; dark: the rule of the card in the style sheet
+    document = report_html.format_failure_html("no statistics")
+    (card,) = re.findall(r'<td class="gb-card" style="([^"]*)"', document)
+    (light,) = re.findall(r"(?:^|;)color:(#[0-9a-f]{6})", card)
+    (rule,) = re.findall(r"\.gb-card \{([^}]*)\}", report_html.HTML_DARK_STYLE)
+    (dark,) = re.findall(r"(?<![-\w])color: (#[0-9a-f]{6})", rule)
+
+    assert light == charts.IMAGE_TEXT_COLOR
+    assert dark == charts.IMAGE_TEXT_COLOR_DARK
+
+
+def test_image_text_colors_are_readable_on_the_card() -> None:
+    assert contrast(charts.IMAGE_TEXT_COLOR, "#ffffff") >= 4.5
+    assert contrast(charts.IMAGE_TEXT_COLOR_DARK, "#111827") >= 4.5
+
+
+def test_image_of_a_view_box_with_fractions_is_rounded_up_to_whole_pixels() -> None:
+    svg = f'<svg xmlns="{charts.SVG_NAMESPACE}" viewBox="0 0 480.2 100.5" width="100%"/>'
+
+    root = parse(charts.as_image(svg))
+
+    assert (root.get("width"), root.get("height")) == ("481", "101")
+    assert root.get("viewBox") == "0 0 480.2 100.5"
+
+
+@pytest.mark.parametrize(
+    ("svg", "message"),
+    [
+        ('<svg viewBox="0 0 480 100"/>', "not an SVG element"),
+        (f'<html xmlns="{charts.SVG_NAMESPACE}"/>', "not an SVG element"),
+        (f'<svg xmlns="{charts.SVG_NAMESPACE}"/>', "no viewBox"),
+        (f'<svg xmlns="{charts.SVG_NAMESPACE}" viewBox="0 0 480"/>', "no viewBox"),
+        (f'<svg xmlns="{charts.SVG_NAMESPACE}" viewBox="0 0 wide high"/>', "no viewBox"),
+    ],
+)
+def test_image_of_a_text_that_is_not_a_chart_is_an_error(svg: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        charts.as_image(svg)

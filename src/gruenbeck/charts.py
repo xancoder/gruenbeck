@@ -20,6 +20,12 @@ and escapes the markup). A chart has no script, style sheet, external font or im
   missing day is a gap with a dash, an incomplete month is only an outline, an incomplete
   week a hollow point
 
+as_image() makes the SVG of a chart a document of its own, as an `<img>` needs it (a mail
+program that removes inline SVG may still show an image): a fixed width and height instead of
+`width="100%"`, and a `<style>` with the text color, light and for a dark color scheme
+(IMAGE_TEXT_COLOR, IMAGE_TEXT_COLOR_DARK), because an image does not inherit the text color
+of the page. Only the image has a `<style>`; everything else stays as in the chart.
+
 The class names (`gb-chart`, `gb-bar`, `gb-interpolated`, `gb-incomplete`, ...) are for tests
 and for styling by the page; the charts look right without any style.
 """
@@ -39,6 +45,14 @@ FONT_FAMILY = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', A
 # Colors of the years, the current year first. Each has a contrast of at least 3:1 to white
 # and to near black (tests/test_charts.py), so the series are visible on both backgrounds.
 YEAR_COLORS = ("#2563eb", "#c27a2c", "#4f9d92", "#9575b8")
+# The text color (currentColor) of a chart as image: the colors of the text of the card of the
+# HTML mail (gruenbeck.report_html), light and for a dark color scheme.
+IMAGE_TEXT_COLOR = "#1f2937"
+IMAGE_TEXT_COLOR_DARK = "#e5e7eb"
+IMAGE_STYLE = (
+    f"svg {{ color: {IMAGE_TEXT_COLOR}; }}"
+    f" @media (prefers-color-scheme: dark) {{ svg {{ color: {IMAGE_TEXT_COLOR_DARK}; }} }}"
+)
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 # a year without a leap day: the position of the months on the axis of the year
 MONTH_STARTS = tuple(
@@ -462,6 +476,41 @@ CHARTS: dict[str, collections.abc.Callable[[report.Report], str]] = {
     "cumulative": cumulative_chart,
     "weekly": weekly_chart,
 }
+
+
+def as_image(svg: str) -> str:
+    """
+    the SVG text of a chart as a document of its own for an `<img>`
+
+    The width and the height are the ones of the `viewBox` (whole pixels, rounded up), the
+    `style` attribute (`max-width`) is left out: the `<img>` scales the image. A `<style>` as
+    the first child sets the text color, light and for a dark color scheme. All the rest
+    (title, description, classes, elements, texts) is the one of the chart.
+    :raises ValueError: the text is not an `<svg>` element with a `viewBox` of 4 numbers
+    :raises xml.etree.ElementTree.ParseError: the text is not XML
+    """
+    namespace = f"{{{SVG_NAMESPACE}}}"
+    root = ET.fromstring(svg)
+    if root.tag != f"{namespace}svg":
+        raise ValueError(f"not an SVG element: {root.tag}")
+    try:
+        _, _, width, height = (float(number) for number in root.get("viewBox", "").split())
+    except ValueError:
+        raise ValueError(f"no viewBox of 4 numbers: {root.get('viewBox')!r}") from None
+    # the tags without the namespace and `xmlns` as the first attribute, as _Canvas makes them
+    # (ElementTree cannot write a default namespace with attributes that have none)
+    for element in root.iter():
+        element.tag = element.tag.removeprefix(namespace)
+    attributes = {"xmlns": SVG_NAMESPACE, **root.attrib}
+    attributes["width"] = str(math.ceil(width))
+    attributes["height"] = str(math.ceil(height))
+    attributes.pop("style", None)
+    root.attrib.clear()
+    root.attrib.update(attributes)
+    style = ET.Element("style")
+    style.text = IMAGE_STYLE
+    root.insert(0, style)
+    return ET.tostring(root, encoding="unicode")
 
 
 def _period_note(period: report.Period) -> str:
