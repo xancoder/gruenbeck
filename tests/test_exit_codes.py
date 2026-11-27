@@ -10,6 +10,7 @@ import datetime
 import logging
 import os
 import pathlib
+import smtplib
 import subprocess
 import sys
 import typing
@@ -24,6 +25,8 @@ if typing.TYPE_CHECKING:
 
 MEMORY = [f"D_Y_2_{n}" for n in range(1, 15)]
 TODAY = datetime.date(2026, 11, 23)
+# the real function, for the tests that send over the fake SMTP server instead of recording
+SEND_MAIL = mail.send_mail
 
 
 @pytest.fixture
@@ -318,6 +321,83 @@ def test_failed_data_mail_exits_with_1_without_error_mail(
 
     assert error_mails(mails) == []
     assert (tmp_path / "data" / "gruenbeck_water_consumption_2026.csv").exists()
+
+
+def test_unexpected_error_in_send_mail_is_logged_with_traceback_without_error_mail(
+    collect: collections.abc.Callable[..., int],
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    tmp_path: pathlib.Path,
+) -> None:
+    # the data mail goes to the fake SMTP server, which fails unexpectedly at the login; an
+    # error mail would get through on the next connection
+    monkeypatch.setattr(mail, "send_mail", SEND_MAIL)
+    smtp.errors = [("login", RuntimeError("boom"))]
+
+    assert collect() == 1
+
+    log = (tmp_path / "errors.log").read_text()
+    first = (
+        "ERROR - mail sending failed: Unexpected error while sending email: RuntimeError: boom\n"
+    )
+    assert first in log
+    traceback_text = log.split(first, 1)[1]
+    assert traceback_text.startswith("Traceback (most recent call last):\n")
+    assert "\nRuntimeError: boom\n" in traceback_text
+    assert "ERROR - data was collected and stored, but email sending failed\n" in traceback_text
+    assert len(smtp.connections) == 1
+    assert smtp.messages() == []
+    assert (tmp_path / "data" / "gruenbeck_water_consumption_2026.csv").exists()
+
+
+def test_unexpected_error_of_the_data_mail_is_logged_with_traceback_without_error_mail(
+    collect: collections.abc.Callable[..., int],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    subjects: list[str] = []
+
+    def boom(
+        settings: config.Mail,
+        subject: str,
+        text: str,
+        attachments: collections.abc.Iterable[pathlib.Path] = (),
+        html: str | None = None,
+    ) -> typing.NoReturn:
+        subjects.append(subject)
+        raise RuntimeError("boom")
+
+    # not a MailError: collector.send_data_mail makes it an unexpected one
+    monkeypatch.setattr(mail, "send_mail", boom)
+
+    assert collect() == 1
+
+    log = (tmp_path / "errors.log").read_text()
+    first = "ERROR - mail sending failed: unexpected error: RuntimeError: boom\n"
+    assert first in log
+    traceback_text = log.split(first, 1)[1]
+    assert traceback_text.startswith("Traceback (most recent call last):\n")
+    assert 'in boom\n    raise RuntimeError("boom")\nRuntimeError: boom\n' in traceback_text
+    assert subjects == ["[data collector] - gruenbeck"]
+
+
+def test_expected_error_of_the_data_mail_is_logged_without_traceback(
+    collect: collections.abc.Callable[..., int],
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    tmp_path: pathlib.Path,
+) -> None:
+    monkeypatch.setattr(mail, "send_mail", SEND_MAIL)
+    smtp.errors = [("login", smtplib.SMTPAuthenticationError(535, b"bad credentials"))]
+
+    assert collect() == 1
+
+    lines = (tmp_path / "errors.log").read_text().splitlines()
+    assert [line.split(" - ", 3)[2:] for line in lines] == [
+        ["ERROR", "mail sending failed: Authentication failed: (535, b'bad credentials')"],
+        ["ERROR", "data was collected and stored, but email sending failed"],
+    ]
+    assert smtp.messages() == []
 
 
 def test_failed_error_mail_keeps_exit_code_1(

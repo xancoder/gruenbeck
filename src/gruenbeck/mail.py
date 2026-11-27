@@ -16,7 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class MailError(errors.GruenbeckError):
-    """a mail could not be built or sent (connection, login, rejected mail)"""
+    """
+    a mail could not be built or sent (connection, login, rejected mail)
+
+    An expected error is described completely by its message. An unexpected one (`unexpected`
+    is true) has the error that nobody expected as its cause (`__cause__`), whose traceback
+    belongs in the log.
+    """
+
+    def __init__(self, message: str, *, unexpected: bool = False) -> None:
+        super().__init__(message)
+        self.unexpected = unexpected
 
 
 # Errors that may disappear on a later attempt (connection problems, timeouts; socket.timeout
@@ -168,7 +178,10 @@ def send_mail(
             raise MailError(f"Email rejected: {error}") from error
         except Exception as error:
             # Unexpected errors
-            raise MailError(f"Unexpected error while sending email: {error}") from error
+            raise MailError(
+                f"Unexpected error while sending email: {type(error).__name__}: {error}",
+                unexpected=True,
+            ) from error
 
 
 def _end_session(server: smtplib.SMTP) -> None:

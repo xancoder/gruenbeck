@@ -418,12 +418,17 @@ def test_send_data_mail_without_data_folder_raises_storage_error(
 
 
 @pytest.mark.parametrize(
-    ("error", "message"),
+    ("error", "message", "unexpected"),
     [
-        (mail.MailError("Authentication failed: x"), "Authentication failed: x"),
-        (RuntimeError("boom"), "unexpected error: RuntimeError: boom"),
+        (mail.MailError("Authentication failed: x"), "Authentication failed: x", False),
+        (RuntimeError("boom"), "unexpected error: RuntimeError: boom", True),
+        (
+            mail.MailError("Unexpected error while sending email: OSError: x", unexpected=True),
+            "Unexpected error while sending email: OSError: x",
+            True,
+        ),
     ],
-    ids=lambda value: value if isinstance(value, str) else type(value).__name__,
+    ids=["expected", "unexpected-in-collector", "unexpected-in-mail"],
 )
 def test_failed_data_mail_raises_mail_error(
     monkeypatch: pytest.MonkeyPatch,
@@ -432,6 +437,7 @@ def test_failed_data_mail_raises_mail_error(
     loaded_config: gruenbeck.config.Configuration,
     error: Exception,
     message: str,
+    unexpected: bool,
 ) -> None:
     def fail(
         settings: configuration.Mail,
@@ -448,8 +454,10 @@ def test_failed_data_mail_raises_mail_error(
         collector.send_data_mail(loaded_config, tmp_path, TODAY)
 
     assert str(err.value) == message
-    # an unexpected error is the cause of the MailError, an expected one is raised as it is
+    # an unexpected error is the cause of the MailError, a MailError is raised as it is (and
+    # keeps whether it is unexpected)
     assert err.value is error or err.value.__cause__ is error
+    assert err.value.unexpected is unexpected
     assert logs() == []
 
 

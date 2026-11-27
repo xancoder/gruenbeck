@@ -187,6 +187,7 @@ def test_line_break_in_the_subject_is_an_error_before_connecting(smtp: "FakeSMTP
         " characters"
     )
     assert isinstance(err.value.__cause__, ValueError)
+    assert not err.value.unexpected
     assert smtp.connections == []
 
 
@@ -320,6 +321,7 @@ def test_transient_error_fails_after_four_attempts(smtp: "FakeSMTP", sleeps: lis
 
     assert str(err.value) == "Failed to send email after 4 attempts: timed out"
     assert isinstance(err.value.__cause__, TimeoutError)
+    assert not err.value.unexpected
     assert sleeps == [5, 5, 5]
     assert len(smtp.errors) == 1
 
@@ -354,6 +356,7 @@ def test_authentication_error_is_not_retried_and_not_wrapped_twice(
 
     assert str(err.value) == "Authentication failed: (535, b'bad credentials')"
     assert isinstance(err.value.__cause__, smtplib.SMTPAuthenticationError)
+    assert not err.value.unexpected
     assert len(smtp.connections) == 1
     assert sleeps == []
 
@@ -379,6 +382,7 @@ def test_permanent_error_is_not_retried(
 
     assert str(err.value) == f"Email rejected: {error}"
     assert err.value.__cause__ is error
+    assert not err.value.unexpected
     assert len(smtp.connections) == 1
     assert sleeps == []
 
@@ -389,6 +393,7 @@ def test_permanent_error_is_not_retried(
         ("connect", ssl.SSLError("certificate verify failed")),
         ("connect", OSError(113, "No route to host")),
         ("sendmail", smtplib.SMTPResponseException(451, b"try again later")),
+        ("login", RuntimeError("boom")),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
@@ -400,7 +405,12 @@ def test_other_errors_are_not_retried(
     with pytest.raises(mail.MailError) as err:
         send()
 
-    assert str(err.value) == f"Unexpected error while sending email: {error}"
+    # the type of the error is part of the message, as in collector.send_data_mail (P011-S2)
+    assert str(err.value) == (
+        f"Unexpected error while sending email: {type(error).__name__}: {error}"
+    )
+    assert err.value.unexpected
+    assert err.value.__cause__ is error
     assert sleeps == []
 
 

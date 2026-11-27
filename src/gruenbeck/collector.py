@@ -230,8 +230,8 @@ def send_data_mail(
     send the csv files of the data folder as data mail, with the statistics as text and HTML
     :param today: day of the run, for the statistics
     :raises storage.StorageError: the data folder does not exist or is not a folder
-    :raises mail.MailError: the mail cannot be built or sent; an unexpected error becomes a
-        MailError with the error as its cause
+    :raises mail.MailError: the mail cannot be built or sent; an unexpected error becomes an
+        unexpected MailError (MailError.unexpected) with the error as its cause
     """
     try:
         data_mail = compose_data_mail(config, data_path, today)
@@ -245,7 +245,9 @@ def send_data_mail(
     except errors.GruenbeckError:
         raise
     except Exception as error:
-        raise mail.MailError(f"unexpected error: {type(error).__name__}: {error}") from error
+        raise mail.MailError(
+            f"unexpected error: {type(error).__name__}: {error}", unexpected=True
+        ) from error
     logger.info("mail sent successfully")
 
 
