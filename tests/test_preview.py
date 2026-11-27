@@ -146,9 +146,10 @@ def test_nothing_is_written_and_no_mail_is_sent_by_default(
     assert out[1].startswith("[*] text: ")
     assert out[2].startswith("[*] html: ")
     assert "characters" in out[2]
+    assert out[3] == "[*] embedded images: 0"
     prefix = stored.data_file.prefix
-    assert out[3] == f"[*] attachments: {prefix}_2025.csv, {prefix}_2026.csv"
-    assert len(out) == 4
+    assert out[4] == f"[*] attachments: {prefix}_2025.csv, {prefix}_2026.csv"
+    assert len(out) == 5
 
 
 def test_send_to_sends_the_mail_to_that_address_only(
@@ -412,10 +413,117 @@ def test_output_dir_that_is_a_file_exits_with_1(
 
 @pytest.mark.parametrize(
     "options",
-    [["--today", "2026-13-01"], ["--today", "yesterday"], ["--send-to", "  "]],
+    [
+        ["--today", "2026-13-01"],
+        ["--today", "yesterday"],
+        ["--send-to", "  "],
+        ["--charts", "png"],
+        ["--charts", "CID"],
+        ["--charts"],
+    ],
 )
 def test_invalid_options_are_a_usage_error(options: list[str]) -> None:
     with pytest.raises(SystemExit) as exit_info:
         preview.main(options)
 
     assert exit_info.value.code == 2
+
+
+def test_invalid_chart_mode_names_the_valid_ones(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        preview.main(["--charts", "png"])
+
+    assert "invalid choice: 'png' (choose from 'inline', 'data-uri', 'cid')" in (
+        capsys.readouterr().err
+    )
+
+
+# --- --charts (P010-S2) ------------------------------------------------------------------
+
+
+def test_charts_inline_is_the_default(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], stored: config.Configuration
+) -> None:
+    assert run(stored, "--output-dir", str(tmp_path / "default")) == 0
+    assert run(stored, "--output-dir", str(tmp_path / "inline"), "--charts", "inline") == 0
+
+    assert data_files(tmp_path / "inline") == data_files(tmp_path / "default")
+    html = (tmp_path / "inline" / "data-mail.html").read_text(encoding="utf-8")
+    assert html.count("<svg") == 4
+    assert capsys.readouterr().out.count("[*] embedded images: 0") == 2
+
+
+def test_charts_data_uri_writes_the_html_with_the_images_in_it(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], stored: config.Configuration
+) -> None:
+    output = tmp_path / "preview"
+
+    assert run(stored, "--output-dir", str(output), "--charts", "data-uri") == 0
+
+    assert sorted(path.name for path in output.iterdir()) == ["data-mail.html", "data-mail.txt"]
+    html = (output / "data-mail.html").read_text(encoding="utf-8")
+    assert "<svg" not in html
+    assert html.count('<img src="data:image/svg+xml,') == 4
+    assert "[*] embedded images: 0" in capsys.readouterr().out.splitlines()
+
+
+def test_charts_cid_writes_the_images_next_to_the_html(
+    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], stored: config.Configuration
+) -> None:
+    output = tmp_path / "preview"
+
+    assert run(stored, "--output-dir", str(output), "--charts", "cid") == 0
+
+    names = ["cumulative", "monthly", "week", "weekly"]
+    assert sorted(path.name for path in output.iterdir()) == sorted(
+        ["data-mail.html", "data-mail.txt", *[f"data-mail-{name}.svg" for name in names]]
+    )
+    data_mail = collector.compose_data_mail(
+        stored, stored.data_path, datetime.date.fromisoformat(TODAY), report_html.ChartMode.CID
+    )
+    assert data_mail.html is not None
+    assert (output / "data-mail.html").read_text(encoding="utf-8") == data_mail.html
+    for image in data_mail.images:
+        assert (output / f"data-mail-{image.filename}").read_bytes() == image.content
+        assert f'src="cid:{image.content_id}"' in data_mail.html
+    out = capsys.readouterr().out.splitlines()
+    assert "[*] embedded images: 4" in out
+    assert [line for line in out if line.endswith(".svg")] == [
+        f"[*] wrote {output / f'data-mail-{name}.svg'}"
+        for name in ("week", "monthly", "cumulative", "weekly")
+    ]
+
+
+def test_charts_cid_sends_the_images_as_parts_of_the_mail(
+    smtp: "FakeSMTP", stored: config.Configuration
+) -> None:
+    assert run(stored, "--send-to", "me@example.org", "--charts", "cid") == 0
+    collector.send_data_mail(
+        stored, stored.data_path, datetime.date.fromisoformat(TODAY), report_html.ChartMode.CID
+    )
+
+    preview_mail, data_mail = smtp.messages()
+    assert html_of(preview_mail) == html_of(data_mail)
+    images = [part for part in preview_mail.walk() if part.get_content_type() == "image/svg+xml"]
+    assert [image.get_filename() for image in images] == [
+        "week.svg",
+        "monthly.svg",
+        "cumulative.svg",
+        "weekly.svg",
+    ]
+    assert [image["Content-ID"] for image in images] == [
+        part["Content-ID"]
+        for part in data_mail.walk()
+        if part.get_content_type() == "image/svg+xml"
+    ]
+    assert preview_mail["To"] == "me@example.org"
+
+
+def test_charts_data_uri_sends_no_image_part(
+    smtp: "FakeSMTP", stored: config.Configuration
+) -> None:
+    assert run(stored, "--send-to", "me@example.org", "--charts", "data-uri") == 0
+
+    (message,) = smtp.messages()
+    assert not [part for part in message.walk() if part.get_content_maintype() == "image"]
+    assert html_of(message).count('<img src="data:image/svg+xml,') == 4

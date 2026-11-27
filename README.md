@@ -216,6 +216,7 @@ uv run gruenbeck-preview-mail --send-to me@example.com
 | `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
 | `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the command only reports what it built (lines of text, size of the HTML, attachments) |
 | `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
+| `--charts inline\|data-uri\|cid` | how the HTML has the charts, for `--output-dir` and `--send-to`: `inline` (default, as the data collector sends it) puts the SVG into the HTML, `data-uri` an `<img>` with the image as `data:` URI, `cid` an `<img>` of an image part of the mail (with `--output-dir` also written as `data-mail-<chart>.svg`) |
 
 Warnings of the statistics and the charts go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
 

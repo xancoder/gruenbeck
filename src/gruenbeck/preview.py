@@ -12,15 +12,20 @@ Options:
     --today YYYY-MM-DD   the day of the run (default: today); a Monday and a Thursday
                          report the same week, the day before a month ends does not
     --output-dir DIR     write data-mail.txt and data-mail.html into DIR (created if
-                         missing), to open the HTML in a browser
+                         missing), to open the HTML in a browser; with --charts cid the
+                         images too, as data-mail-<chart>.svg
     --send-to ADDRESS    send the mail, with the CSV files, to this address only (not to
                          the recipients of the configuration) and with the prefix
                          "[preview] " in the subject; without it nothing is sent
+    --charts MODE        how the HTML has the charts: inline (SVG in the HTML, the default
+                         and what the data collector sends), data-uri (an <img> with the
+                         image in a data: URI) or cid (an <img> of an image part of the mail)
 
 Usage from the repository root (same place as the data collector):
 
     uv run gruenbeck-preview-mail --output-dir ./log/preview
     uv run gruenbeck-preview-mail --send-to me@example.com
+    uv run gruenbeck-preview-mail --send-to me@example.com --charts cid
 
 Exit code 0 if the mail was built (and written or sent as asked), 1 on an error in the
 configuration, the data folder, the output folder or the sending.
@@ -36,10 +41,13 @@ import gruenbeck.collector
 import gruenbeck.config
 import gruenbeck.errors
 import gruenbeck.mail
+import gruenbeck.report_html
 import gruenbeck.version
 
 TEXT_FILE = "data-mail.txt"
 HTML_FILE = "data-mail.html"
+# an image of the mail (--charts cid) is written as data-mail-<file name of the image>
+IMAGE_FILE_PREFIX = "data-mail-"
 SUBJECT_PREFIX = "[preview] "
 
 
@@ -90,6 +98,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="send the mail to this address only, with the subject prefix"
         f" {SUBJECT_PREFIX.strip()!r} (default: send nothing)",
     )
+    parser.add_argument(
+        "--charts",
+        choices=[mode.value for mode in gruenbeck.report_html.ChartMode],
+        default=gruenbeck.report_html.ChartMode.INLINE.value,
+        help="how the HTML has the charts: SVG in the HTML (inline, the default, as the data"
+        " collector sends it), or an <img> with a data: URI (data-uri) or an image part of the"
+        " mail (cid)",
+    )
     return parser.parse_args(argv)
 
 
@@ -107,6 +123,7 @@ def describe(
         f"[*] data mail for the run on {today} from {data_path}",
         f"[*] text: {len(data_mail.text.splitlines())} lines",
         f"[*] html: {html}",
+        f"[*] embedded images: {len(data_mail.images)}",
         f"[*] attachments: {files}",
     ]
 
@@ -115,7 +132,7 @@ def write_output(
     output_dir: pathlib.Path, data_mail: gruenbeck.collector.DataMail
 ) -> list[pathlib.Path]:
     """
-    write the text and, if it was made, the HTML of the mail
+    write the text and, if it was made, the HTML of the mail with its images
     :return: the files written
     :raises OSError: the folder or a file cannot be written
     """
@@ -129,6 +146,10 @@ def write_output(
         html_file = output_dir / HTML_FILE
         html_file.write_text(data_mail.html, encoding="utf-8")
         written.append(html_file)
+    for image in data_mail.images:
+        image_file = output_dir / f"{IMAGE_FILE_PREFIX}{image.filename}"
+        image_file.write_bytes(image.content)
+        written.append(image_file)
     return written
 
 
@@ -145,7 +166,12 @@ def send_preview(
         settings, recipients=(address,), subject=SUBJECT_PREFIX + settings.subject
     )
     gruenbeck.mail.send_mail(
-        preview, preview.subject, data_mail.text, data_mail.files, html=data_mail.html
+        preview,
+        preview.subject,
+        data_mail.text,
+        data_mail.files,
+        html=data_mail.html,
+        images=data_mail.images,
     )
     return preview.subject
 
@@ -167,7 +193,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        data_mail = gruenbeck.collector.compose_data_mail(config, config.data_path, today)
+        data_mail = gruenbeck.collector.compose_data_mail(
+            config, config.data_path, today, gruenbeck.report_html.ChartMode(args.charts)
+        )
     except gruenbeck.errors.GruenbeckError as err:
         print(f"[-] {err}", file=sys.stderr)
         return 1
