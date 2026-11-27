@@ -4,12 +4,10 @@ import collections
 import datetime
 import html.parser
 import re
-import urllib.parse
-import xml.etree.ElementTree as ET
 
 import pytest
 
-from gruenbeck import charts, report, report_html, report_text
+from gruenbeck import report, report_html, report_text
 
 D = datetime.date
 Stored = dict[datetime.date, int | str]
@@ -18,13 +16,7 @@ MONDAY = D(2026, 11, 23)
 WEEK_START = D(2026, 11, 16)
 NBSP = "\N{NO-BREAK SPACE}"
 DASH = "\N{EN DASH}"
-VOID_TAGS = {"meta", "br", "img"}
-CHARTS = {
-    "week": '<svg id="week"></svg>',
-    "weekly": '<svg id="weekly"></svg>',
-    "monthly": '<svg id="monthly"></svg>',
-    "cumulative": '<svg id="cumulative"></svg>',
-}
+VOID_TAGS = {"meta", "br"}
 
 
 def stored_days(start: datetime.date, *values: int | str | None) -> Stored:
@@ -75,7 +67,6 @@ class Page(html.parser.HTMLParser):
         self.tables: list[list[list[str]]] = []
         self.rows: list[tuple[list[str], bool]] = []
         self.classes: set[str] = set()
-        self.images: list[dict[str, str | None]] = []
         self._text: list[str] | None = None
         self._cell: list[str] | None = None
         self.feed(document)
@@ -88,8 +79,6 @@ class Page(html.parser.HTMLParser):
         self.classes.update((dict(attrs).get("class") or "").split())
         if tag == "br":
             self.handle_data(" ")
-        if tag == "img":
-            self.images.append(dict(attrs))
         if tag not in VOID_TAGS:
             self.stack.append(tag)
         if tag == "table":
@@ -126,11 +115,9 @@ class Page(html.parser.HTMLParser):
         return [row for table in self.tables for row in table if len(row) == columns]
 
 
-def page_of(
-    stored: Stored, charts: dict[str, str] | None = None, today: datetime.date = MONDAY
-) -> tuple[Page, report.Report]:
+def page_of(stored: Stored, today: datetime.date = MONDAY) -> tuple[Page, report.Report]:
     stats = stats_of(stored, today)
-    return Page(report_html.format_html(stats, charts)), stats
+    return Page(report_html.format_html(stats)), stats
 
 
 # --- document --------------------------------------------------------------------------------
@@ -140,7 +127,7 @@ def page_of(
 def test_document_is_well_formed_html_with_inline_css_and_no_external_resource(
     stored: Stored,
 ) -> None:
-    document = report_html.format_html(stats_of(stored), CHARTS)
+    document = report_html.format_html(stats_of(stored))
 
     page = Page(document)
     assert page.problems == []
@@ -161,7 +148,7 @@ def test_document_is_well_formed_html_with_inline_css_and_no_external_resource(
 
 def test_head_style_only_switches_the_colors_for_a_dark_color_scheme() -> None:
     # with a period that is not complete, so the class of its note is used
-    document = report_html.format_html(stats_of(with_gaps()), CHARTS)
+    document = report_html.format_html(stats_of(with_gaps()))
 
     (style,) = re.findall(r"<style>(.*?)</style>", document)
     assert style.startswith("@media (prefers-color-scheme: dark) {")
@@ -173,13 +160,6 @@ def test_head_style_only_switches_the_colors_for_a_dark_color_scheme() -> None:
     assert page.classes <= classes
     # the colors are in the elements too: the page is complete without the style sheet
     assert "background:#ffffff;color:#1f2937" in document
-
-
-def test_charts_follow_the_text_color_of_the_card() -> None:
-    document = report_html.format_html(stats_of(full_data()), CHARTS)
-
-    # the cell with the content sets `color`, which the SVG of a chart inherits (currentColor)
-    assert re.search(r'<td class="gb-card" style="[^"]*color:#1f2937', document)
 
 
 # --- headings and tables ---------------------------------------------------------------------
@@ -361,46 +341,16 @@ def test_dates_in_a_heading_do_not_break_at_their_hyphens() -> None:
     )
 
 
-# --- charts ----------------------------------------------------------------------------------
+# --- no charts (P012-S1) ---------------------------------------------------------------------
 
 
-def test_charts_are_put_in_their_sections_unchanged() -> None:
-    document = report_html.format_html(stats_of(full_data()), CHARTS)
+@pytest.mark.parametrize("stored", [full_data(), with_gaps(), {}], ids=["full", "gaps", "empty"])
+def test_document_has_no_image_and_no_address(stored: Stored) -> None:
+    document = report_html.format_html(stats_of(stored), ["No data files found to attach."])
 
-    order = [
-        document.index("Last week: week"),
-        document.index(CHARTS["week"]),
-        document.index(CHARTS["weekly"]),
-        document.index("Current month so far"),
-        document.index("Last month: "),
-        document.index(CHARTS["monthly"]),
-        document.index("Year so far"),
-        document.index(CHARTS["cumulative"]),
-        document.index("Earlier years as a whole"),
-    ]
-    assert order == sorted(order)
-    # the week chart is before its tables, the 52 weeks after them
-    assert document.index(CHARTS["week"]) < document.index("<th")
-    assert document.index(CHARTS["weekly"]) > document.rindex("<th", 0, document.index("Current"))
-
-
-def test_a_chart_that_is_not_given_is_left_out() -> None:
-    charts = {name: svg for name, svg in CHARTS.items() if name != "monthly"}
-
-    document = report_html.format_html(stats_of(full_data()), charts)
-
-    assert 'id="monthly"' not in document
-    assert Page(document).tags["svg"] == 3
-    assert "Last month: " in document
-
-
-def test_without_charts_the_tables_are_all_there_is() -> None:
-    with_charts = Page(report_html.format_html(stats_of(full_data()), CHARTS))
-    without = Page(report_html.format_html(stats_of(full_data())))
-    none_given = Page(report_html.format_html(stats_of(full_data()), {}))
-
-    assert without.tags["svg"] == 0
-    assert without.tables == with_charts.tables == none_given.tables
+    assert "<svg" not in document
+    assert "<img" not in document
+    assert "http" not in document
 
 
 # --- notes and failure -----------------------------------------------------------------------
@@ -434,159 +384,12 @@ def test_failure_document_has_the_note_and_no_statistics() -> None:
     assert page.tags["th"] == 0
     assert page.headings == []
     assert "statistics not available" in document
-    assert page.tags["svg"] == 0
     assert "<style>@media (prefers-color-scheme: dark)" in document
 
 
 def test_cells_of_the_tables_have_no_markup_of_their_own() -> None:
-    document = report_html.format_html(stats_of(with_gaps()), CHARTS)
+    document = report_html.format_html(stats_of(with_gaps()))
 
     # all texts come from numbers and dates: no value can bring its own markup
     cells = [cell for table in Page(document).tables for row in table for cell in row]
     assert not [cell for cell in cells if "<" in cell or ">" in cell or "&" in cell]
-
-
-# --- charts as images (P010-S2) --------------------------------------------------------------
-
-ChartMode = report_html.ChartMode
-# the charts in the order of the HTML
-HTML_ORDER = ("week", "weekly", "monthly", "cumulative")
-IMAGE_STYLE = "width:100%;max-width:640px;height:auto;border:0;"
-
-
-def drawn(stats: report.Report) -> dict[str, str]:
-    """the four real charts of the statistics"""
-    return {name: chart(stats) for name, chart in charts.CHARTS.items()}
-
-
-def alt_of(svg: str) -> str:
-    """the title and the description of a chart"""
-    root = ET.fromstring(svg)
-    namespace = f"{{{charts.SVG_NAMESPACE}}}"
-    return f"{root.findtext(namespace + 'title')}. {root.findtext(namespace + 'desc')}"
-
-
-def test_inline_is_the_default_chart_mode() -> None:
-    stats = stats_of(full_data())
-    svgs = drawn(stats)
-
-    document = report_html.format_html(stats, svgs, ["a note"], ChartMode.INLINE)
-
-    assert document == report_html.format_html(stats, svgs, ["a note"])
-    assert Page(document).tags["svg"] == 4
-    assert all(svg in document for svg in svgs.values())
-    assert "<img" not in document
-
-
-@pytest.mark.parametrize("stored", [full_data(), with_gaps()], ids=["full", "gaps"])
-def test_data_uri_puts_every_chart_as_image_into_an_img(stored: Stored) -> None:
-    stats = stats_of(stored)
-    svgs = drawn(stats)
-
-    document = report_html.format_html(stats, svgs, chart_mode=ChartMode.DATA_URI)
-
-    page = Page(document)
-    assert page.problems == []
-    assert "<svg" not in document
-    assert page.tags["img"] == 4
-    for name, image in zip(HTML_ORDER, page.images, strict=True):
-        source = image["src"] or ""
-        assert source.startswith("data:image/svg+xml,")
-        encoded = source.removeprefix("data:image/svg+xml,")
-        assert urllib.parse.unquote(encoded) == charts.as_image(svgs[name])
-        assert image["alt"] == alt_of(svgs[name])
-        assert (image["width"], image["style"]) == ("480", IMAGE_STYLE)
-
-
-@pytest.mark.parametrize("stored", [full_data(), with_gaps()], ids=["full", "gaps"])
-def test_cid_names_every_chart_by_the_content_id_of_its_image(stored: Stored) -> None:
-    stats = stats_of(stored)
-    svgs = drawn(stats)
-
-    document = report_html.format_html(stats, svgs, chart_mode=ChartMode.CID)
-
-    page = Page(document)
-    assert page.problems == []
-    assert "<svg" not in document
-    assert page.tags["img"] == 4
-    for name, image in zip(HTML_ORDER, page.images, strict=True):
-        expected = report_html.chart_image(name, svgs[name])
-        assert image["src"] == f"cid:{expected.content_id}"
-        assert expected.svg == charts.as_image(svgs[name])
-        assert image["alt"] == alt_of(svgs[name])
-        assert (image["width"], image["style"]) == ("480", IMAGE_STYLE)
-    assert len({image["src"] for image in page.images}) == 4
-
-
-@pytest.mark.parametrize("mode", [ChartMode.DATA_URI, ChartMode.CID])
-def test_images_keep_the_rest_of_the_document(mode: ChartMode) -> None:
-    stats = stats_of(with_gaps())
-    svgs = drawn(stats)
-
-    inline = report_html.format_html(stats, svgs, ["note"])
-    images = report_html.format_html(stats, svgs, ["note"], mode)
-
-    # the document is the same, only an <img> stands where the SVG was
-    assert re.sub(r"<img [^>]*>", "CHART", images) == re.sub(
-        r"<svg .*?</svg>", "CHART", inline, flags=re.DOTALL
-    )
-
-
-@pytest.mark.parametrize("mode", [ChartMode.DATA_URI, ChartMode.CID])
-def test_a_chart_that_is_not_given_has_no_image(mode: ChartMode) -> None:
-    stats = stats_of(full_data())
-    svgs = {name: svg for name, svg in drawn(stats).items() if name != "monthly"}
-
-    page = Page(report_html.format_html(stats, svgs, chart_mode=mode))
-
-    assert [image["alt"] for image in page.images] == [
-        alt_of(svgs[name]) for name in HTML_ORDER if name != "monthly"
-    ]
-
-
-def test_content_id_depends_on_the_name_and_on_the_image() -> None:
-    stats = stats_of(full_data())
-    svgs = drawn(stats)
-    other = drawn(stats_of(with_gaps()))
-
-    week = report_html.chart_image("week", svgs["week"])
-
-    assert re.fullmatch(r"chart-week\.[0-9a-f]{16}@gruenbeck", week.content_id)
-    assert report_html.chart_image("week", svgs["week"]) == week
-    assert report_html.chart_image("weekly", svgs["week"]).content_id != week.content_id
-    assert report_html.chart_image("week", other["week"]).content_id != week.content_id
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "<svg a=\"b c\" d='e'>#1 & 2 &amp; 3 < 4 > 5 % 6</svg>",
-        "11-16 \N{EN DASH} 11-22 \N{NO-BREAK SPACE}\n\t?",
-        "svg { color: #1f2937; } @media (x) { }",
-        "",
-    ],
-)
-def test_data_uri_is_percent_encoded_without_characters_that_need_escaping(text: str) -> None:
-    uri = report_html.data_uri(text)
-
-    assert uri.startswith("data:image/svg+xml,")
-    encoded = uri.removeprefix("data:image/svg+xml,")
-    assert urllib.parse.unquote(encoded) == text
-    # safe in an attribute and in a URL: no quote, markup, fragment, space or `?`
-    assert re.fullmatch(r"[A-Za-z0-9_.~/:;=,()!*@+%-]*", encoded)
-    # only escapes of two hex digits after a percent sign
-    assert re.fullmatch(r"([^%]|%[0-9A-F]{2})*", encoded)
-
-
-@pytest.mark.parametrize("mode", [ChartMode.DATA_URI, ChartMode.CID])
-def test_alt_text_of_an_image_is_escaped(mode: ChartMode) -> None:
-    svg = (
-        f'<svg xmlns="{charts.SVG_NAMESPACE}" viewBox="0 0 480 100" width="100%">'
-        "<title>a &lt;b&gt; &amp; \"c\"</title><desc>d 'e'</desc></svg>"
-    )
-
-    document = report_html.format_html(stats_of(full_data()), {"week": svg}, chart_mode=mode)
-
-    assert 'alt="a &lt;b&gt; &amp; &quot;c&quot;. d &#x27;e&#x27;"' in document
-    (image,) = Page(document).images
-    assert image["alt"] == "a <b> & \"c\". d 'e'"

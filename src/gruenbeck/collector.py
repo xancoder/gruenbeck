@@ -11,10 +11,10 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 
+from gruenbeck import config as configuration
 from gruenbeck import (
-    charts,
     device,
     errors,
     mail,
@@ -23,7 +23,6 @@ from gruenbeck import (
     report_text,
     storage,
 )
-from gruenbeck import config as configuration
 
 logger = logging.getLogger(__name__)
 
@@ -204,15 +203,10 @@ class DataMail:
     """the HTML document, None if it could not be made (the mail has the text only)"""
     files: tuple[pathlib.Path, ...]
     """the csv files to attach"""
-    images: tuple[mail.InlineImage, ...] = ()
-    """the charts as parts of the HTML (ChartMode.CID), each named by an `<img>` of it"""
 
 
 def compose_data_mail(
-    config: configuration.Configuration,
-    data_path: pathlib.Path,
-    today: datetime.date,
-    chart_mode: report_html.ChartMode = report_html.ChartMode.INLINE,
+    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
 ) -> DataMail:
     """
     make the data mail from the csv files of the data folder and the statistics
@@ -220,44 +214,40 @@ def compose_data_mail(
     Only reads the data folder: nothing is written and nothing is sent. The statistics
     never fail the mail, see get_statistics().
     :param today: day of the run, for the statistics
-    :param chart_mode: how the HTML has the charts
     :raises storage.StorageError: the data folder does not exist or is not a folder
     """
     files = storage.list_csv_files(data_path)
     notes = [] if files else [NO_DATA_FILES_TEXT]
-    statistics = get_statistics(config, data_path, today, notes, chart_mode)
+    statistics = get_statistics(config, data_path, today, notes)
     text = "\n\n".join([DATA_MAIL_TEXT, *notes, statistics.text])
-    return DataMail(text, statistics.html, tuple(files), statistics.images)
+    return DataMail(text, statistics.html, tuple(files))
 
 
 def send_data_mail(
-    config: configuration.Configuration,
-    data_path: pathlib.Path,
-    today: datetime.date,
-    chart_mode: report_html.ChartMode = report_html.ChartMode.INLINE,
+    config: configuration.Configuration, data_path: pathlib.Path, today: datetime.date
 ) -> None:
     """
     send the csv files of the data folder as data mail, with the statistics as text and HTML
     :param today: day of the run, for the statistics
-    :param chart_mode: how the HTML has the charts
     :raises storage.StorageError: the data folder does not exist or is not a folder
-    :raises mail.MailError: the mail cannot be built or sent; an unexpected error becomes a
-        MailError with the error as its cause
+    :raises mail.MailError: the mail cannot be built or sent; an unexpected error becomes an
+        unexpected MailError (MailError.unexpected) with the error as its cause
     """
     try:
-        data_mail = compose_data_mail(config, data_path, today, chart_mode)
+        data_mail = compose_data_mail(config, data_path, today)
         mail.send_mail(
             config.mail,
             config.mail.subject,
             data_mail.text,
             data_mail.files,
             html=data_mail.html,
-            images=data_mail.images,
         )
     except errors.GruenbeckError:
         raise
     except Exception as error:
-        raise mail.MailError(f"unexpected error: {type(error).__name__}: {error}") from error
+        raise mail.MailError(
+            f"unexpected error: {type(error).__name__}: {error}", unexpected=True
+        ) from error
     logger.info("mail sent successfully")
 
 
@@ -267,8 +257,6 @@ class Statistics:
 
     text: str
     html: str | None
-    images: tuple[mail.InlineImage, ...] = ()
-    """the charts the HTML names as parts of the mail (ChartMode.CID)"""
 
 
 def get_statistics(
@@ -276,22 +264,18 @@ def get_statistics(
     data_path: pathlib.Path,
     today: datetime.date,
     notes: Sequence[str] = (),
-    chart_mode: report_html.ChartMode = report_html.ChartMode.INLINE,
 ) -> Statistics:
     """
-    the statistics of the stored data for the data mail, as text and as HTML with the charts
+    the statistics of the stored data for the data mail, as text and as HTML
 
     The data is stored already and the data mail has to go out, so nothing here fails the
     run; every failure is logged as a warning with its traceback:
 
     - the statistics cannot be calculated (an unusable data file, a bug): a note takes
       their place in the text and in the HTML
-    - a chart cannot be drawn: the HTML is made without it (no `<img>`, no image part)
-    - the HTML cannot be made: the mail has the text only (and no image part)
+    - the HTML cannot be made: the mail has the text only
 
     :param notes: texts for the top of the HTML (the text gets them from the caller)
-    :param chart_mode: how the HTML has the charts; with ChartMode.CID the result has an
-        image for every chart the HTML shows
     """
     try:
         stats = report.build_report(data_path, config.data_file, today)
@@ -300,38 +284,10 @@ def get_statistics(
         logger.warning("statistics for the data mail failed: %s", error, exc_info=True)
         note = STATISTICS_FAILED_TEXT.format(error=error)
         return Statistics(note, _make_html(lambda: report_html.format_failure_html(note, notes)))
-
-    svgs = {}
-    for name, chart in charts.CHARTS.items():
-        try:
-            svgs[name] = chart(stats)
-        except Exception as error:
-            logger.warning("chart %r for the data mail failed: %s", name, error, exc_info=True)
-    made = _make_html(lambda: _html_with_images(stats, svgs, notes, chart_mode))
-    return Statistics(text, None) if made is None else Statistics(text, *made)
+    return Statistics(text, _make_html(lambda: report_html.format_html(stats, notes)))
 
 
-def _html_with_images(
-    stats: report.Report,
-    svgs: Mapping[str, str],
-    notes: Sequence[str],
-    chart_mode: report_html.ChartMode,
-) -> tuple[str, tuple[mail.InlineImage, ...]]:
-    """the HTML and, for ChartMode.CID, the images it names (a chart without section has none)"""
-    html = report_html.format_html(stats, svgs, notes, chart_mode)
-    if chart_mode is not report_html.ChartMode.CID:
-        return html, ()
-    images = []
-    for name, svg in svgs.items():
-        image = report_html.chart_image(name, svg)
-        if f'src="cid:{image.content_id}"' in html:
-            images.append(
-                mail.InlineImage(image.content_id, f"{name}.svg", image.svg.encode("utf-8"))
-            )
-    return html, tuple(images)
-
-
-def _make_html[T](build: Callable[[], T]) -> T | None:
+def _make_html(build: Callable[[], str]) -> str | None:
     try:
         return build()
     except Exception as error:

@@ -21,13 +21,18 @@ STATISTIC_NAMES = ("mean", "min", "max", "std", "sum")
 HEADLINE_COLUMNS = ("year", "month", *STATISTIC_NAMES)
 HEADLINE_FORMAT = "{:<4} {:<5} {:<4} {:<3} {:<3} {:<3} {:<5}"
 ROW_FORMAT = "{:>4} {:>5} {:>4.0f} {:>3.0f} {:>3.0f} {:>3.0f} {:>5.0f}"
+# the packages of the extra "analysis"; a missing one ends the command with MISSING_EXTRA_TEXT
+EXTRA_PACKAGES = frozenset({"matplotlib", "pandas"})
+MISSING_EXTRA_TEXT = (
+    "the extra 'analysis' is not installed (needs matplotlib and pandas): uv sync --extra analysis"
+)
 
 # a pandas data frame with the columns "date" (datetime) and "value"
 Frame = typing.Any
 
 
 class AnalysisError(errors.GruenbeckError):
-    """nothing to analyse"""
+    """the analysis cannot run: the extra "analysis" is missing, or there is nothing to analyse"""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -124,10 +129,23 @@ def draw_chart(plt: types.ModuleType, years: list[YearStatistics]) -> None:
 
 
 def main(config_file: str | os.PathLike[str]) -> None:
+    """
+    print the statistics of every yearly file and plot the mean per month
+    :raises AnalysisError: the extra "analysis" is not installed, or there is no yearly file
+    :raises FileNotFoundError: the configuration file does not exist
+    :raises errors.GruenbeckError: the configuration is invalid
+    """
     # pandas and matplotlib belong to the extra "analysis"; importing them here
     # keeps the module and the help of gruenbeck-analyse usable without it
-    import matplotlib.pyplot as plt
-    import pandas
+    try:
+        import matplotlib.pyplot as plt
+        import pandas
+    except ModuleNotFoundError as err:
+        # only the packages of the extra themselves; a module missing inside one of them
+        # is another problem and keeps its traceback
+        if (err.name or "").split(".")[0] not in EXTRA_PACKAGES:
+            raise
+        raise AnalysisError(MISSING_EXTRA_TEXT) from err
 
     # FileNotFoundError and ConfigurationError go to the caller (gruenbeck.cli.analyse)
     # the analysis never logs in to the SMTP server

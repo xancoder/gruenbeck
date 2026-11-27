@@ -98,7 +98,10 @@ def main(config_file: str | os.PathLike[str]) -> int:
     try:
         collector.send_data_mail(config, result.data_path, result.today)
     except errors.GruenbeckError as err:
-        logger.error("mail sending failed: %s", err)  # noqa: TRY400
+        # an expected error is described completely by its message (no traceback, TRY400);
+        # an unexpected one gets the traceback of its cause in the log (there is no error mail)
+        cause = err.__cause__ if isinstance(err, mail.MailError) and err.unexpected else None
+        logger.error("mail sending failed: %s", err, exc_info=cause)  # noqa: TRY400
         logger.error("data was collected and stored, but email sending failed")  # noqa: TRY400
         return 1
 

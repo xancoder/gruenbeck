@@ -1,6 +1,5 @@
 """sending mails: the data mail with attachments and the error mail"""
 
-import dataclasses
 import email.message
 import logging
 import pathlib
@@ -17,7 +16,17 @@ logger = logging.getLogger(__name__)
 
 
 class MailError(errors.GruenbeckError):
-    """a mail could not be built or sent (connection, login, rejected mail)"""
+    """
+    a mail could not be built or sent (connection, login, rejected mail)
+
+    An expected error is described completely by its message. An unexpected one (`unexpected`
+    is true) has the error that nobody expected as its cause (`__cause__`), whose traceback
+    belongs in the log.
+    """
+
+    def __init__(self, message: str, *, unexpected: bool = False) -> None:
+        super().__init__(message)
+        self.unexpected = unexpected
 
 
 # Errors that may disappear on a later attempt (connection problems, timeouts; socket.timeout
@@ -40,19 +49,6 @@ PERMANENT_SMTP_ERRORS = (
 )
 
 
-@dataclasses.dataclass(frozen=True)
-class InlineImage:
-    """an image of the HTML part, shown by `<img src="cid:<content_id>">` (an SVG by default)"""
-
-    content_id: str
-    """the Content-ID without the angle brackets"""
-    filename: str
-    """the name of the image, for a mail program that shows the part as file"""
-    content: bytes
-    subtype: str = "svg+xml"
-    """the type of the image: image/<subtype>"""
-
-
 def get_smtp_security(settings: config.Mail) -> str:
     """
     connection security of the smtp server
@@ -73,15 +69,13 @@ def build_message(
     text: str,
     attachments: Iterable[pathlib.Path] = (),
     html: str | None = None,
-    images: Iterable[InlineImage] = (),
 ) -> email.message.EmailMessage:
     """
     build the mail from the sender and the recipients of the configuration
 
     Text only is a text/plain mail. With `html` it is multipart/alternative (the text first,
     the HTML as the preferred part), and with attachments multipart/mixed with that as its
-    first part. With images, the HTML is multipart/related: the HTML first, then the images
-    (inline, with their Content-ID).
+    first part.
 
     :param settings: mail section of the configuration
     :param subject: subject of the mail
@@ -89,7 +83,6 @@ def build_message(
     :param attachments: files to attach; a file that cannot be read is left out and named
         at the end of the body (and of the HTML)
     :param html: the same mail as a complete HTML document (None for no HTML part)
-    :param images: the images the HTML shows by their content id; left out without `html`
     :raises MailError: a header is invalid (e.g. a line break in the subject)
     """
     files = []
@@ -111,30 +104,9 @@ def build_message(
     message.set_content("\n\n".join([text, *notes]))
     if html is not None:
         message.add_alternative(add_notes_to_html(html, notes), subtype="html")
-        _add_images(message, images)
     for name, data in files:
         message.add_attachment(data, maintype="application", subtype="octet-stream", filename=name)
     return message
-
-
-def _add_images(message: email.message.EmailMessage, images: Iterable[InlineImage]) -> None:
-    """the images as parts next to the HTML part, which becomes multipart/related"""
-    related = tuple(images)
-    if not related:
-        return
-    html_part = message.get_body(preferencelist=("html",))
-    assert html_part is not None, "the mail has no HTML part"
-    for image in related:
-        html_part.add_related(
-            image.content,
-            maintype="image",
-            subtype=image.subtype,
-            cid=f"<{image.content_id}>",
-            disposition="inline",
-            filename=image.filename,
-        )
-    # RFC 2387: the type of the first part, the root of multipart/related
-    html_part.set_param("type", "text/html")
 
 
 def add_notes_to_html(html: str, notes: Iterable[str]) -> str:
@@ -154,7 +126,6 @@ def send_mail(
     text: str,
     attachments: Iterable[pathlib.Path] = (),
     html: str | None = None,
-    images: Iterable[InlineImage] = (),
 ) -> None:
     """
     send a mail to the recipients of the configuration, with or without attachments
@@ -169,10 +140,9 @@ def send_mail(
     :param text: body of the mail
     :param attachments: files to attach (see build_message)
     :param html: the mail as HTML document, sent next to the text (see build_message)
-    :param images: the images of the HTML (see build_message)
     :raises MailError: the mail cannot be built or sent
     """
-    message = build_message(settings, subject, text, attachments, html, images)
+    message = build_message(settings, subject, text, attachments, html)
     security = get_smtp_security(settings)
 
     attempts = 0
@@ -208,7 +178,10 @@ def send_mail(
             raise MailError(f"Email rejected: {error}") from error
         except Exception as error:
             # Unexpected errors
-            raise MailError(f"Unexpected error while sending email: {error}") from error
+            raise MailError(
+                f"Unexpected error while sending email: {type(error).__name__}: {error}",
+                unexpected=True,
+            ) from error
 
 
 def _end_session(server: smtplib.SMTP) -> None:

@@ -1,6 +1,6 @@
 """
-the data mail with the statistics (P007-S2, P007-S4): text, HTML with the charts and
-attachments over a fake SMTP server, and the run when a part of it cannot be made
+the data mail with the statistics (P007-S2, P007-S4, P012-S1): text, HTML and attachments
+over a fake SMTP server, and the run when a part of it cannot be made
 """
 
 import collections.abc
@@ -10,12 +10,10 @@ import logging
 import pathlib
 import re
 import typing
-import urllib.parse
 
 import pytest
 
 from gruenbeck import (
-    charts,
     cli,
     collector,
     config,
@@ -31,8 +29,6 @@ if typing.TYPE_CHECKING:
 
 TODAY = datetime.date(2026, 11, 23)
 STATISTICS_FAILED = "The statistics could not be calculated: "
-# the charts in the order of the HTML
-CHART_CLASSES = ["gb-week", "gb-weekly", "gb-monthly", "gb-cumulative"]
 
 
 def write_year(
@@ -383,10 +379,10 @@ def test_run_past_midnight_calculates_the_statistics_for_the_day_of_the_stored_v
     assert warnings() == []
 
 
-# --- HTML part and charts (P007-S4) -----------------------------------------------------
+# --- HTML part (P007-S4, P012-S1) --------------------------------------------------------
 
 
-def test_data_mail_is_text_and_html_with_the_four_charts_and_the_csv_files(
+def test_data_mail_is_text_and_html_without_images_and_the_csv_files(
     smtp: "FakeSMTP",
     warnings: typing.Callable[[], list[logging.LogRecord]],
     loaded_config: config.Configuration,
@@ -406,15 +402,23 @@ def test_data_mail_is_text_and_html_with_the_four_charts_and_the_csv_files(
         "text/html",
     ]
     text, document = (part.get_content() for part in alternative.iter_parts())
-    # the text as before; the HTML has the same tables and the four charts
+    # the text as before; the HTML has the same tables
     assert text.startswith("your stored data\n\nWater consumption in liters, run on 2026-11-23\n")
     assert "2026  11-16..11-22     1100     157     90 11-21    300 11-20" in text.splitlines()
     assert document.startswith("<!DOCTYPE html>")
     assert re.findall(r"<td [^>]*>1100</td>", document)
-    assert re.findall(r'class="gb-chart (gb-\w+)"', document) == CHART_CLASSES
-    assert document.count("<svg") == document.count("</svg>") == 4
-    # no external resource: the only addresses are the namespaces of the four SVGs
-    assert document.count("http") == 4
+    # no chart (P012-S1): no SVG, no image and no address of an external resource
+    assert "<svg" not in document
+    assert "<img" not in document
+    assert "http" not in document
+    assert [part.get_content_maintype() for part in message.walk()] == [
+        "multipart",
+        "multipart",
+        "text",
+        "text",
+        "application",
+        "application",
+    ]
     assert [part.get_filename() for part in attachments] == [
         f"{prefix}_2025.csv",
         f"{prefix}_2026.csv",
@@ -448,7 +452,6 @@ def test_failed_statistics_give_a_note_in_the_html_too(
     # in the HTML the special characters of the message are escaped, and there is no statistics
     assert "bad &lt;file&gt; &amp; &quot;x&quot;<br>Details are in the log file." in document
     assert "<file>" not in document
-    assert "<svg" not in document
     assert "<h2" not in document
     assert len(list(message.iter_attachments())) == 1
     (record,) = warnings()
@@ -476,65 +479,6 @@ def test_special_characters_of_a_data_file_name_are_escaped_in_the_html(
     assert f"{bad_file} has no column" in text
     assert str(bad_file).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") in document
     assert "w&<b>" not in document
-
-
-def test_failed_chart_is_left_out_of_the_html(
-    monkeypatch: pytest.MonkeyPatch,
-    smtp: "FakeSMTP",
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-
-    def fail(stats: report.Report) -> str:
-        raise RuntimeError("boom")
-
-    monkeypatch.setitem(charts.CHARTS, "monthly", fail)
-
-    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
-
-    text, _ = sent(smtp)
-    document = html_of(smtp)
-    assert re.findall(r'class="gb-chart (gb-\w+)"', document) == [
-        "gb-week",
-        "gb-weekly",
-        "gb-cumulative",
-    ]
-    # the tables and the text are complete
-    assert "Last month: " in document
-    assert "Water consumption in liters" in text
-    assert STATISTICS_FAILED not in text
-    (record,) = warnings()
-    assert record.getMessage() == "chart 'monthly' for the data mail failed: boom"
-    assert record.exc_info is not None
-    assert record.exc_info[0] is RuntimeError
-
-
-def test_without_any_chart_the_html_has_the_tables(
-    monkeypatch: pytest.MonkeyPatch,
-    smtp: "FakeSMTP",
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-
-    def fail(stats: report.Report) -> str:
-        raise ValueError("no chart")
-
-    for name in list(charts.CHARTS):
-        monkeypatch.setitem(charts.CHARTS, name, fail)
-
-    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
-
-    document = html_of(smtp)
-    assert "<svg" not in document
-    assert re.findall(r"<td [^>]*>1100</td>", document)
-    assert [record.getMessage() for record in warnings()] == [
-        f"chart {name!r} for the data mail failed: no chart" for name in CHART_NAMES
-    ]
-
-
-CHART_NAMES = ("week", "monthly", "cumulative", "weekly")
 
 
 def test_failed_html_leaves_the_mail_with_the_text(
@@ -590,209 +534,3 @@ def test_failed_statistics_and_failed_note_leave_the_note_in_the_text(
         "statistics for the data mail failed: boom",
         "HTML part of the data mail failed: boom",
     ]
-
-
-def test_run_with_a_failed_chart_still_exits_with_0(
-    monkeypatch: pytest.MonkeyPatch, smtp: "FakeSMTP", loaded_config: config.Configuration
-) -> None:
-    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-
-    def fail(stats: report.Report) -> str:
-        raise RuntimeError("boom")
-
-    monkeypatch.setitem(charts.CHARTS, "cumulative", fail)
-    monkeypatch.setattr(
-        collector,
-        "collect_and_store",
-        lambda config: collector.CollectResult(loaded_config.data_path, TODAY),
-    )
-
-    assert cli.main(str(loaded_config.file)) == 0
-
-    assert re.findall(r'class="gb-chart (gb-\w+)"', html_of(smtp)) == [
-        "gb-week",
-        "gb-weekly",
-        "gb-monthly",
-    ]
-
-
-# --- charts as images (P010-S2) ----------------------------------------------------------
-
-ChartMode = report_html.ChartMode
-# the charts in the order of the HTML
-HTML_ORDER = ("week", "weekly", "monthly", "cumulative")
-
-
-def write_two_years(configuration: config.Configuration) -> None:
-    write_year(configuration, 2025, week_rows(50, 50, 50, 50, 50, 50, 50, first="2025-11-17"))
-    write_year(configuration, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-
-
-def drawn(configuration: config.Configuration, today: datetime.date = TODAY) -> dict[str, str]:
-    """the four charts the data mail of the run has"""
-    stats = report.build_report(configuration.data_path, configuration.data_file, today)
-    return {name: chart(stats) for name, chart in charts.CHARTS.items()}
-
-
-def cids(document: str) -> list[str]:
-    return re.findall(r'<img src="cid:([^"]+)"', document)
-
-
-def test_inline_charts_give_the_data_mail_as_before(
-    warnings: typing.Callable[[], list[logging.LogRecord]], loaded_config: config.Configuration
-) -> None:
-    write_two_years(loaded_config)
-
-    default = collector.compose_data_mail(loaded_config, loaded_config.data_path, TODAY)
-    inline = collector.compose_data_mail(
-        loaded_config, loaded_config.data_path, TODAY, ChartMode.INLINE
-    )
-
-    assert inline == default
-    assert inline.images == ()
-    # the HTML of the statistics with the charts as SVG, exactly as format_html makes it
-    stats = report.build_report(loaded_config.data_path, loaded_config.data_file, TODAY)
-    assert inline.html == report_html.format_html(stats, drawn(loaded_config))
-    assert warnings() == []
-
-
-def test_data_uri_charts_are_images_in_the_html_and_no_part_of_the_mail(
-    smtp: "FakeSMTP",
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    prefix = loaded_config.data_file.prefix
-    write_two_years(loaded_config)
-
-    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY, ChartMode.DATA_URI)
-
-    (message,) = smtp.messages()
-    alternative, *attachments = message.iter_parts()
-    assert [part.get_content_type() for part in alternative.iter_parts()] == [
-        "text/plain",
-        "text/html",
-    ]
-    document = html_of(smtp)
-    assert "<svg" not in document
-    sources = re.findall(r'<img src="data:image/svg\+xml,([^"]*)"', document)
-    svgs = drawn(loaded_config)
-    assert [urllib.parse.unquote(source) for source in sources] == [
-        charts.as_image(svgs[name]) for name in HTML_ORDER
-    ]
-    assert [part.get_filename() for part in attachments] == [
-        f"{prefix}_2025.csv",
-        f"{prefix}_2026.csv",
-    ]
-    assert warnings() == []
-
-
-def test_cid_charts_are_image_parts_next_to_the_html(
-    smtp: "FakeSMTP",
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    prefix = loaded_config.data_file.prefix
-    write_two_years(loaded_config)
-
-    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY, ChartMode.CID)
-
-    (message,) = smtp.messages()
-    assert message.get_content_type() == "multipart/mixed"
-    alternative, *attachments = message.iter_parts()
-    plain, related = alternative.iter_parts()
-    assert plain.get_content().startswith("your stored data\n\nWater consumption in liters")
-    assert related.get_content_type() == "multipart/related"
-    html_part, *images = related.iter_parts()
-    document = html_part.get_content()
-    assert "<svg" not in document
-    # every <img> has its part, every part has its <img>
-    svgs = drawn(loaded_config)
-    assert cids(document) == [
-        report_html.chart_image(name, svgs[name]).content_id for name in HTML_ORDER
-    ]
-    by_id = {image["Content-ID"]: image for image in images}
-    assert sorted(by_id) == sorted(f"<{content_id}>" for content_id in cids(document))
-    for name in HTML_ORDER:
-        image = by_id[f"<{report_html.chart_image(name, svgs[name]).content_id}>"]
-        assert image.get_content_type() == "image/svg+xml"
-        assert image.get_filename() == f"{name}.svg"
-        assert image.get_content() == charts.as_image(svgs[name]).encode("utf-8")
-    assert [part.get_filename() for part in attachments] == [
-        f"{prefix}_2025.csv",
-        f"{prefix}_2026.csv",
-    ]
-    assert warnings() == []
-
-
-@pytest.mark.parametrize("mode", [ChartMode.DATA_URI, ChartMode.CID])
-def test_failed_chart_leaves_neither_an_image_nor_a_part(
-    mode: ChartMode,
-    monkeypatch: pytest.MonkeyPatch,
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    write_two_years(loaded_config)
-
-    def fail(stats: report.Report) -> str:
-        raise RuntimeError("boom")
-
-    monkeypatch.setitem(charts.CHARTS, "monthly", fail)
-
-    data_mail = collector.compose_data_mail(loaded_config, loaded_config.data_path, TODAY, mode)
-
-    assert data_mail.html is not None
-    assert data_mail.html.count("<img ") == 3
-    assert "Monthly consumption" not in data_mail.html
-    assert "Last month: " in data_mail.html
-    expected = ["week.svg", "cumulative.svg", "weekly.svg"] if mode is ChartMode.CID else []
-    assert [image.filename for image in data_mail.images] == expected
-    assert sorted(image.content_id for image in data_mail.images) == sorted(cids(data_mail.html))
-    (record,) = warnings()
-    assert record.getMessage() == "chart 'monthly' for the data mail failed: boom"
-
-
-def test_failed_html_leaves_the_mail_with_the_text_and_without_images(
-    monkeypatch: pytest.MonkeyPatch,
-    smtp: "FakeSMTP",
-    warnings: typing.Callable[[], list[logging.LogRecord]],
-    loaded_config: config.Configuration,
-) -> None:
-    write_year(loaded_config, 2026, week_rows(100, 200, 150, 120, 300, 90, 140))
-
-    def fail(*arguments: object) -> str:
-        raise RuntimeError("no html")
-
-    monkeypatch.setattr(report_html, "format_html", fail)
-
-    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY, ChartMode.CID)
-
-    (message,) = smtp.messages()
-    assert [part.get_content_type() for part in message.walk()] == [
-        "multipart/mixed",
-        "text/plain",
-        "application/octet-stream",
-    ]
-    (record,) = warnings()
-    assert record.getMessage() == "HTML part of the data mail failed: no html"
-
-
-def test_chart_without_its_section_has_no_part(
-    warnings: typing.Callable[[], list[logging.LogRecord]], loaded_config: config.Configuration
-) -> None:
-    new_year = datetime.date(2027, 1, 1)
-    write_year(loaded_config, 2026, week_rows(*[100] * 31, first="2026-12-01"))
-
-    data_mail = collector.compose_data_mail(
-        loaded_config, loaded_config.data_path, new_year, ChartMode.CID
-    )
-
-    # on 1 January there is no year so far, and so no place for the cumulative chart
-    assert data_mail.html is not None
-    assert "Year so far" not in data_mail.html
-    assert [image.filename for image in data_mail.images] == [
-        "week.svg",
-        "monthly.svg",
-        "weekly.svg",
-    ]
-    assert sorted(image.content_id for image in data_mail.images) == sorted(cids(data_mail.html))
-    assert warnings() == []

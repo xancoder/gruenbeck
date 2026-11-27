@@ -47,9 +47,8 @@ def send(
     text: str = "text",
     attachments: collections.abc.Iterable[pathlib.Path] = (),
     html: str | None = None,
-    images: collections.abc.Iterable[mail.InlineImage] = (),
 ) -> None:
-    mail.send_mail(settings, subject, text, attachments, html, images)
+    mail.send_mail(settings, subject, text, attachments, html)
 
 
 def parts(message: email.message.EmailMessage) -> list[tuple[str, str | None, typing.Any]]:
@@ -188,6 +187,7 @@ def test_line_break_in_the_subject_is_an_error_before_connecting(smtp: "FakeSMTP
         " characters"
     )
     assert isinstance(err.value.__cause__, ValueError)
+    assert not err.value.unexpected
     assert smtp.connections == []
 
 
@@ -321,6 +321,7 @@ def test_transient_error_fails_after_four_attempts(smtp: "FakeSMTP", sleeps: lis
 
     assert str(err.value) == "Failed to send email after 4 attempts: timed out"
     assert isinstance(err.value.__cause__, TimeoutError)
+    assert not err.value.unexpected
     assert sleeps == [5, 5, 5]
     assert len(smtp.errors) == 1
 
@@ -355,6 +356,7 @@ def test_authentication_error_is_not_retried_and_not_wrapped_twice(
 
     assert str(err.value) == "Authentication failed: (535, b'bad credentials')"
     assert isinstance(err.value.__cause__, smtplib.SMTPAuthenticationError)
+    assert not err.value.unexpected
     assert len(smtp.connections) == 1
     assert sleeps == []
 
@@ -380,6 +382,7 @@ def test_permanent_error_is_not_retried(
 
     assert str(err.value) == f"Email rejected: {error}"
     assert err.value.__cause__ is error
+    assert not err.value.unexpected
     assert len(smtp.connections) == 1
     assert sleeps == []
 
@@ -390,6 +393,7 @@ def test_permanent_error_is_not_retried(
         ("connect", ssl.SSLError("certificate verify failed")),
         ("connect", OSError(113, "No route to host")),
         ("sendmail", smtplib.SMTPResponseException(451, b"try again later")),
+        ("login", RuntimeError("boom")),
     ],
     ids=lambda value: value if isinstance(value, str) else type(value).__name__,
 )
@@ -401,7 +405,12 @@ def test_other_errors_are_not_retried(
     with pytest.raises(mail.MailError) as err:
         send()
 
-    assert str(err.value) == f"Unexpected error while sending email: {error}"
+    # the type of the error is part of the message, as in collector.send_data_mail (P011-S2)
+    assert str(err.value) == (
+        f"Unexpected error while sending email: {type(error).__name__}: {error}"
+    )
+    assert err.value.unexpected
+    assert err.value.__cause__ is error
     assert sleeps == []
 
 
@@ -515,7 +524,7 @@ def test_html_with_non_ascii_text_is_sent_as_utf8(smtp: "FakeSMTP") -> None:
 
 
 def test_long_lines_of_the_html_survive_the_transmission(smtp: "FakeSMTP") -> None:
-    html = "<html><body>" + '<svg><line x1="1" /></svg>' * 2000 + "</body></html>"
+    html = "<html><body>" + '<p><span class="x">1</span></p>' * 2000 + "</body></html>"
 
     send(text="the text", html=html)
 
@@ -561,104 +570,3 @@ def test_mail_without_html_stays_as_before(smtp: "FakeSMTP", tmp_path: pathlib.P
     (message,) = smtp.messages()
     assert message.get_content_type() == "multipart/mixed"
     assert [kind for kind, _, _ in parts(message)] == ["text/plain", "application/octet-stream"]
-
-
-# --- images of the HTML (P010-S2) ---------------------------------------------------
-
-IMAGES = (
-    mail.InlineImage(
-        "chart-a.1@gruenbeck",
-        "a.svg",
-        '<svg xmlns="http://www.w3.org/2000/svg"><text>1 \N{EN DASH} 2</text></svg>'.encode(),
-    ),
-    mail.InlineImage("chart-b.2@gruenbeck", "b.svg", b"<svg/>" * 1000),
-)
-HTML_WITH_IMAGES = (
-    '<html><body><img src="cid:chart-a.1@gruenbeck"><img src="cid:chart-b.2@gruenbeck">'
-    "</body></html>"
-)
-
-
-def images_of(related: email.message.MIMEPart) -> list[tuple[str, str, str | None, str]]:
-    """content type, Content-ID, disposition and file name of the images of multipart/related"""
-    _, *images = related.iter_parts()
-    return [
-        (
-            image.get_content_type(),
-            image["Content-ID"],
-            image.get_content_disposition(),
-            image.get_filename() or "",
-        )
-        for image in images
-    ]
-
-
-def test_images_make_the_html_multipart_related_with_the_html_first(smtp: "FakeSMTP") -> None:
-    send(text="the text", html=HTML_WITH_IMAGES, images=IMAGES)
-
-    (message,) = smtp.messages()
-    assert message.get_content_type() == "multipart/alternative"
-    plain, related = message.iter_parts()
-    assert plain.get_content() == "the text\n"
-    assert related.get_content_type() == "multipart/related"
-    assert related.get_param("type") == "text/html"
-    html_part, *images = related.iter_parts()
-    assert html_part.get_content_type() == "text/html"
-    assert html_part.get_content() == HTML_WITH_IMAGES + "\n"
-    assert images_of(related) == [
-        ("image/svg+xml", "<chart-a.1@gruenbeck>", "inline", "a.svg"),
-        ("image/svg+xml", "<chart-b.2@gruenbeck>", "inline", "b.svg"),
-    ]
-    assert [image.get_content() for image in images] == [image.content for image in IMAGES]
-    # the mail program shows the HTML; the images are no attachments
-    body = message.get_body(preferencelist=("html", "plain"))
-    assert body is not None
-    assert body.get_content() == HTML_WITH_IMAGES + "\n"
-    assert list(message.iter_attachments()) == []
-
-
-def test_images_and_attachments_keep_their_places(smtp: "FakeSMTP", tmp_path: pathlib.Path) -> None:
-    (tmp_path / "a.csv").write_text("date,value\n")
-
-    send(text="the text", html=HTML_WITH_IMAGES, attachments=[tmp_path / "a.csv"], images=IMAGES)
-
-    (message,) = smtp.messages()
-    assert message.get_content_type() == "multipart/mixed"
-    alternative, attachment = message.iter_parts()
-    assert [part.get_content_type() for part in alternative.iter_parts()] == [
-        "text/plain",
-        "multipart/related",
-    ]
-    _, related = alternative.iter_parts()
-    assert [content_id for _, content_id, _, _ in images_of(related)] == [
-        "<chart-a.1@gruenbeck>",
-        "<chart-b.2@gruenbeck>",
-    ]
-    assert (attachment.get_filename(), attachment.get_content()) == ("a.csv", b"date,value\n")
-    assert [part.get_filename() for part in message.iter_attachments()] == ["a.csv"]
-
-
-def test_long_images_survive_the_transmission(smtp: "FakeSMTP") -> None:
-    send(text="the text", html=HTML_WITH_IMAGES, images=IMAGES)
-
-    (raw,) = smtp.raw_messages()
-    assert max(len(line) for line in raw.split(b"\r\n")) <= 998
-    (message,) = smtp.messages()
-    (_, related) = message.iter_parts()
-    _, _, image = related.iter_parts()
-    assert image.get_content() == b"<svg/>" * 1000
-
-
-def test_images_without_html_are_left_out(smtp: "FakeSMTP") -> None:
-    send(text="the text", images=IMAGES)
-
-    (message,) = smtp.messages()
-    assert message.get_content_type() == "text/plain"
-    assert message.get_content() == "the text\n"
-
-
-def test_no_images_leave_the_html_part_as_it_is() -> None:
-    message = mail.build_message(SETTINGS, "subject", "the text", html=HTML, images=())
-
-    assert parts(message) == [("text/plain", None, "the text\n"), ("text/html", None, HTML + "\n")]
-    assert mail.InlineImage("x", "x.svg", b"").subtype == "svg+xml"
