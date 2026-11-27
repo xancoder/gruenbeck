@@ -3,10 +3,10 @@ consumption statistics of the yearly data files, for the data mail
 
 compute_report() classifies every day of the stored values and builds the periods of a run
 on a given day: the last complete week, the current and the last complete month, the year
-so far, each with the same period of the earlier years, plus the series for the charts.
-build_report() reads the yearly files first. The result is plain data (dataclasses); text
-and charts are made from it elsewhere (report_text, report_html, charts). Only the standard
-library is needed, and the yearly files are never changed.
+so far, each with the same period of the earlier years. build_report() reads the yearly
+files first. The result is plain data (dataclasses); text and HTML are made from it elsewhere
+(report_sections, report_text, report_html). Only the standard library is needed, and the
+yearly files are never changed.
 
 Every day has one status (DayStatus):
 
@@ -15,7 +15,7 @@ Every day has one status (DayStatus):
   (e.g. "-" of older runs), from the first stored day to the day before the run
 - interpolated: a missing day of a gap of up to MAX_INTERPOLATED_GAP days with a measured
   day on both sides, linear and rounded to whole liters (half up). The value is made up for
-  the statistics and the charts only; it is never written to a file.
+  the statistics only; it is never written to a file.
 - no data: before the first stored day (the collector did not run yet) and from the day of
   the run on
 
@@ -45,13 +45,10 @@ ONE_DAY = datetime.timedelta(days=1)
 ONE_WEEK = datetime.timedelta(days=7)
 # gaps of more days stay missing
 MAX_INTERPOLATED_GAP = 3
-# an earlier period (and a year of the charts) needs a value on at least this share of its days
+# an earlier period needs a value on at least this share of its days
 MIN_COVERAGE = 0.5
 # every comparison shows up to this many earlier years, the latest ones (see MIN_COVERAGE)
 MAX_COMPARED_YEARS = 5
-# the charts show the current year and up to this many earlier years with enough values
-CHART_EARLIER_YEARS = 3
-CHART_WEEKS = 52
 
 
 class DayStatus(enum.StrEnum):
@@ -125,37 +122,6 @@ class Comparison:
 
 
 @dataclasses.dataclass(frozen=True)
-class YearMonths:
-    """the 12 calendar months of a year, January first; a month of the future has no data"""
-
-    year: int
-    months: tuple[Period, ...]
-
-
-@dataclasses.dataclass(frozen=True)
-class CumulativePoint:
-    """
-    the consumption of the year from 1 January up to and including `date`
-
-    cumulative is None for a missing day and a day without data: the line of the chart
-    breaks there. The missing liters are not added later, so the line after a gap is
-    lower than the real consumption.
-    """
-
-    date: datetime.date
-    status: DayStatus
-    cumulative: int | None
-
-
-@dataclasses.dataclass(frozen=True)
-class YearCumulative:
-    """one point for every day of the year, from 1 January to 31 December"""
-
-    year: int
-    points: tuple[CumulativePoint, ...]
-
-
-@dataclasses.dataclass(frozen=True)
 class Report:
     """
     the statistics of the run on the day `today`
@@ -166,10 +132,6 @@ class Report:
     :param year_to_date: the current year up to yesterday, None on 1 January
     :param previous_years: the earlier years as a whole to show, the latest year first (the
         limits of Comparison.previous apply)
-    :param monthly: the months of the current year and of up to CHART_EARLIER_YEARS earlier
-        years with a value on at least MIN_COVERAGE of their days, the current year last
-    :param cumulative: the same years, the current year last
-    :param weekly: the last CHART_WEEKS complete weeks, the last week last
     :param omitted_previous_years: the earlier years with at least one value that are not in
         `previous_years` (see Comparison.omitted)
     """
@@ -180,9 +142,6 @@ class Report:
     last_month: Comparison
     year_to_date: Comparison | None
     previous_years: tuple[Period, ...]
-    monthly: tuple[YearMonths, ...]
-    cumulative: tuple[YearCumulative, ...]
-    weekly: tuple[Period, ...]
     omitted_previous_years: int = 0
 
 
@@ -259,7 +218,6 @@ def compute_report(
         _year(series, year) for year in _earlier_years(series, today.year)
     )
 
-    chart_years = _chart_years(series, today.year)
     return Report(
         today=today,
         week=week,
@@ -267,12 +225,6 @@ def compute_report(
         last_month=last_month,
         year_to_date=year_to_date,
         previous_years=previous_years,
-        monthly=tuple(
-            YearMonths(year, tuple(_month(series, year, month) for month in range(1, 13)))
-            for year in chart_years
-        ),
-        cumulative=tuple(_cumulative(series, year) for year in chart_years),
-        weekly=tuple(_week(series, last_week - n * ONE_WEEK) for n in reversed(range(CHART_WEEKS))),
         omitted_previous_years=omitted_previous_years,
     )
 
@@ -298,15 +250,6 @@ class _Series:
         if self.first is not None and self.first <= day <= self.last:
             return Day(day, DayStatus.MISSING, None)
         return Day(day, DayStatus.NO_DATA, None)
-
-    def years_with_values(self) -> set[int]:
-        return {day.year for day in (*self.measured, *self.interpolated)}
-
-    def years_with_enough_values(self) -> set[int]:
-        """the years with a value on at least MIN_COVERAGE of their days"""
-        return {
-            year for year in self.years_with_values() if _year(self, year).coverage >= MIN_COVERAGE
-        }
 
 
 def _interpolate(
@@ -438,21 +381,3 @@ def _select_earlier(
     enough = [period for period in with_values if period.coverage >= MIN_COVERAGE]
     shown = tuple(enough[:MAX_COMPARED_YEARS])
     return shown, len(with_values) - len(shown)
-
-
-def _chart_years(series: _Series, year: int) -> tuple[int, ...]:
-    """up to CHART_EARLIER_YEARS earlier years with enough values, then the current year"""
-    earlier = sorted(y for y in series.years_with_enough_values() if y < year)
-    return (*earlier[-CHART_EARLIER_YEARS:], year)
-
-
-def _cumulative(series: _Series, year: int) -> YearCumulative:
-    points = []
-    running = 0
-    for day in _year(series, year).days:
-        if day.liters is None:
-            points.append(CumulativePoint(day.date, day.status, None))
-        else:
-            running += day.liters
-            points.append(CumulativePoint(day.date, day.status, running))
-    return YearCumulative(year, tuple(points))

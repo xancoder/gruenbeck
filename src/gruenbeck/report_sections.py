@@ -36,7 +36,7 @@ class Section:
     """
     a part of the statistics: the period of the run and the same period of earlier years
 
-    :param key: week, current-month, last-month, year or years (where charts belong)
+    :param key: week, current-month, last-month, year or years
     :param periods: the period of the run first, then the earlier years; the earlier years
         as a whole in the section "years"
     :param daily: the week with every day

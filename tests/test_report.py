@@ -1,4 +1,4 @@
-"""report: statistics of the yearly data files (periods, missing values, chart series)"""
+"""report: statistics of the yearly data files (periods, missing values, interpolation)"""
 
 import datetime
 import pathlib
@@ -534,18 +534,17 @@ def test_gap_over_the_turn_of_the_year_is_interpolated_in_both_years() -> None:
 
     result = report.compute_report(stored, D(2026, 1, 12))
 
-    year_2025, year_2026 = result.cumulative
-    assert (year_2025.year, year_2026.year) == (2025, 2026)
-    assert (year_2025.points[-1].date, year_2025.points[-1].status) == (
-        D(2025, 12, 31),
-        INTERPOLATED,
+    december = result.last_month.current
+    assert (december.year, december.days[-1]) == (2025, Day(D(2025, 12, 31), INTERPOLATED, 175))
+    assert december.total == 30 * 100 + 175
+    assert result.year_to_date is not None
+    january = result.year_to_date.current
+    assert january.year == 2026
+    assert january.days[:3] == (
+        Day(D(2026, 1, 1), INTERPOLATED, 250),
+        Day(D(2026, 1, 2), INTERPOLATED, 325),
+        Day(D(2026, 1, 3), MEASURED, 400),
     )
-    assert year_2025.points[-1].cumulative == 364 * 100 + 175
-    assert [(p.date.day, p.status, p.cumulative) for p in year_2026.points[:3]] == [
-        (1, INTERPOLATED, 250),
-        (2, INTERPOLATED, 575),
-        (3, MEASURED, 975),
-    ]
 
 
 # --- files ----------------------------------------------------------------------------------
@@ -638,8 +637,6 @@ def test_build_report_without_data_files_has_no_values(
         assert counts(result.week.current) == (0, 0, 0, 7)
         assert result.week.previous == ()
         assert result.previous_years == ()
-        assert [series.year for series in result.monthly] == [2026]
-        assert len(result.weekly) == 52
 
 
 def test_build_report_does_not_change_the_data_files(loaded_config: config.Configuration) -> None:
@@ -668,167 +665,3 @@ def test_build_report_gives_the_error_of_an_unusable_data_file(
 
     with pytest.raises(storage.StorageError, match="no column 'value'"):
         report.build_report(loaded_config.data_path, loaded_config.data_file, MONDAY)
-
-
-# --- series for the charts ------------------------------------------------------------------
-
-
-def test_monthly_series_has_the_current_year_and_up_to_three_earlier_years_with_values() -> None:
-    stored = fill(D(2021, 1, 1), D(2026, 11, 22), 10)
-
-    result = report.compute_report(stored, MONDAY)
-
-    assert [series.year for series in result.monthly] == [2023, 2024, 2025, 2026]
-    for series in result.monthly:
-        assert [month.start for month in series.months] == [
-            D(series.year, m, 1) for m in range(1, 13)
-        ]
-    totals_2024 = [month.total for month in result.monthly[1].months]
-    assert totals_2024 == [310, 290, 310, 300, 310, 300, 310, 310, 300, 310, 300, 310]
-    assert all(month.complete for month in result.monthly[1].months)
-    current = result.monthly[-1].months
-    assert [month.complete for month in current] == [True] * 10 + [False, False]
-    # November is not over yet; December has no data at all
-    assert (current[10].total, counts(current[10])) == (220, (22, 0, 0, 8))
-    assert (current[11].total, counts(current[11])) == (None, (0, 0, 0, 31))
-
-
-def test_monthly_series_leaves_out_earlier_years_with_few_values() -> None:
-    # 30 days of 365 in 2021: no year of the charts
-    stored = {**fill(D(2021, 6, 1), D(2021, 6, 30)), **fill(D(2025, 1, 1), D(2026, 11, 22))}
-
-    result = report.compute_report(stored, MONDAY)
-
-    assert [series.year for series in result.monthly] == [2025, 2026]
-    assert [series.year for series in result.cumulative] == [2025, 2026]
-
-
-@pytest.mark.parametrize(
-    ("year", "days", "shown"),
-    [(2024, 183, True), (2024, 182, False), (2025, 183, True), (2025, 182, False)],
-    ids=["leap-year-183-of-366", "leap-year-182-of-366", "183-of-365", "182-of-365"],
-)
-def test_chart_year_needs_values_on_half_of_its_days(year: int, days: int, shown: bool) -> None:
-    stored = {
-        **fill(D(year, 1, 1), D(year, 1, 1) + datetime.timedelta(days=days - 1)),
-        **fill(D(2026, 1, 1), D(2026, 11, 22)),
-    }
-
-    result = report.compute_report(stored, MONDAY)
-
-    expected = [year, 2026] if shown else [2026]
-    assert [series.year for series in result.monthly] == expected
-    assert [series.year for series in result.cumulative] == expected
-
-
-def test_chart_years_skip_years_with_few_values_and_always_have_the_current_year() -> None:
-    stored = {
-        **fill(D(2022, 1, 1), D(2022, 12, 31)),
-        **fill(D(2023, 1, 1), D(2023, 3, 2)),
-        **fill(D(2024, 1, 1), D(2024, 12, 31)),
-        **fill(D(2025, 1, 1), D(2025, 12, 31)),
-        **fill(D(2026, 11, 20), D(2026, 11, 22)),
-    }
-
-    result = report.compute_report(stored, MONDAY)
-
-    # three earlier years with enough values at most, and 2026 with its 3 days of 365
-    assert [series.year for series in result.monthly] == [2022, 2024, 2025, 2026]
-    assert [series.year for series in result.cumulative] == [2022, 2024, 2025, 2026]
-    # a year of the charts is not a year of the tables: those have their own limit
-    assert [p.year for p in result.previous_years] == [2025, 2024, 2022]
-    nothing = report.compute_report({D(2025, 1, 1): 10}, MONDAY)
-    assert [series.year for series in nothing.monthly] == [2026]
-
-
-def test_monthly_series_marks_interpolated_and_missing_values() -> None:
-    stored = {
-        **fill(D(2026, 1, 1), D(2026, 1, 9), 10),
-        # the 10th is interpolated, the 20th to the 25th is missing
-        **fill(D(2026, 1, 11), D(2026, 1, 19), 10),
-        **fill(D(2026, 1, 26), D(2026, 11, 22), 10),
-    }
-
-    result = report.compute_report(stored, MONDAY)
-
-    january = result.monthly[-1].months[0]
-    assert counts(january) == (24, 1, 6, 0)
-    assert january.total == 250
-    assert not january.complete
-
-
-def test_cumulative_series_has_a_point_for_every_day_of_the_year() -> None:
-    stored = fill(D(2023, 1, 1), D(2026, 11, 22), 10)
-
-    result = report.compute_report(stored, MONDAY)
-
-    assert [series.year for series in result.cumulative] == [2023, 2024, 2025, 2026]
-    assert [len(series.points) for series in result.cumulative] == [365, 366, 365, 365]
-    year_2024 = result.cumulative[1].points
-    assert (year_2024[0].date, year_2024[0].cumulative) == (D(2024, 1, 1), 10)
-    assert (year_2024[-1].date, year_2024[-1].cumulative) == (D(2024, 12, 31), 3660)
-    current = result.cumulative[-1].points
-    assert [point.cumulative for point in current if point.date == D(2026, 11, 22)] == [3260]
-    # no value from the day of the run on: the line ends
-    after = [point for point in current if point.date >= MONDAY]
-    assert {(point.status, point.cumulative) for point in after} == {(NO_DATA, None)}
-
-
-def test_cumulative_series_breaks_at_missing_days_and_marks_interpolated_ones() -> None:
-    stored = {
-        **fill(D(2026, 1, 1), D(2026, 1, 2), 10),
-        # the 3rd is interpolated (10), the 6th to the 9th is missing
-        **fill(D(2026, 1, 4), D(2026, 1, 5), 10),
-        **fill(D(2026, 1, 10), D(2026, 11, 22), 10),
-    }
-
-    points = report.compute_report(stored, MONDAY).cumulative[-1].points
-
-    assert [(p.date.day, p.status, p.cumulative) for p in points[:11]] == [
-        (1, MEASURED, 10),
-        (2, MEASURED, 20),
-        (3, INTERPOLATED, 30),
-        (4, MEASURED, 40),
-        (5, MEASURED, 50),
-        (6, MISSING, None),
-        (7, MISSING, None),
-        (8, MISSING, None),
-        (9, MISSING, None),
-        (10, MEASURED, 60),
-        (11, MEASURED, 70),
-    ]
-
-
-def test_weekly_series_has_the_last_52_complete_weeks() -> None:
-    stored = fill(D(2024, 1, 1), D(2026, 11, 22), 10)
-
-    result = report.compute_report(stored, MONDAY)
-
-    weekly = result.weekly
-    assert len(weekly) == 52
-    assert weekly[-1] == result.week.current
-    assert weekly[0].start == WEEK_START - datetime.timedelta(weeks=51)
-    assert [week.start for week in weekly] == sorted(week.start for week in weekly)
-    assert all(week.start.weekday() == 0 and week.total == 70 for week in weekly)
-    assert all(week.complete for week in weekly)
-
-
-def test_weekly_series_marks_incomplete_weeks_and_weeks_without_data() -> None:
-    # the data starts on Wednesday of the second to last week
-    stored = fill(D(2026, 11, 11), D(2026, 11, 22), 10)
-
-    weekly = report.compute_report(stored, MONDAY).weekly
-
-    assert [(week.total, week.complete) for week in weekly[:50]] == [(None, False)] * 50
-    assert (weekly[-2].total, counts(weekly[-2])) == (50, (5, 0, 0, 2))
-    assert (weekly[-1].total, weekly[-1].complete) == (70, True)
-
-
-def test_series_of_a_year_without_earlier_years() -> None:
-    stored = fill(D(2026, 1, 1), D(2026, 11, 22), 10)
-
-    result = report.compute_report(stored, MONDAY)
-
-    assert [series.year for series in result.monthly] == [2026]
-    assert [series.year for series in result.cumulative] == [2026]
-    assert result.previous_years == ()
