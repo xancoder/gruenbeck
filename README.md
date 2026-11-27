@@ -143,7 +143,7 @@ Warnings and errors are written to the rotating file `./log/gruenbeck_error.log`
 
 Every run ends with the data mail to the `recipients`: the subject is `mail.subject`, every CSV file directly in the data folder is attached, and the mail holds the statistics of the stored consumption as text and as HTML. They are calculated after the yearly files have been written, so they include the values of the run. All figures are whole liters.
 
-The mail is `multipart/alternative` (text and HTML, the mail program shows the HTML) inside `multipart/mixed` with the CSV files. The **text** is plain ASCII with tables of a fixed column width (at most 78 characters per line). The **HTML** has the same tables, a table layout of at most 640 px with inline CSS that fits a phone, and four charts. There is no configuration key for it: the data mail always has both parts.
+The mail is `multipart/alternative` (text and HTML, the mail program shows the HTML) inside `multipart/mixed` with the CSV files. The **text** is plain ASCII with tables of a fixed column width (at most 78 characters per line). The **HTML** has the same tables, a table layout of at most 640 px with inline CSS that fits a phone. There is no configuration key for it: the data mail always has both parts.
 
 The statistics cover, for the day of the run:
 
@@ -178,27 +178,11 @@ A day is **missing** if no value is stored for it (no row, or a value that is no
 - A gap of up to 3 missing days with a measured day on both sides is **interpolated**: a straight line between the two values, in whole liters. The value counts for the total and the mean, is marked with `*` (in the list of days and at the total of the period) and is not used for the minimum and maximum, which are measured days only. Interpolated values exist for the statistics only; they are never written to the data files.
 - Longer gaps and gaps at the edge of the data (for example no value for yesterday, which has no measured day after it) stay missing: total and mean cover the days with a value, and the period is marked below its row as `incomplete: 4 days missing` and, if it starts before the first stored day, `n days without data`.
 
-#### charts
-
-The HTML part has four charts, drawn as SVG directly in the HTML (no image, script, font or other external resource, and no extra package):
-
-| chart | content |
-|-------|---------|
-| Daily consumption | the liters of every day of the last week as bars |
-| Weekly consumption | the liters of the last 52 calendar weeks as a line with points |
-| Monthly consumption by year | grouped bars per month for the current year and up to 3 earlier years that have values on at least half of their days |
-| Cumulative consumption | a line per year (the years of the monthly chart) from 1 January, with the day of the run marked |
-
-The current year has the strong color, the earlier years muted ones, the same color for a year in every chart. Text and axes take the text color of the mail, so the charts are readable on a light and on a dark background (the HTML switches its own colors with `prefers-color-scheme`). Marks: an interpolated day is a light bar with `*` (a ring in the lines), a missing day is a gap with a dash, a month with missing days is only an outline, a week with missing days is a hollow point.
-
-**Gmail and Outlook do not show SVG in mails.** There the charts are simply not displayed, and the tables of the HTML part (or the text) still hold every figure. Thunderbird and Apple Mail show the charts.
-
 #### if a part cannot be made
 
 The data is stored before the mail is made, so the mail goes out whatever happens to its parts; the exit code stays `0` and the log file gets a warning with the traceback:
 
-- the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`): a note takes the place of the statistics in the text and in the HTML, without charts
-- a chart cannot be drawn: the HTML is made without that chart
+- the statistics cannot be calculated (e.g. a yearly file of an earlier year has no column of `fieldnames`): a note takes the place of the statistics in the text and in the HTML
 - the HTML cannot be made: the mail has the text only
 
 #### preview of the data mail
@@ -216,9 +200,8 @@ uv run gruenbeck-preview-mail --send-to me@example.com
 | `--today YYYY-MM-DD` | the day of the run for the statistics (default: today), e.g. to see the mail of the next Monday |
 | `--output-dir DIR` | write `data-mail.txt` and `data-mail.html` into `DIR` (created if missing); open the HTML in a browser. Without it nothing is written, the command only reports what it built (lines of text, size of the HTML, attachments) |
 | `--send-to ADDRESS` | send the mail like the data mail, with the CSV files, but to this address only and with the prefix `[preview] ` in the subject (sender and server from the `mail` section). Without it nothing is sent |
-| `--charts inline\|data-uri\|cid` | how the HTML has the charts, for `--output-dir` and `--send-to`: `inline` (default, as the data collector sends it) puts the SVG into the HTML, `data-uri` an `<img>` with the image as `data:` URI, `cid` an `<img>` of an image part of the mail (with `--output-dir` also written as `data-mail-<chart>.svg`) |
 
-Warnings of the statistics and the charts go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
+Warnings of the statistics go to stderr. An error in the configuration, the data folder, the output folder or the sending ends with a message on stderr and exit code `1`.
 
 ### analysis
 
@@ -242,7 +225,6 @@ uv run --extra analysis gruenbeck-analyse
 | `src/gruenbeck/report_sections.py` | the sections, notes and legend of the data mail, shared by the text and the HTML part |
 | `src/gruenbeck/report_text.py` | the statistics as plain text for the data mail |
 | `src/gruenbeck/report_html.py` | the statistics as HTML document for the data mail |
-| `src/gruenbeck/charts.py` | the four SVG charts of the HTML part of the data mail |
 | `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
 | `src/gruenbeck/rollover.py` | the command `gruenbeck-log-rollover`: read-only diagnostic tool for the daily rollover of the device |
 | `src/gruenbeck/preview.py` | the command `gruenbeck-preview-mail`: read-only preview of the data mail without the device (files, or a mail to your own address) |

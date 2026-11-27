@@ -1,32 +1,21 @@
 """
 the statistics as HTML document for the data mail
 
-format_html() draws the sections of report_sections as tables of inline CSS, the charts of
-gruenbeck.charts go in between; format_failure_html() is the document without statistics.
-The plain text part is report_text.
-
-A chart goes into the HTML in one of three ways (ChartMode): as inline SVG, or as an image
-(gruenbeck.charts.as_image) in an `<img>` whose source is a `data:` URI or a `cid:` that names
-a part of the mail (chart_image() gives its content id, the mail module adds the part).
+format_html() draws the sections of report_sections as tables of inline CSS;
+format_failure_html() is the document without statistics. The plain text part is report_text.
 """
 
 import collections.abc
-import dataclasses
-import enum
-import hashlib
 import re
-import urllib.parse
-import xml.etree.ElementTree as ET
 from html import escape
 
-from gruenbeck import charts as svg_charts
 from gruenbeck import report, report_sections
 from gruenbeck.report import Day, DayStatus, Period, Report
 
 HTML_WIDTH = 640
 HTML_FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
 # The colors are inline, so a mail program without style sheets shows the light variant. The
-# style sheet only switches them for a dark color scheme; the charts follow the text color.
+# style sheet only switches them for a dark color scheme.
 HTML_DARK_STYLE = (
     "@media (prefers-color-scheme: dark) {"
     " .gb-page { background: #0b1220 !important; }"
@@ -49,16 +38,6 @@ NBSP = "\N{NO-BREAK SPACE}"
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 HTML_MUTED = "color:#6b7280;"
 HTML_RULE = "border-bottom:1px solid #e5e7eb;"
-# the charts (keys of gruenbeck.charts.CHARTS) before and after the tables of a section
-HTML_CHARTS_BEFORE = {"week": ("week",), "year": ("cumulative",)}
-HTML_CHARTS_AFTER = {"week": ("weekly",), "last-month": ("monthly",)}
-# an image of a chart: as wide as the page, at most as wide as the inline SVG
-CHART_IMAGE_STYLE = f"width:100%;max-width:{svg_charts.MAX_DISPLAY_WIDTH}px;height:auto;border:0;"
-# the characters of a `data:` URI that are not percent-encoded, besides letters, digits and
-# `_.-~`: all others (`#`, `<`, `>`, `"`, `'`, `&`, `%`, space, ...) are encoded, so the URI is
-# safe in an HTML attribute without escaping
-DATA_URI_SAFE = "/:;=,()!*@+"
-DATA_URI_PREFIX = "data:image/svg+xml,"
 TABLE_COLUMNS = (
     ("Year", "left"),
     ("Period", "left"),
@@ -69,50 +48,19 @@ TABLE_COLUMNS = (
 )
 
 
-class ChartMode(enum.StrEnum):
-    """how the HTML has the charts"""
-
-    INLINE = "inline"
-    """the SVG in the HTML"""
-    DATA_URI = "data-uri"
-    """an `<img>` with the image as percent-encoded `data:` URI"""
-    CID = "cid"
-    """an `<img>` that names the image as a part of the mail (`cid:`, see chart_image())"""
-
-
-@dataclasses.dataclass(frozen=True)
-class ChartImage:
-    """a chart as image of its own, as a part of the mail has it (ChartMode.CID)"""
-
-    content_id: str
-    """the Content-ID of the part without the angle brackets; the `<img>` has `cid:` and it"""
-    svg: str
-    """the image: gruenbeck.charts.as_image() of the chart"""
-
-
-def format_html(
-    stats: Report,
-    charts: collections.abc.Mapping[str, str] | None = None,
-    notes: collections.abc.Sequence[str] = (),
-    chart_mode: ChartMode = ChartMode.INLINE,
-) -> str:
+def format_html(stats: Report, notes: collections.abc.Sequence[str] = ()) -> str:
     """
-    the statistics as HTML document for the data mail: the tables of format_text() and the charts
+    the statistics as HTML document for the data mail: the tables of format_text()
 
     The layout is a table of at most HTML_WIDTH pixels with inline CSS, so it works in mail
     programs; a style sheet in the head only adds the colors for a dark color scheme.
-    :param charts: the SVG of the charts by name (gruenbeck.charts.CHARTS), put in the section
-        they belong to; a chart that is not there is left out
     :param notes: texts for the top of the page (e.g. that no data files are attached)
-    :param chart_mode: how the charts go into the HTML; with ChartMode.CID the mail needs a
-        part for every chart the HTML names (chart_image())
     """
-    svgs = charts or {}
     sections = report_sections.sections(stats)
     body = [_html_heading(f"in liters, run on {stats.today.isoformat()}")]
     body += [_html_paragraph(note) for note in notes]
     for section in sections:
-        body.append(_html_section(section, svgs, chart_mode))
+        body.append(_html_section(section))
     legend = report_sections.legend(sections)
     body.append(
         f'<p class="gb-muted" style="margin:20px 0 0;font-size:12px;{HTML_MUTED}">'
@@ -159,35 +107,13 @@ def _html_paragraph(text: str) -> str:
     return f'<p style="margin:8px 0;font-size:13px;">{escape(text).replace(chr(10), "<br>")}</p>'
 
 
-def chart_image(name: str, svg: str) -> ChartImage:
-    """
-    the chart as image (gruenbeck.charts.as_image) with the content id of its part of the mail
-
-    The content id is made from the name and the image, so the HTML and the part of the mail
-    get the same one, and another image gets another one.
-    """
-    image = svg_charts.as_image(svg)
-    digest = hashlib.sha256(image.encode("utf-8")).hexdigest()[:16]
-    return ChartImage(f"chart-{name}.{digest}@gruenbeck", image)
-
-
-def data_uri(image: str) -> str:
-    """the image as percent-encoded `data:` URI (not Base64: about the size of the SVG)"""
-    return DATA_URI_PREFIX + urllib.parse.quote(image, safe=DATA_URI_SAFE)
-
-
-def _html_section(
-    section: report_sections.Section,
-    charts: collections.abc.Mapping[str, str],
-    chart_mode: ChartMode,
-) -> str:
+def _html_section(section: report_sections.Section) -> str:
     heading = '<h2 style="margin:24px 0 8px;font-size:16px;line-height:1.3;">'
     # a date is not broken at its hyphens on a narrow screen
     title = DATE.sub(
         lambda date: f'<span style="white-space:nowrap;">{date[0]}</span>', escape(section.title)
     )
     parts = [f"{heading}{title}</h2>"]
-    parts += _html_charts(HTML_CHARTS_BEFORE.get(section.key, ()), charts, chart_mode)
     if section.daily is not None:
         parts.append(_html_days(section.daily))
     if section.periods:
@@ -197,43 +123,7 @@ def _html_section(
             f'<p class="gb-muted" style="margin:6px 0;font-size:12px;{HTML_MUTED}">'
             f"{escape(section.note)}</p>"
         )
-    parts += _html_charts(HTML_CHARTS_AFTER.get(section.key, ()), charts, chart_mode)
     return "".join(parts)
-
-
-def _html_charts(
-    names: collections.abc.Iterable[str],
-    charts: collections.abc.Mapping[str, str],
-    chart_mode: ChartMode,
-) -> list[str]:
-    """the charts of these names that exist; the SVG is made by gruenbeck.charts"""
-    return [
-        f'<div style="margin:8px 0 12px;">{_html_chart(name, charts[name], chart_mode)}</div>'
-        for name in names
-        if name in charts
-    ]
-
-
-def _html_chart(name: str, svg: str, chart_mode: ChartMode) -> str:
-    """the SVG of the chart, or an `<img>` of it with the title and the description as `alt`"""
-    if chart_mode is ChartMode.INLINE:
-        return svg
-    if chart_mode is ChartMode.DATA_URI:
-        source = data_uri(svg_charts.as_image(svg))
-    else:
-        source = f"cid:{chart_image(name, svg).content_id}"
-    return (
-        f'<img src="{source}" alt="{escape(_chart_text(svg))}" width="{svg_charts.WIDTH}"'
-        f' style="{CHART_IMAGE_STYLE}">'
-    )
-
-
-def _chart_text(svg: str) -> str:
-    """the title and the description of a chart, for the `alt` of its image"""
-    root = ET.fromstring(svg)
-    namespace = f"{{{svg_charts.SVG_NAMESPACE}}}"
-    texts = (root.findtext(namespace + tag) for tag in ("title", "desc"))
-    return ". ".join(text for text in texts if text)
 
 
 def _html_days(week: Period) -> str:

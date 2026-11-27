@@ -9,17 +9,15 @@ only makes valid data (e.g. dates of the years 2000 to 2100, the range of the da
 
 import datetime
 import fractions
-import itertools
 import logging
 import math
 import pathlib
 import tempfile
-import xml.etree.ElementTree as ET
 
 import hypothesis
 import hypothesis.strategies as st
 
-from gruenbeck import charts, config, device, report, storage
+from gruenbeck import config, device, report, storage
 
 LITERS = st.integers(min_value=0, max_value=10**9)
 DAYS = st.dates(min_value=datetime.date(2000, 1, 1), max_value=datetime.date(2100, 12, 31))
@@ -296,93 +294,3 @@ def test_clock_warns_exactly_when_the_deviation_exceeds_the_tolerance(
 
     # 15 minutes off is still fine, 16 is not; one warning at most
     assert len(warnings) == (1 if abs(off) > device.CLOCK_TOLERANCE_MINUTES else 0)
-
-
-# --- charts.nice_ticks ---------------------------------------------------------------
-
-
-@hypothesis.given(st.integers(min_value=-10, max_value=10**12))
-def test_ticks_start_at_zero_and_go_up_by_equal_steps(maximum: int) -> None:
-    ticks = charts.nice_ticks(maximum)
-
-    assert ticks[0] == 0
-    steps = {later - earlier for earlier, later in itertools.pairwise(ticks)}
-    assert len(steps) == 1
-    assert steps.pop() > 0
-
-
-@hypothesis.given(st.integers(min_value=-10, max_value=10**12))
-def test_ticks_cover_the_maximum_without_a_needless_step(maximum: int) -> None:
-    ticks = charts.nice_ticks(maximum)
-    step = ticks[1] - ticks[0]
-
-    assert ticks[-1] >= max(maximum, 1)
-    # the last tick is the first multiple of the step that covers the maximum
-    assert ticks[-1] - step < max(maximum, 1)
-
-
-@hypothesis.given(st.integers(min_value=-10, max_value=10**12))
-def test_ticks_have_at_most_the_allowed_intervals(maximum: int) -> None:
-    ticks = charts.nice_ticks(maximum)
-
-    assert 1 <= len(ticks) - 1 <= charts.MAX_TICK_INTERVALS
-
-
-@hypothesis.given(st.integers(min_value=-10, max_value=10**12))
-def test_tick_step_is_1_2_or_5_times_a_power_of_10(maximum: int) -> None:
-    ticks = charts.nice_ticks(maximum)
-    step = ticks[1] - ticks[0]
-
-    assert str(step).rstrip("0") in {"1", "2", "5"}
-
-
-# --- charts.as_image: a chart as image ----------------------------------------------
-
-
-@st.composite
-def reports(draw: st.DrawFn) -> report.Report:
-    """
-    the report of a run on any day: runs of days with the same value or without a row (at most
-    2000 days, so the data start in 2000 at the earliest)
-    """
-    today = draw(st.dates(datetime.date(2006, 1, 1), datetime.date(2100, 12, 31)))
-    runs = draw(
-        st.lists(st.tuples(st.integers(1, 200), st.none() | LITERS), min_size=1, max_size=10)
-    )
-    day = today - datetime.timedelta(days=sum(length for length, _ in runs))
-    stored: dict[datetime.date, int | str] = {}
-    for length, liters in runs:
-        for _ in range(length):
-            if liters is not None:
-                stored[day] = liters
-            day += datetime.timedelta(days=1)
-    return report.compute_report(stored, today)
-
-
-def svg_elements(svg: str) -> list[tuple[str, dict[str, str], str | None, str | None]]:
-    """every element below the root of an SVG text: tag, attributes, text and tail"""
-    root = ET.fromstring(svg)
-    return [
-        (element.tag, dict(element.attrib), element.text, element.tail)
-        for element in root.iter()
-        if element is not root
-    ]
-
-
-@hypothesis.given(reports())
-def test_image_of_every_chart_is_the_chart_with_a_size_and_a_style(stats: report.Report) -> None:
-    for chart in charts.CHARTS.values():
-        svg = chart(stats)
-
-        image = charts.as_image(svg)
-
-        root = ET.fromstring(image)
-        _, _, width, height = root.get("viewBox", "").split()
-        assert (root.get("width"), root.get("height")) == (width, height)
-        assert "style" not in root.attrib
-        assert "%" not in "".join(v for element in root.iter() for v in element.attrib.values())
-        assert list(root.iter(f"{{{charts.SVG_NAMESPACE}}}style")) == [root[0]]
-        assert root[0].text == charts.IMAGE_STYLE
-        assert svg_elements(image)[1:] == svg_elements(svg)
-        # the same chart gives the same image
-        assert charts.as_image(svg) == image
