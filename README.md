@@ -47,8 +47,6 @@ The data collector and the analysis check the whole file when they start: every 
 |-----|---------|
 | `dataPath` | folder of the yearly data files; created if it does not exist (its parent folder must exist) |
 
-The key `parameterFile` of older configurations is not used any more (the data collector asks for fixed parameters, see [assets](assets/README.md) for the documentation of the device); remove it, otherwise every run logs the warning `unknown config parameter 'parameterFile' is ignored`.
-
 A relative path starts at the folder of the configuration file, not at the current directory: in `src/config.json`, `"../data"` is the folder `data/` of the repository. Only the default of `--config-file` (`./src/config.json` unless `GRUENBECK_CONFIG` is set) and of `--log-error` (`./log/gruenbeck_error.log`) are relative to the current directory.
 
 #### mail settings
