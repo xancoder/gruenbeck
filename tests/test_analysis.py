@@ -6,6 +6,7 @@ without the extra (uv sync); CI installs it (uv sync --all-extras). A missing ex
 simulated in-process, so that test runs in both environments.
 """
 
+import builtins
 import collections.abc
 import pathlib
 import subprocess
@@ -36,19 +37,72 @@ def test_help_works_without_the_analysis_extra(tmp_path: pathlib.Path) -> None:
     assert "monthly statistics of the collected water consumption" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "missing",
+    [
+        ("matplotlib", "matplotlib.pyplot", "pandas"),
+        ("matplotlib", "matplotlib.pyplot"),
+        ("pandas",),
+    ],
+    ids=["both", "matplotlib", "pandas"],
+)
 def test_run_without_the_analysis_extra_fails(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: pathlib.Path,
+    missing: tuple[str, ...],
 ) -> None:
     # None in sys.modules makes the import fail as if the package was not installed, also
     # if the extra is installed and the modules are already imported
-    for name in ("matplotlib", "matplotlib.pyplot", "pandas"):
+    for name in missing:
         monkeypatch.setitem(sys.modules, name, None)
+
+    # the import comes before the configuration is read: no configuration file is needed
+    assert cli.analyse(["--config-file", str(tmp_path / "config.json")]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.err == (
+        "gruenbeck-analyse: the extra 'analysis' is not installed (needs matplotlib and"
+        " pandas): uv sync --extra analysis\n"
+    )
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
+def test_missing_extra_is_an_analysis_error_with_the_import_error_as_cause(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    monkeypatch.setitem(sys.modules, "matplotlib", None)
+
+    with pytest.raises(analysis.AnalysisError) as excinfo:
+        analysis.main(tmp_path / "config.json")
+
+    assert str(excinfo.value) == analysis.MISSING_EXTRA_TEXT
+    assert isinstance(excinfo.value.__cause__, ModuleNotFoundError)
+    assert (excinfo.value.__cause__.name or "").split(".")[0] in analysis.EXTRA_PACKAGES
+
+
+@pytest.mark.parametrize("name", ["kiwisolver", None], ids=["dependency", "no-name"])
+def test_other_missing_module_is_not_the_missing_extra(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, name: str | None
+) -> None:
+    # e.g. a dependency of matplotlib is missing: that is no missing extra, and the error
+    # keeps its type and traceback
+    real_import = builtins.__import__
+
+    def fake_import(module: str, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
+        if module == "matplotlib.pyplot":
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
+        return real_import(module, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
 
     with pytest.raises(ModuleNotFoundError) as excinfo:
         cli.analyse(["--config-file", str(tmp_path / "config.json")])
 
-    # the import comes before the configuration is read: no configuration file is needed
-    assert (excinfo.value.name or "").split(".")[0] == "matplotlib"
+    assert not isinstance(excinfo.value, analysis.AnalysisError)
+    assert excinfo.value.name == name
 
 
 @pytest.mark.parametrize(

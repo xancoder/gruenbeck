@@ -211,6 +211,8 @@ Warnings of the statistics go to stderr. An error in the configuration, the data
 uv run --extra analysis gruenbeck-analyse
 ```
 
+Without the extra it ends with exit code `1` and the message `gruenbeck-analyse: the extra 'analysis' is not installed (needs matplotlib and pandas): uv sync --extra analysis`.
+
 ### project layout
 
 | path | content |
