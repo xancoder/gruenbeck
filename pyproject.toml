@@ -1,6 +1,6 @@
 [project]
 name = "gruenbeck"
-version = "0.2.0"
+version = "0.3.0"
 description = "Collects water consumption data from a Grünbeck soft water system and stores it as CSV"
 readme = "README.md"
 license = "MIT"
