@@ -306,6 +306,7 @@ class _CredentialError(Exception):
 def _read_password_credential() -> str | None:
     """
     the SMTP password of the credential "smtp-password" of systemd, without the final line break
+    (\n or \r\n); any other character, a carriage return as well, belongs to the password
     :return: the password, or None if there is no credential
     :raises _CredentialError: the credential cannot be read or is empty
     """
@@ -314,7 +315,9 @@ def _read_password_credential() -> str | None:
         return None
     path = pathlib.Path(folder) / PASSWORD_CREDENTIAL
     try:
-        text = path.read_text(encoding="utf-8")
+        # newline="": read the line endings as they are (by default \r and \r\n become \n)
+        with path.open(encoding="utf-8", newline="") as credential:
+            text = credential.read()
     except FileNotFoundError:
         return None
     except UnicodeDecodeError:

@@ -76,7 +76,7 @@ Temporary errors (connection lost, timeout, connection failed) are retried `retr
 
 ##### SMTP password as a systemd credential
 
-The password need not be in `src/config.json`. If the environment variable `CREDENTIALS_DIRECTORY` is set (systemd does that for a service with `LoadCredential=`) and the folder holds a file `smtp-password`, its content is the SMTP password, without a final line break, and `senderPassword` is optional:
+The password need not be in `src/config.json`. If the environment variable `CREDENTIALS_DIRECTORY` is set (systemd does that for a service with `LoadCredential=`) and the folder holds a file `smtp-password`, its content is the SMTP password, without a final line break (`\n` or `\r\n`; every other character, spaces included, belongs to the password), and `senderPassword` is optional:
 
 - Both there: the credential wins, and the log gets the warning `the credential 'smtp-password' is used as SMTP password; remove 'mail.senderPassword' from the configuration file`. Remove the key, the file does not need the password any more.
 - Neither there: the configuration error names both ways (the key and the credential).

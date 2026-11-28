@@ -229,7 +229,11 @@ def credentials(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
         (SECRET + "\r\n", SECRET),
         # only one final line break belongs to the file, not to the password
         (SECRET + "\n\n", SECRET + "\n"),
+        (SECRET + "\r\n\r\n", SECRET + "\r\n"),
         (" a b ", " a b "),
+        # any other carriage return is part of the password, read as it is
+        (SECRET + "\r", SECRET + "\r"),
+        ("a\rb", "a\rb"),
     ],
 )
 def test_credential_is_the_password(
