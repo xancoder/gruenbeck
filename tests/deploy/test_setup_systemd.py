@@ -65,6 +65,14 @@ def test_generated_service_is_limited_in_time_and_hardened(tmp_path: pathlib.Pat
     assert service["SystemCallArchitectures"] == "native"
     assert service["CapabilityBoundingSet"] == ""
     assert service["RestrictAddressFamilies"] == "AF_INET AF_INET6 AF_UNIX AF_NETLINK"
+    assert service["SystemCallFilter"] == "@system-service"
+    assert service["SystemCallErrorNumber"] == "EPERM"
+    assert service["ProtectProc"] == "invisible"
+    assert service["ProcSubset"] == "pid"
+    assert service["MemoryDenyWriteExecute"] == "true"
+    # the JIT of CPython needs writable and executable memory, which the service denies
+    assert service["Environment"] == "PYTHON_JIT=0"
+    assert service["UMask"] == "0027"
 
 
 def test_generated_service_may_write_to_data_and_log_of_the_install_path(

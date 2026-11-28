@@ -33,3 +33,16 @@ SystemCallArchitectures=native
 CapabilityBoundingSet=
 # AF_UNIX and AF_NETLINK are used by the name resolution of the C library
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+# only the system calls of an ordinary service; a call outside the list fails with EPERM
+# instead of killing the process, so a library that tries one can handle the error
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# /proc shows only the processes of the service and no kernel settings
+ProtectProc=invisible
+ProcSubset=pid
+# no memory that is writable and executable; the JIT of CPython needs such memory and would
+# stop Python with a fatal error, so it is switched off even if the build enables it by default
+MemoryDenyWriteExecute=true
+Environment=PYTHON_JIT=0
+# new data and log files are not readable for other users (existing files keep their mode)
+UMask=0027
