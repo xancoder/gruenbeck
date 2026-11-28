@@ -4,6 +4,7 @@ import collections
 import datetime
 import html.parser
 import re
+import typing
 
 import pytest
 
@@ -74,6 +75,7 @@ class Page(html.parser.HTMLParser):
         if self.stack:
             self.problems.append(f"not closed: {self.stack}")
 
+    @typing.override
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags[tag] += 1
         self.classes.update((dict(attrs).get("class") or "").split())
@@ -90,9 +92,11 @@ class Page(html.parser.HTMLParser):
         elif tag == "h2":
             self._text = []
 
+    @typing.override
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags[tag] += 1
 
+    @typing.override
     def handle_endtag(self, tag: str) -> None:
         if not self.stack or self.stack.pop() != tag:
             self.problems.append(f"unexpected </{tag}>")
@@ -104,6 +108,7 @@ class Page(html.parser.HTMLParser):
             self.headings.append(" ".join("".join(self._text).split()))
             self._text = None
 
+    @typing.override
     def handle_data(self, data: str) -> None:
         if self._cell is not None:
             self._cell.append(data)
@@ -118,6 +123,21 @@ class Page(html.parser.HTMLParser):
 def page_of(stored: Stored, today: datetime.date = MONDAY) -> tuple[Page, report.Report]:
     stats = stats_of(stored, today)
     return Page(report_html.format_html(stats)), stats
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "total", "mean"),
+    [(1, 2, "45", "2"), (2, 3, "75", "3")],
+    ids=["1.5", "2.5"],
+)
+def test_a_mean_of_exactly_half_a_liter_is_rounded_up(
+    low: int, high: int, total: str, mean: str
+) -> None:
+    # September 2026 has 30 days: 15 days with `low` and 15 with `high` liters
+    page, _ = page_of(stored_days(D(2026, 9, 1), *[low, high] * 15), D(2026, 10, 5))
+
+    (row,) = [row for row in page.rows_of(6) if row[:2] == ["2026", f"09-01 {DASH} 09-30"]]
+    assert row[2:4] == [total, mean]
 
 
 # --- document --------------------------------------------------------------------------------

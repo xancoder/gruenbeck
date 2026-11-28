@@ -69,6 +69,14 @@ def test_there_is_no_current_month_on_the_1st_and_no_year_on_1_january() -> None
     assert "year" not in [section.key for section in on_new_year]
 
 
+def test_on_the_second_day_of_a_month_the_current_month_has_its_first_day() -> None:
+    found = sections_of(fill(D(2025, 1, 1), D(2026, 12, 1)), D(2026, 12, 2))
+
+    (current_month,) = [section for section in found if section.key == "current-month"]
+    assert current_month.title == "Current month so far: 2026-12-01 .. 2026-12-01"
+    assert current_month.periods[0].total == 10
+
+
 def test_a_section_has_the_period_of_the_run_first_then_the_earlier_years() -> None:
     found = sections_of(fill(D(2024, 1, 1), D(2026, 11, 22)), D(2026, 11, 23))
 
@@ -113,6 +121,46 @@ def test_note_about_the_earlier_years_that_are_left_out(first_year: int, note: s
 )
 def test_incomplete_note_names_the_days(missing: int, no_data: int, note: str | None) -> None:
     assert report_sections.incomplete_note(period_with(missing, no_data)) == note
+
+
+@pytest.mark.parametrize(
+    ("total", "days", "mean"),
+    [
+        (0, 1, 0),
+        (7, 7, 1),
+        (15, 30, 1),  # 0.5
+        (45, 30, 2),  # 1.5
+        (75, 30, 3),  # 2.5: half up, not half to even
+        (10, 4, 3),  # 2.5
+        (14, 4, 4),  # 3.5
+        (44, 30, 1),  # 1.47
+        (1100, 7, 157),
+    ],
+)
+def test_mean_liters_rounds_half_up(total: int, days: int, mean: int) -> None:
+    assert report_sections.mean_liters(total, days) == mean
+
+
+def test_period_mean_counts_the_interpolated_days_and_rounds_half_up() -> None:
+    # 11-17 interpolated (3), 11-22 missing: 2 + 3 + 4 + 2 + 2 + 2 = 15 liters on 6 days
+    stored = {**fill(D(2026, 11, 1), D(2026, 11, 15), 2), D(2026, 11, 16): 2}
+    stored.update({D(2026, 11, 18): 4, D(2026, 11, 19): 2, D(2026, 11, 20): 2})
+    stored[D(2026, 11, 21)] = 2
+
+    week = sections_of(stored, D(2026, 11, 23))[0].periods[0]
+
+    assert (week.start, week.total, week.interpolated, week.missing) == (
+        D(2026, 11, 16),
+        15,
+        1,
+        1,
+    )
+    assert week.mean == 2.5
+    assert report_sections.period_mean(week) == 3
+
+
+def test_period_mean_without_a_day_with_a_value_is_none() -> None:
+    assert report_sections.period_mean(period_with(no_data=7)) is None
 
 
 def test_legend_explains_interpolated_days_only_if_a_shown_period_has_some() -> None:

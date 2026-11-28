@@ -3,7 +3,8 @@ configuration file of the data collector: loading and checking
 
 load_configuration() reads the JSON file into a Configuration and checks required keys,
 types and values. A relative path (dataPath) starts at the folder of the
-configuration file, not at the working directory.
+configuration file, not at the working directory. load_soft_water_system() reads and checks
+only the section softWaterSystem, for a command that needs nothing else (gruenbeck.rollover).
 
 The file of the commands is --config-file; its default is the environment variable
 GRUENBECK_CONFIG if it is set, else ./src/config.json (add_config_file_option()). The SMTP
@@ -52,7 +53,7 @@ class ConfigurationError(errors.GruenbeckError, ValueError):
     the configuration file is invalid; str() lists every problem
 
     `mail` is the mail section if that part is valid (to send the error mail), else None.
-    Also a ValueError for callers of read_configuration_file() such as gruenbeck.rollover.
+    Also a ValueError: the file has an invalid value.
     """
 
     def __init__(self, problems: list[str], mail: "Mail | None" = None):
@@ -240,6 +241,26 @@ def load_configuration(
     )
 
 
+def load_soft_water_system(configuration_file: str | os.PathLike[str]) -> SoftWaterSystem:
+    """
+    read and check only the section softWaterSystem, with the rules of load_configuration()
+    Unknown keys of the section are ignored with a warning; the other sections of the file are
+    neither checked nor reported as unknown.
+    :param configuration_file: path of the JSON file
+    :raises FileNotFoundError: the file does not exist
+    :raises ConfigurationError: every problem of the section (also: it is missing or no object)
+    """
+    data = read_configuration_file(configuration_file)
+    problems: list[str] = []
+    soft_water_system = _read_soft_water_system(
+        _Section(data, "", problems).section("softWaterSystem")
+    )
+    if problems:
+        raise ConfigurationError(problems)
+    # without problems the section is set
+    return typing.cast(SoftWaterSystem, soft_water_system)
+
+
 def _read_path(section: _Section, key: str, base: pathlib.Path) -> pathlib.Path | None:
     """absolute path of a path parameter; a relative path starts at `base`, the config folder"""
     text = section.text(key)
@@ -285,6 +306,7 @@ class _CredentialError(Exception):
 def _read_password_credential() -> str | None:
     """
     the SMTP password of the credential "smtp-password" of systemd, without the final line break
+    (\n or \r\n); any other character, a carriage return as well, belongs to the password
     :return: the password, or None if there is no credential
     :raises _CredentialError: the credential cannot be read or is empty
     """
@@ -293,7 +315,9 @@ def _read_password_credential() -> str | None:
         return None
     path = pathlib.Path(folder) / PASSWORD_CREDENTIAL
     try:
-        text = path.read_text(encoding="utf-8")
+        # newline="": read the line endings as they are (by default \r and \r\n become \n)
+        with path.open(encoding="utf-8", newline="") as credential:
+            text = credential.read()
     except FileNotFoundError:
         return None
     except UnicodeDecodeError:

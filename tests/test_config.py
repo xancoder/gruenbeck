@@ -6,6 +6,7 @@ import copy
 import datetime
 import json
 import logging
+import math
 import pathlib
 import typing
 
@@ -114,8 +115,8 @@ def test_retries_and_retry_delay(
     caplog: pytest.LogCaptureFixture,
     section: str,
     key: str,
-    value: float | int,
-    expected: float | int,
+    value: float,
+    expected: float,
 ) -> None:
     config_data[section][key] = value
 
@@ -127,6 +128,17 @@ def test_retries_and_retry_delay(
     assert type(result) is type(expected)
     # known keys: no warning about an unknown parameter
     assert caplog.records == []
+
+
+@pytest.mark.parametrize("port", [1, 25, 65535])
+def test_port_numbers_from_1_to_65535_are_valid(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    port: int,
+) -> None:
+    config_data["mail"]["smtpPort"] = port
+
+    assert configuration.load_configuration(write_config(config_data)).mail.smtp_port == port
 
 
 def test_retries_of_the_sections_are_independent(
@@ -152,7 +164,7 @@ def test_device_timeout(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     key: str,
-    value: float | int | str,
+    value: float | str,
     expected: float,
 ) -> None:
     config_data["softWaterSystem"][key] = value
@@ -217,7 +229,11 @@ def credentials(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> path
         (SECRET + "\r\n", SECRET),
         # only one final line break belongs to the file, not to the password
         (SECRET + "\n\n", SECRET + "\n"),
+        (SECRET + "\r\n\r\n", SECRET + "\r\n"),
         (" a b ", " a b "),
+        # any other carriage return is part of the password, read as it is
+        (SECRET + "\r", SECRET + "\r"),
+        ("a\rb", "a\rb"),
     ],
 )
 def test_credential_is_the_password(
@@ -363,6 +379,7 @@ def test_empty_credential_is_a_problem(
     with_key: bool,
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     if not with_key:
         del config_data["mail"]["senderPassword"]
@@ -372,6 +389,8 @@ def test_empty_credential_is_a_problem(
     assert problems(config_data, write_config) == [
         f"the credential {credentials / 'smtp-password'} is empty"
     ]
+    # the key is known: it is not reported as an unknown parameter as well
+    assert caplog.records == []
 
 
 def test_unreadable_credential_is_a_problem(
@@ -577,6 +596,20 @@ def test_missing_required_key_is_a_problem(
     assert problems(config_data, write_config) == [f"no config parameter: {key!r}"]
 
 
+def test_the_example_of_the_date_pattern_problem_is_a_valid_pattern(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    config_data["dataFile"]["datePattern"] = "%m-%d"
+    (problem,) = problems(config_data, write_config)
+    example = problem.rsplit("e.g. ", 1)[1].strip("'")
+
+    config_data["dataFile"]["datePattern"] = example
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.data_file.date_pattern == example == "%Y-%m-%d"
+
+
 @pytest.mark.parametrize(
     ("key", "value", "reason"),
     [
@@ -629,6 +662,8 @@ def test_missing_required_key_is_a_problem(
         ("softWaterSystem.retryDelay", "5", "must be a number, 0 or greater"),
         ("softWaterSystem.retryDelay", True, "must be a number, 0 or greater"),
         ("softWaterSystem.retryDelay", None, "must be a number, 0 or greater"),
+        # json writes and reads float("inf") as Infinity
+        ("softWaterSystem.retryDelay", math.inf, "must be a number, 0 or greater"),
         ("mail.retries", -1, "must be a whole number, 0 or greater"),
         ("mail.retries", "3", "must be a whole number, 0 or greater"),
         ("mail.retryDelay", -0.5, "must be a number, 0 or greater"),
@@ -805,3 +840,89 @@ def test_read_configuration_file_returns_the_json_object(tmp_path: pathlib.Path)
     assert configuration.read_configuration_file(path) == {
         "softWaterSystem": {"host": "device.lan"}
     }
+
+
+# --- only the section softWaterSystem -----------------------------------------------
+
+
+def test_load_soft_water_system_ignores_the_other_sections(
+    write_config: collections.abc.Callable[..., pathlib.Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    path = write_config(
+        {"softWaterSystem": {"host": "device.lan", "timeout": 7}, "mail": 5, "comment": "x"}
+    )
+
+    assert configuration.load_soft_water_system(path) == configuration.SoftWaterSystem(
+        host="device.lan",
+        timeout=7.0,
+        retries=configuration.DEVICE_RETRIES,
+        retry_delay=float(configuration.DEVICE_RETRY_DELAY),
+    )
+    # neither the invalid section mail nor the unknown key at the top is reported
+    assert caplog.records == []
+
+
+def test_load_soft_water_system_warns_about_unknown_keys_of_the_section(
+    write_config: collections.abc.Callable[..., pathlib.Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    path = write_config({"softWaterSystem": {"host": "device.lan", "hots": "x"}})
+
+    assert configuration.load_soft_water_system(path).host == "device.lan"
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "unknown config parameter 'softWaterSystem.hots' is ignored")
+    ]
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        None,
+        "device.lan",
+        ["device.lan"],
+        {},
+        {"host": ["a"]},
+        {"host": " "},
+        {"host": "", "timeout": 0, "retries": -1, "retryDelay": "5"},
+        {"host": "device.lan", "timeout": "x"},
+    ],
+    ids=repr,
+)
+def test_load_soft_water_system_has_the_problems_of_load_configuration(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    section: typing.Any,
+) -> None:
+    if section is None:
+        del config_data["softWaterSystem"]
+    else:
+        config_data["softWaterSystem"] = section
+    expected = problems(config_data, write_config)
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_soft_water_system(write_config(config_data))
+
+    assert err.value.problems == expected
+    assert err.value.mail is None
+
+
+def test_load_soft_water_system_lists_every_problem_of_the_section(
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    path = write_config({"softWaterSystem": {"timeout": 0, "retries": True}})
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_soft_water_system(path)
+
+    assert err.value.problems == [
+        "no config parameter: 'softWaterSystem.host'",
+        "invalid config parameter softWaterSystem.timeout 0: must be a number greater than 0",
+        "invalid config parameter softWaterSystem.retries True: must be a whole number, 0 or"
+        " greater",
+    ]
+
+
+def test_load_soft_water_system_without_file_raises_file_not_found_error(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(FileNotFoundError):
+        configuration.load_soft_water_system(tmp_path / "missing.json")

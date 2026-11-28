@@ -221,6 +221,37 @@ def test_the_period_of_the_run_is_listed_with_few_values() -> None:
     assert text.count("No earlier year has enough values for this period.") == 4
 
 
+@pytest.mark.parametrize(
+    ("low", "high", "total", "mean"),
+    [(1, 2, "45", "2"), (2, 3, "75", "3")],
+    ids=["1.5", "2.5"],
+)
+def test_a_mean_of_exactly_half_a_liter_is_rounded_up(
+    low: int, high: int, total: str, mean: str
+) -> None:
+    # September 2026 has 30 days: 15 days with `low` and 15 with `high` liters
+    text = text_of(stored_days(D(2026, 9, 1), *[low, high] * 15), D(2026, 10, 5))
+
+    (row,) = [
+        re.split(r"\s{2,}", line.strip())
+        for line in text.splitlines()
+        if line.startswith("2026  09-01..09-30")
+    ]
+    assert row[2:4] == [total, mean]
+
+
+def test_a_note_below_a_table_follows_an_empty_line() -> None:
+    lines = text_of(fill(D(2026, 1, 1), D(2026, 11, 22))).splitlines()
+
+    notes = [
+        index
+        for index, line in enumerate(lines)
+        if line == "No earlier year has enough values for this period."
+    ]
+    assert len(notes) == 4
+    assert all(lines[index - 1] == "" for index in notes)
+
+
 def test_a_period_without_values_has_dashes() -> None:
     text = text_of({})
 
@@ -267,8 +298,15 @@ def with_gaps() -> Stored:
 
 @pytest.mark.parametrize(
     "stored",
-    [{}, full_data(), with_gaps(), fill(D(2025, 1, 1), D(2026, 11, 22), 10000)],
-    ids=["empty", "complete", "with-gaps", "seven-digit-totals"],
+    [
+        {},
+        full_data(),
+        with_gaps(),
+        fill(D(2025, 1, 1), D(2026, 11, 22), 10000),
+        # 21 earlier years: the note about the 16 that are left out has to be wrapped
+        fill(D(2005, 1, 1), D(2026, 11, 22)),
+    ],
+    ids=["empty", "complete", "with-gaps", "seven-digit-totals", "twenty-years"],
 )
 def test_text_is_ascii_with_short_lines_and_aligned_columns(stored: Stored) -> None:
     text = text_of(stored)

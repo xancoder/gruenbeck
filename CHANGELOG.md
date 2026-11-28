@@ -1,7 +1,37 @@
 # Changelog
 
-All notable changes of this project. The file is generated from the commit messages with git-cliff (see "release" in the README); do not edit it by hand.
+All notable changes of this project. The file is generated from the commit messages with git-cliff (see "release" in CONTRIBUTING.md); do not edit it by hand.
 
+## [0.3.0] - 2026-11-28
+
+### Features
+
+- **deploy:** Harden the collector service further
+
+### Bug fixes
+
+- **config:** Read the smtp-password credential as it is
+- **report:** Round the mean half up like the interpolation
+- **storage:** Report a data folder that is a file as storage error
+- **rollover:** Check the device configuration like the data collector
+
+### Documentation
+
+- Run the commands of the virtual environment on the Pi
+- Move the developer documentation to CONTRIBUTING.md
+
+### Tests
+
+- Sharpen tests found weak by a mutation analysis
+
+### Build
+
+- Add license and project URLs, recipe release
+- **checks:** Treat warnings as errors and tighten coverage, mypy and ruff
+
+### CI
+
+- Test without the analysis extra, audit dependencies, target development
 ## [0.2.0] - 2026-11-27
 
 ### Features
@@ -113,6 +143,7 @@ All notable changes of this project. The file is generated from the commit messa
 
 ### Documentation
 
+- **changelog:** Update 0.2.0 release notes
 - **readme:** Remove outdated parameterFile note
 - Clarify collector timing and migration recovery
 - Move scheduling guide to systemd deploy directory

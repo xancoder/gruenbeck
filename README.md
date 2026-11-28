@@ -18,13 +18,21 @@ The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer
 
 ```shell script
 cd gruenbeck
-uv sync --no-dev           # data collector only (production)
-uv sync                    # plus the dev tools (pytest, pytest-cov, ruff, mypy, pre-commit)
+uv sync --no-dev --locked  # data collector only (production, e.g. the Raspberry Pi)
+uv sync                    # plus the dev tools (the group `dev` in pyproject.toml)
 uv sync --extra analysis   # plus pandas and matplotlib for gruenbeck-analyse
 uv sync --all-extras       # dev tools and the extra: what CI installs
 ```
 
+`--locked` installs exactly the versions of `uv.lock` and stops with an error instead of writing a new `uv.lock` into the checkout. The dev tools are the group `dev` in `pyproject.toml` (pytest and its plugins, hypothesis, responses, ruff, mypy, pre-commit, just, git-cliff and more); production needs none of them.
+
 Without the extra, the tests that need pandas and matplotlib are skipped; `uv sync --all-extras` runs all of them.
+
+To update an installation such as the one on the Raspberry Pi, run `git pull` and then `uv sync --no-dev --locked` again in the repository. `./.venv/bin/gruenbeck-collect --version` shows the installed version; the log file shows the version of every run.
+
+On the Raspberry Pi, call the commands of the virtual environment (`./.venv/bin/gruenbeck-collect` and so on), as the scheduled runs do: they need no uv and change nothing. A plain `uv run <command>` syncs the virtual environment first and installs the dev tools, which production does not need.
+
+How to work on the project (layout, tests, checks, continuous integration, release) is described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### create the config.json
 
@@ -68,7 +76,7 @@ Temporary errors (connection lost, timeout, connection failed) are retried `retr
 
 ##### SMTP password as a systemd credential
 
-The password need not be in `src/config.json`. If the environment variable `CREDENTIALS_DIRECTORY` is set (systemd does that for a service with `LoadCredential=`) and the folder holds a file `smtp-password`, its content is the SMTP password, without a final line break, and `senderPassword` is optional:
+The password need not be in `src/config.json`. If the environment variable `CREDENTIALS_DIRECTORY` is set (systemd does that for a service with `LoadCredential=`) and the folder holds a file `smtp-password`, its content is the SMTP password, without a final line break (`\n` or `\r\n`; every other character, spaces included, belongs to the password), and `senderPassword` is optional:
 
 - Both there: the credential wins, and the log gets the warning `the credential 'smtp-password' is used as SMTP password; remove 'mail.senderPassword' from the configuration file`. Remove the key, the file does not need the password any more.
 - Neither there: the configuration error names both ways (the key and the credential).
@@ -130,10 +138,10 @@ Before it writes anything, the data collector reads every yearly file it needs. 
 ### manually running
 
 ```shell script
-uv run gruenbeck-collect -l
+./.venv/bin/gruenbeck-collect -l
 ```
 
-Scheduled runs call the command of the virtual environment directly (`./.venv/bin/gruenbeck-collect`), so uv is not needed at run time.
+Scheduled runs call the same command of the virtual environment, so uv is not needed at run time.
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
@@ -188,8 +196,8 @@ The data is stored before the mail is made, so the mail goes out whatever happen
 `gruenbeck-preview-mail` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. Like the data collector it takes the configuration relative to the current directory, so run it from the repository root or pass the configuration file:
 
 ```shell script
-uv run gruenbeck-preview-mail --output-dir ./log/preview
-uv run gruenbeck-preview-mail --send-to me@example.com
+./.venv/bin/gruenbeck-preview-mail --output-dir ./log/preview
+./.venv/bin/gruenbeck-preview-mail --send-to me@example.com
 ```
 
 | option | meaning |
@@ -210,120 +218,6 @@ uv run --extra analysis gruenbeck-analyse
 ```
 
 Without the extra it ends with exit code `1` and the message `gruenbeck-analyse: the extra 'analysis' is not installed (needs matplotlib and pandas): uv sync --extra analysis`.
-
-### project layout
-
-| path | content |
-|------|---------|
-| `src/gruenbeck/cli.py` | the commands `gruenbeck-collect` and `gruenbeck-analyse`: options, logging, error mail and exit code |
-| `src/gruenbeck/collector.py` | the run of the data collector: request the device, store the new values, compose and send the data mail |
-| `src/gruenbeck/config.py` | reading the configuration file |
-| `src/gruenbeck/device.py` | web server of the soft water system: request, meaning of the values |
-| `src/gruenbeck/storage.py` | data folder and yearly data files |
-| `src/gruenbeck/mail.py` | data mail (text, HTML, CSV attachments) and error mail |
-| `src/gruenbeck/report.py` | statistics of the stored consumption for the data mail (periods, missing values, interpolation); plain data, no text |
-| `src/gruenbeck/report_sections.py` | the sections, notes and legend of the data mail, shared by the text and the HTML part |
-| `src/gruenbeck/report_text.py` | the statistics as plain text for the data mail |
-| `src/gruenbeck/report_html.py` | the statistics as HTML document for the data mail |
-| `src/gruenbeck/analysis.py` | monthly statistics (extra `analysis`) |
-| `src/gruenbeck/rollover.py` | the command `gruenbeck-log-rollover`: read-only diagnostic tool for the daily rollover of the device |
-| `src/gruenbeck/preview.py` | the command `gruenbeck-preview-mail`: read-only preview of the data mail without the device (files, or a mail to your own address) |
-| `deploy/systemd/` | systemd units and their setup |
-
-### tests
-
-```shell script
-uv run just test   # with coverage; plain: uv run pytest
-```
-
-The tests run from any directory and write nothing into the repository, except the folder `.hypothesis/` of the property tests in the current directory (it is ignored by git).
-
-Two dev tools shape the run:
-
-- **pytest-randomly** shuffles the order of the tests on every run, so a test that depends on another one fails soon instead of years later. The first lines of the pytest output name the seed (`Using --randomly-seed=3811257189`). To repeat a run in the same order, for example a failed one from CI, pass that seed or take the one of the last run; to switch the shuffling off use `-p no:randomly`:
-
-  ```shell script
-  uv run pytest --randomly-seed=3811257189
-  uv run pytest --randomly-seed=last
-  uv run pytest -p no:randomly
-  ```
-
-- **hypothesis** generates the inputs of the property tests in `tests/test_properties.py` (about 1.5 s): they state what holds for *every* input instead of single examples, for instance that the interpolated days of a short gap lie between the measured neighbours, that a data file is read back as it was written, or that the device clock deviation is the shortest way round the clock. A failing example is shrunk to a small one and printed; the same seed (see above) generates it again, and hypothesis remembers it in `.hypothesis/` and tries it first on the next run.
-
-### code quality
-
-The dev tools (`uv sync`) include ruff, mypy, pre-commit and [just](https://just.systems), a command runner; the settings of the tools are in `pyproject.toml` and `.pre-commit-config.yaml`, the commands in the `justfile`. `uv run just check` runs all checks in the order of the CI, the other recipes run one check each (`uv run just --list` describes them):
-
-```shell script
-uv run just check          # all of the following, in the order of the CI
-uv run just format         # format the code (double quotes, line length 100); `just format --check` only checks
-uv run just lint           # ruff check
-uv run just types          # mypy: the types of src, tests and deploy (strict)
-uv run just test           # pytest with line and branch coverage of the code (src, deploy)
-uv run just hooks          # all pre-commit hooks on all files (ruff, file checks, spelling, zizmor)
-uv run just secrets        # gitleaks scan of the whole git history
-```
-
-Further arguments go to the tool: `uv run just test -k mail`, `uv run just format --check`.
-
-The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
-#### pre-commit
-
-[pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files), [typos](https://github.com/crate-ci/typos) (spelling of code, comments and documentation), [zizmor](https://docs.zizmor.sh/) (audits the GitHub Actions workflows and the Dependabot configuration, offline) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:
-
-```shell script
-uv sync
-uv run pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
-```
-
-The hook type `commit-msg` checks the first word of the commit message ([conventional-pre-commit](https://github.com/compilerla/conventional-pre-commit)): it has to be a type of the history (`feat`, `fix`, `refactor`, `test`, `docs`, `style`, `chore`, `build`, `ci` or `perf`), optionally with a scope and `!`, then `: ` and a description, for example `fix(storage): report a row without value as storage error`. Other messages are rejected. `CHANGELOG.md` is generated from these messages (see [release](#release)). The hook runs only when this hook type is installed; leave out `--hook-type commit-msg` to go without it.
-
-`typos` only reports what it finds (the hook of the project does not write corrections into the files, because a name of the standard library such as `smtplib.SMTPHeloError` would be "corrected" too). The settings are in `pyproject.toml` (`[tool.typos]`): `assets/`, `uv.lock` and the generated `CHANGELOG.md` are not checked, and the few false positives are listed with their reason (names of `smtplib`, the SMTP command `helo`, the misspelled key of a test).
-
-Hooks that already exist in `.git/hooks` are kept as `<hook>.legacy` and still run first. To check all files at any time:
-
-```shell script
-uv run just hooks   # same as: uv run pre-commit run --all-files --show-diff-on-failure
-```
-
-The first run needs network access to set up the hook environments (gitleaks is built with a Go toolchain that pre-commit fetches). The gitleaks hook looks at the staged changes only, so `--all-files` does not scan files that are not staged. The separate hook `gitleaks-history` (manual stage) scans the whole git history instead:
-
-```shell script
-uv run just secrets
-```
-
-#### continuous integration
-
-`.github/workflows/ci.yml` runs on every pull request and on every push to `master` and `development` (a branch with an open pull request does not run twice; a newer run for the same branch or pull request cancels the older one). It always uses `uv sync --locked --all-extras`, so that the extra `analysis` (pandas, matplotlib) is installed and tested:
-
-- job `checks` (Python 3.12): the recipes `hooks` (ruff, the file checks, spelling and zizmor; as separate steps the log of every check stays apart), `secrets` (the gitleaks scan of the git history) and `types` (mypy);
-- job `tests`: the recipe `test` (pytest with coverage) on Python 3.12 (lowest supported version), 3.14 and 3.15 (the version on the Raspberry Pi).
-
-The steps call the recipes of the `justfile` (`uv run just hooks`, …), so no check is spelled out in `ci.yml`. Run the same checks locally before pushing:
-
-```shell script
-uv sync --locked --all-extras
-uv run just check
-```
-
-Another Python version can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest`.
-
-The actions in `ci.yml` are pinned to the full commit SHA (with the version as a comment), not to a tag, because a tag can be moved. Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv, including ruff), the GitHub Actions (it updates SHA and comment) and the hook versions in `.pre-commit-config.yaml` (ecosystem `pre-commit`; the local ruff hooks have no version there) once a week and opens one pull request per ecosystem. Version updates wait 7 days after a release (`cooldown`); security updates are not delayed. `uv run pre-commit autoupdate` updates the hook versions by hand.
-
-### release
-
-The version is in `pyproject.toml` (`version`); every command prints it with `--version` (for example `gruenbeck-collect 0.2.0`), and the data collector writes it into the first line of every run in `log/gruenbeck_error.log` (`run script: …, version 0.2.0`). `CHANGELOG.md` is generated from the commit messages (Conventional Commits: `feat`, `fix`, `refactor`, `test`, `docs`, `style`, `chore`, `build`, `ci`, `perf`) with [git-cliff](https://git-cliff.org); its settings are in `pyproject.toml` (`[tool.git-cliff.*]`). Do not edit the file by hand. To release a version:
-
-1. Commit all changes (the changelog lists commits only) and raise the version, e.g. `uv version --bump minor` (or `uv version 0.3.0`); it changes `pyproject.toml` and `uv.lock`.
-2. Generate the changelog for the new version, which has no tag yet:
-
-   ```shell script
-   uv run git-cliff --tag v0.3.0 --output CHANGELOG.md
-   ```
-
-3. Commit `pyproject.toml`, `uv.lock` and `CHANGELOG.md` as `chore(release): v0.3.0` (git-cliff leaves such commits out), merge into `master`, and set the tag there (`git tag v0.3.0`, then push the tag to `origin`).
-
-On the Raspberry Pi, `./.venv/bin/gruenbeck-collect --version` shows the installed version. After an update (`git pull`, `uv sync --no-dev`) it is the new one; the log file shows the version of every run.
 
 ## Scheduling
 

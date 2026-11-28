@@ -13,11 +13,12 @@ import logging
 import math
 import pathlib
 import tempfile
+import typing
 
 import hypothesis
 import hypothesis.strategies as st
 
-from gruenbeck import config, device, report, storage
+from gruenbeck import config, device, report, report_sections, storage
 
 LITERS = st.integers(min_value=0, max_value=10**9)
 DAYS = st.dates(min_value=datetime.date(2000, 1, 1), max_value=datetime.date(2100, 12, 31))
@@ -67,6 +68,22 @@ def test_between_rounds_half_up_like_exact_fractions(case: tuple[int, int, int, 
     # x.5 goes up, whatever the direction of the steps
     assert report._between(before, after, step, steps) == math.floor(
         exact + fractions.Fraction(1, 2)
+    )
+
+
+# --- report_sections.mean_liters: the Mean of the tables ----------------------------
+
+
+# up to 100 years of days with a value
+MEAN_DAYS = st.integers(min_value=1, max_value=36600)
+
+
+@hypothesis.given(MEAN_DAYS, st.data())
+def test_mean_liters_rounds_half_up_like_exact_fractions(days: int, data: st.DataObject) -> None:
+    total = data.draw(st.integers(min_value=0, max_value=days * 10**9))
+
+    assert report_sections.mean_liters(total, days) == math.floor(
+        fractions.Fraction(total, days) + fractions.Fraction(1, 2)
     )
 
 
@@ -235,6 +252,7 @@ class _Records(logging.Handler):
         super().__init__(logging.WARNING)
         self.records: list[logging.LogRecord] = []
 
+    @typing.override
     def emit(self, record: logging.LogRecord) -> None:
         self.records.append(record)
 

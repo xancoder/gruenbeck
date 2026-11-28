@@ -162,9 +162,10 @@ def _html_table(periods: collections.abc.Sequence[Period]) -> str:
         weight = "font-weight:600;" if index == 0 else ""
         rule = "" if note else HTML_RULE
         total = mean = "\N{EN DASH}"
-        if period.total is not None and period.mean is not None:
+        liters = report_sections.period_mean(period)
+        if period.total is not None and liters is not None:
             total = f"{period.total}{'*' if period.interpolated else ''}"
-            mean = f"{period.mean:.0f}"
+            mean = str(liters)
         values = [
             str(period.year),
             f"{period.start:%m-%d}{NBSP}\N{EN DASH}{NBSP}{period.end:%m-%d}",

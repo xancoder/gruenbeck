@@ -31,19 +31,21 @@ def date_of(text: str, date_pattern: str) -> datetime.date:
 
 def check_data_folder(data_folder: str | os.PathLike[str]) -> pathlib.Path:
     """
-    create an output folder if not exists
+    create the data folder if it does not exist; only the last folder, not its parents
     :param data_folder: folder to store data
     :return: object: pathlib.Path of the given string
+    :raises FileNotFoundError: the parent folder does not exist
+    :raises FileExistsError: the path exists, but is no folder (e.g. a file)
+    :raises OSError: the folder cannot be created (e.g. no permission)
     """
     path_object = pathlib.Path(data_folder)
-    if not path_object.exists():
-        path_object.mkdir()
+    path_object.mkdir(exist_ok=True)
     return path_object
 
 
 def get_data_file(data_path: str | os.PathLike[str], prefix: str, year: int | str) -> pathlib.Path:
     """path of the yearly data file"""
-    return pathlib.Path(f"{data_path}/{prefix}_{year}.csv")
+    return pathlib.Path(data_path) / f"{prefix}_{year}.csv"
 
 
 def list_year_files(data_path: str | os.PathLike[str], prefix: str) -> list[pathlib.Path]:

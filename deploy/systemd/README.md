@@ -26,8 +26,8 @@ The collector reports a failed run by its exit code (see the exit codes in the
 ## Prerequisites
 
 - The repository is cloned on the machine that runs the collector.
-- The virtual environment exists in `./.venv` (`uv sync --no-dev`, see the
-  [main README](../../README.md)). `uv sync` installs the command `.venv/bin/gruenbeck-collect`
+- The virtual environment exists in `./.venv` (`uv sync --no-dev --locked`, see the
+  [main README](../../README.md); `--locked` keeps `uv.lock` of the checkout as it is). `uv sync` installs the command `.venv/bin/gruenbeck-collect`
   that the unit calls, so uv is not needed at run time. Create it as the user that runs the
   service, or make it readable for that user.
 - `src/config.json` is configured. The collector reads it, writes `data/` and `log/` relative
@@ -91,6 +91,10 @@ runs unattended. It needs nothing but the network and write access to two folder
 | `ProtectKernelTunables`, `ProtectKernelModules`, `ProtectKernelLogs`, `ProtectControlGroups`, `ProtectClock`, `ProtectHostname` | no change to the kernel, the clock or the host name |
 | `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK` | IP sockets for the device and the mail server; `AF_UNIX` and `AF_NETLINK` are used by the name resolution of the C library |
 | `SystemCallArchitectures=native` | no system calls of other architectures |
+| `SystemCallFilter=@system-service`, `SystemCallErrorNumber=EPERM` | only the system calls of an ordinary service; any other call fails with the error `EPERM` instead of killing the process |
+| `ProtectProc=invisible`, `ProcSubset=pid` | `/proc` shows only the processes of the service and no kernel settings |
+| `MemoryDenyWriteExecute=true`, `Environment=PYTHON_JIT=0` | no memory that is writable and executable. The JIT compiler of CPython needs such memory: switched on, it stops Python with `Fatal Python error: … Cannot allocate core JIT code`. It is off by default, and `PYTHON_JIT=0` keeps it off even with a Python built to switch it on |
+| `UMask=0027` | new files are not readable for other users: a new yearly file, a new log file after a rotation. A yearly file that exists keeps its mode when it is written (`shutil.copymode`). If another user reads the data folder (e.g. a web server), give that user the group of the service user, or set `UMask=0022` in the generated service |
 
 `ReadWritePaths=` is the only setting that depends on the installation. If the `dataPath` of
 `src/config.json` or the log file (`--log-error`) is not below the install path, give every
@@ -113,9 +117,11 @@ systemd-analyze verify /tmp/gruenbeck-systemd-XXXX/gruenbeck-collector.service
 systemd-analyze security --offline=true /tmp/gruenbeck-systemd-XXXX/gruenbeck-collector.service
 ```
 
-The overall exposure level of the generated unit is 3.5 (`OK`; the scale goes from 0 to 10,
-lower is better). What is left is what the collector needs or what costs more than it gives,
-for example a system call filter or `PrivateNetwork`. Whether the Raspberry Pi accepts every
+The overall exposure level of the generated unit is 1.6 (`OK`; the scale goes from 0 to 10,
+lower is better; measured with systemd 262, other versions weigh the settings a little
+differently). What is left is what the collector needs or what costs more than it gives:
+the network (`PrivateNetwork`, `IPAddressDeny`), the users of the system (`PrivateUsers`) and
+the read access to `/home`, where the repository is. Whether the Raspberry Pi accepts every
 setting shows only a run there: after installing, start the service once
 (`sudo systemctl start gruenbeck-collector.service`) and look at `systemctl status` and the
 journal. A status `218/CAPABILITIES` or `226/NAMESPACE` means that this system does not allow a
@@ -183,7 +189,9 @@ system service:
   (`chmod 600`); the user manager loads it like the system manager does.
 - The hardening settings stay in the service. They work for a user service only if the user
   manager of systemd can set up a user namespace (the transient test unit with these settings
-  ran on the development machine, systemd 262). If the start fails with `status=218/CAPABILITIES`
+  ran on the development machine, systemd 262). There a user service did not apply
+  `ProtectProc` and `ProcSubset` (`/proc` stayed complete); the system call filter,
+  `MemoryDenyWriteExecute` and `UMask` did apply. If the start fails with `status=218/CAPABILITIES`
   or `226/NAMESPACE`, delete the whole hardening block from the generated service:
   `sed -i '/^# Hardening/,$d' ~/gruenbeck-units/gruenbeck-collector.service` (the block is at the end).
 - A missed run is made up directly after boot or login, possibly before the network is

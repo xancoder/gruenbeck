@@ -123,6 +123,25 @@ def incomplete_note(period: Period) -> str | None:
     return f"incomplete: {', '.join(parts)}" if parts else None
 
 
+def mean_liters(total: int, days: int) -> int:
+    """
+    total / days in whole liters, rounded half up like the interpolated days (report._between);
+    exact with whole numbers, not over a float (whose format rounds half to even: 2.5 -> 2)
+    """
+    return (2 * total + days) // (2 * days)
+
+
+def period_mean(period: Period) -> int | None:
+    """
+    the Mean of the tables: liters per day with a value (measured or interpolated) in whole
+    liters, see mean_liters(); None without such a day
+    """
+    days = sum(1 for day in period.days if day.liters is not None)
+    if period.total is None or not days:
+        return None
+    return mean_liters(period.total, days)
+
+
 def _days(count: int) -> str:
     return f"{count} day" if count == 1 else f"{count} days"
 

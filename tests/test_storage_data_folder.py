@@ -18,6 +18,32 @@ def test_check_data_folder_exists(tmp_path: pathlib.Path) -> None:
     assert data_path.exists()
 
 
+def test_check_data_folder_that_is_a_file_is_an_error(tmp_path: pathlib.Path) -> None:
+    data_folder = tmp_path / "data"
+    data_folder.write_text("not a folder\n")
+
+    # gruenbeck.collector.get_data_folder makes it a StorageError
+    with pytest.raises(FileExistsError):
+        storage.check_data_folder(data_folder)
+
+    assert data_folder.read_text() == "not a folder\n"
+
+
+def test_check_data_folder_does_not_create_the_parents(tmp_path: pathlib.Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        storage.check_data_folder(tmp_path / "missing" / "data")
+
+    assert not (tmp_path / "missing").exists()
+
+
+@pytest.mark.parametrize("data_path", ["/srv/data", "/srv/data/", pathlib.Path("/srv/data")])
+def test_get_data_file_is_the_yearly_file_in_the_data_folder(
+    data_path: str | pathlib.Path,
+) -> None:
+    assert storage.get_data_file(data_path, "p", 2026) == pathlib.Path("/srv/data/p_2026.csv")
+    assert storage.get_data_file(data_path, "p", "2026") == pathlib.Path("/srv/data/p_2026.csv")
+
+
 def test_list_csv_files_gives_the_csv_files_of_the_folder_sorted_by_name(
     tmp_path: pathlib.Path,
 ) -> None:

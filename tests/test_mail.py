@@ -555,6 +555,14 @@ def test_unreadable_attachment_is_named_in_the_text_and_in_the_html(
     assert html.rstrip().endswith("</body></html>")
 
 
+def test_several_notes_are_paragraphs_in_their_order_before_the_end_of_the_body() -> None:
+    style = "margin:12px 16px;font-size:13px;"
+
+    assert mail.add_notes_to_html("<html><body><p>x</p></body></html>", ["a", "b"]) == (
+        f'<html><body><p>x</p><p style="{style}">a</p><p style="{style}">b</p></body></html>'
+    )
+
+
 def test_notes_go_to_the_end_of_a_html_without_body() -> None:
     assert mail.add_notes_to_html("<p>x</p>", ["a & b"]) == (
         '<p>x</p><p style="margin:12px 16px;font-size:13px;">a &amp; b</p>'

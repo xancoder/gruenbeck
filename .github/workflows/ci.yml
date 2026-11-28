@@ -46,10 +46,16 @@ jobs:
       - name: gitleaks (git history)
         run: uv run just secrets
 
+      # known vulnerabilities of the locked dependencies; a finding fails the job
+      - name: uv audit
+        run: uv run just audit
+
       - name: mypy
         run: uv run just types
 
   tests:
+    # e.g. "tests (3.12)" and "tests (3.15, without analysis)"
+    name: tests (${{ matrix.python-version }}${{ !matrix.analysis && ', without analysis' || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -58,6 +64,15 @@ jobs:
         # 3.12: lowest supported version (requires-python); 3.15: the version on the Pi
         # (.python-version)
         python-version: ["3.12", "3.14", "3.15"]
+        # with the extra "analysis": tests/test_analysis.py and analysis.py need pandas and
+        # matplotlib
+        analysis: [true]
+        # one more combination, exactly the state of the Pi: Python 3.15 without the extra
+        # (coverage has to hold there as well). It overrides a value of the dimension "analysis",
+        # so GitHub adds it as a new combination instead of changing the existing 3.15 one
+        include:
+          - python-version: "3.15"
+            analysis: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,10 +83,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      # with the extra "analysis": tests/test_analysis.py and analysis.py need pandas and
-      # matplotlib
+      # `uv run` in the next step keeps what is installed here (no extra = no pandas, matplotlib)
       - name: Install dependencies
-        run: uv sync --locked --all-extras
+        env:
+          ANALYSIS: ${{ matrix.analysis }}
+        run: |
+          if [ "$ANALYSIS" = "true" ]; then
+            uv sync --locked --all-extras
+          else
+            uv sync --locked
+          fi
 
       - name: pytest
         run: uv run just test

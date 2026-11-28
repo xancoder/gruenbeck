@@ -336,6 +336,30 @@ def test_failed_replace_keeps_the_old_file_and_removes_the_temporary_one(
     assert list(tmp_path.iterdir()) == [path]
 
 
+def test_failed_temporary_file_keeps_the_old_file_and_reports_its_error(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "p_2026.csv"
+    path.write_text("date,value\n2026-11-01,1\n", encoding="utf-8")
+    open_file = pathlib.Path.open
+
+    def fail_on_the_temporary_file(
+        self: pathlib.Path, *args: typing.Any, **kwargs: typing.Any
+    ) -> typing.Any:
+        if self.name.endswith(".tmp"):
+            raise OSError(28, "No space left on device")
+        return open_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "open", fail_on_the_temporary_file)
+
+    # the error of the temporary file, not one of the cleanup of a file that is not there
+    with pytest.raises(OSError, match="No space left on device"):
+        storage.write_data(path, FIELDNAMES, {"2026-11-02": 2}, ISO)
+
+    assert path.read_text(encoding="utf-8") == "date,value\n2026-11-01,1\n"
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_other_fieldnames_are_the_columns(tmp_path: pathlib.Path) -> None:
     """up to P006-S3 csv.DictWriter took the keys date/value as columns and failed"""
     path = tmp_path / "p_2026.csv"

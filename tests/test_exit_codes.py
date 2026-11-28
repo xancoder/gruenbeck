@@ -118,6 +118,30 @@ def test_successful_run_exits_with_0(
     assert mails == [("data", tmp_path / "data")]
 
 
+def test_the_device_is_asked_with_host_and_timeout_of_the_configuration(
+    collect: collections.abc.Callable[..., int],
+    config_data: dict[str, typing.Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_data["softWaterSystem"].update(host="softwater.lan:8080", timeout=7)
+    asked: list[tuple[str, float]] = []
+
+    def fetch(
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
+        asked.append((host, timeout))
+        return {"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1")}
+
+    monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
+
+    assert collect() == 0
+
+    assert asked == [("softwater.lan:8080", 7.0)]
+
+
 def test_missing_configuration_exits_with_1_without_mail(
     collect: collections.abc.Callable[..., int],
     mails: list[tuple[str, typing.Any]],
@@ -242,6 +266,31 @@ def test_data_folder_that_cannot_be_created_exits_with_1_and_error_mail(
 
     (text,) = error_mails(mails)
     assert text.startswith("creation data folder failed: [Errno 2] No such file or directory")
+
+
+def test_data_folder_that_is_a_file_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+    tmp_path: pathlib.Path,
+) -> None:
+    (tmp_path / "data").write_text("not a folder\n")
+    # up to P013-S5 the run asked the device and failed only when writing (NotADirectoryError),
+    # as unexpected error with traceback
+    never = RuntimeError("the device must not be asked")
+    answers.append(never)
+
+    assert collect() == 1
+
+    (text,) = error_mails(mails)
+    assert text == f"creation data folder failed: [Errno 17] File exists: '{tmp_path / 'data'}'"
+    assert "unexpected error" not in text
+    log = (tmp_path / "errors.log").read_text()
+    assert "Traceback" not in log
+    # nothing written: the file is unchanged, besides it only the configuration and the log
+    assert (tmp_path / "data").read_text() == "not a folder\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["config.json", "data", "errors.log"]
+    assert answers == [never]
 
 
 def test_invalid_data_file_exits_with_1_and_error_mail(
@@ -462,7 +511,7 @@ def test_errors_of_the_package_have_a_common_base_class() -> None:
         analysis.AnalysisError,
     ):
         assert issubclass(error, errors.GruenbeckError)
-    # read_configuration_file() callers (gruenbeck.rollover) catch ValueError
+    # a ValueError as well: the file has an invalid value
     assert issubclass(config.ConfigurationError, ValueError)
 
 

@@ -505,7 +505,29 @@ def test_failed_html_leaves_the_mail_with_the_text(
     assert attachment.get_filename() == f"{loaded_config.data_file.prefix}_2026.csv"
     (record,) = warnings()
     assert record.getMessage() == "HTML part of the data mail failed: no html"
+    # with the traceback (exc_info=False would also be "not None")
     assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+
+
+def test_failed_statistics_keep_the_notes_in_the_html(
+    monkeypatch: pytest.MonkeyPatch,
+    smtp: "FakeSMTP",
+    loaded_config: config.Configuration,
+) -> None:
+    def fail(*arguments: object) -> typing.NoReturn:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(report, "build_report", fail)
+    storage.check_data_folder(loaded_config.data_path)
+
+    collector.send_data_mail(loaded_config, loaded_config.data_path, TODAY)
+
+    document = html_of(smtp)
+    # the note about the missing csv files is in the HTML as well, above the failure as in the text
+    assert "boom<br>Details are in the log file." in document
+    assert "No data files found to attach." in document
+    assert document.index("No data files found to attach.") < document.index("boom<br>")
 
 
 def test_failed_statistics_and_failed_note_leave_the_note_in_the_text(

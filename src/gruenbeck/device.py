@@ -50,6 +50,7 @@ class DeviceError(errors.GruenbeckError):
 class _LoggingRetry(urllib3.util.Retry):
     """the Retry of urllib3 that logs every repeated attempt"""
 
+    @typing.override
     def increment(
         self,
         method: str | None = None,
