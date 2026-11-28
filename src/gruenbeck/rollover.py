@@ -10,18 +10,19 @@ responses are logged and do not stop the script (the device drops requests while
 web interface is open). Every row is written immediately, so stopping the script at any
 time loses nothing.
 
-Usage on the Raspberry Pi, from the repository root (same place as the data collector):
+Usage on the Raspberry Pi, from the repository root (same place as the data collector), with
+the command of the virtual environment (a plain "uv run" would install the dev tools there):
 
-    uv run gruenbeck-log-rollover --config-file ./src/config.json
+    .venv/bin/gruenbeck-log-rollover --config-file ./src/config.json
 
 Keep it running after logout (e.g. over night):
 
-    nohup uv run gruenbeck-log-rollover > /dev/null 2>&1 &
+    nohup .venv/bin/gruenbeck-log-rollover > /dev/null 2>&1 &
 
 or as a transient user unit (needs "loginctl enable-linger" to survive logout):
 
     systemd-run --user --unit=gruenbeck-rollover --working-directory="$PWD" \\
-        "$(command -v uv)" run gruenbeck-log-rollover
+        "$PWD/.venv/bin/gruenbeck-log-rollover"
 
 Stop it with Ctrl+C, "kill <pid>" or "systemctl --user stop gruenbeck-rollover".
 The result is in ./log/device_rollover.csv.

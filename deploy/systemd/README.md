@@ -26,8 +26,8 @@ The collector reports a failed run by its exit code (see the exit codes in the
 ## Prerequisites
 
 - The repository is cloned on the machine that runs the collector.
-- The virtual environment exists in `./.venv` (`uv sync --no-dev`, see the
-  [main README](../../README.md)). `uv sync` installs the command `.venv/bin/gruenbeck-collect`
+- The virtual environment exists in `./.venv` (`uv sync --no-dev --locked`, see the
+  [main README](../../README.md); `--locked` keeps `uv.lock` of the checkout as it is). `uv sync` installs the command `.venv/bin/gruenbeck-collect`
   that the unit calls, so uv is not needed at run time. Create it as the user that runs the
   service, or make it readable for that user.
 - `src/config.json` is configured. The collector reads it, writes `data/` and `log/` relative

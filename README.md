@@ -18,13 +18,19 @@ The project uses [uv](https://docs.astral.sh/uv/) and needs Python 3.12 or newer
 
 ```shell script
 cd gruenbeck
-uv sync --no-dev           # data collector only (production)
-uv sync                    # plus the dev tools (pytest, pytest-cov, ruff, mypy, pre-commit)
+uv sync --no-dev --locked  # data collector only (production, e.g. the Raspberry Pi)
+uv sync                    # plus the dev tools (the group `dev` in pyproject.toml)
 uv sync --extra analysis   # plus pandas and matplotlib for gruenbeck-analyse
 uv sync --all-extras       # dev tools and the extra: what CI installs
 ```
 
+`--locked` installs exactly the versions of `uv.lock` and stops with an error instead of writing a new `uv.lock` into the checkout. The dev tools are the group `dev` in `pyproject.toml` (pytest and its plugins, hypothesis, responses, ruff, mypy, pre-commit, just, git-cliff and more); production needs none of them.
+
 Without the extra, the tests that need pandas and matplotlib are skipped; `uv sync --all-extras` runs all of them.
+
+To update an installation such as the one on the Raspberry Pi, run `git pull` and then `uv sync --no-dev --locked` again in the repository. `./.venv/bin/gruenbeck-collect --version` shows the installed version; the log file shows the version of every run.
+
+On the Raspberry Pi, call the commands of the virtual environment (`./.venv/bin/gruenbeck-collect` and so on), as the scheduled runs do: they need no uv and change nothing. A plain `uv run <command>` syncs the virtual environment first and installs the dev tools, which production does not need.
 
 How to work on the project (layout, tests, checks, continuous integration, release) is described in [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -132,10 +138,10 @@ Before it writes anything, the data collector reads every yearly file it needs. 
 ### manually running
 
 ```shell script
-uv run gruenbeck-collect -l
+./.venv/bin/gruenbeck-collect -l
 ```
 
-Scheduled runs call the command of the virtual environment directly (`./.venv/bin/gruenbeck-collect`), so uv is not needed at run time.
+Scheduled runs call the same command of the virtual environment, so uv is not needed at run time.
 
 Warnings and errors are written to the rotating file `./log/gruenbeck_error.log` (option `--log-error` / `-e`). With `-l` the data collector also logs everything from INFO on to the console; scheduled runs do without it, so the log file is the place to look for warnings.
 
@@ -190,8 +196,8 @@ The data is stored before the mail is made, so the mail goes out whatever happen
 `gruenbeck-preview-mail` builds the data mail from the yearly files that are in the data folder already, without asking the device and without changing a file in the data folder, so the mail can be looked at (and sent to your own address) between two runs. Like the data collector it takes the configuration relative to the current directory, so run it from the repository root or pass the configuration file:
 
 ```shell script
-uv run gruenbeck-preview-mail --output-dir ./log/preview
-uv run gruenbeck-preview-mail --send-to me@example.com
+./.venv/bin/gruenbeck-preview-mail --output-dir ./log/preview
+./.venv/bin/gruenbeck-preview-mail --send-to me@example.com
 ```
 
 | option | meaning |

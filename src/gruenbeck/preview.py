@@ -17,10 +17,11 @@ Options:
                          the recipients of the configuration) and with the prefix
                          "[preview] " in the subject; without it nothing is sent
 
-Usage from the repository root (same place as the data collector):
+Usage from the repository root (same place as the data collector), with the command of the
+virtual environment (a plain "uv run" would install the dev tools on the Raspberry Pi):
 
-    uv run gruenbeck-preview-mail --output-dir ./log/preview
-    uv run gruenbeck-preview-mail --send-to me@example.com
+    .venv/bin/gruenbeck-preview-mail --output-dir ./log/preview
+    .venv/bin/gruenbeck-preview-mail --send-to me@example.com
 
 Exit code 0 if the mail was built (and written or sent as asked), 1 on an error in the
 configuration, the data folder, the output folder or the sending.

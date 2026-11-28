@@ -122,4 +122,4 @@ The version is in `pyproject.toml` (`version`); every command prints it with `--
 
 3. Commit `pyproject.toml`, `uv.lock` and `CHANGELOG.md` as `chore(release): v0.3.0` (git-cliff leaves such commits out), merge into `master`, and set the tag there (`git tag v0.3.0`, then push the tag to `origin`).
 
-On the Raspberry Pi, `./.venv/bin/gruenbeck-collect --version` shows the installed version. After an update (`git pull`, `uv sync --no-dev`) it is the new one; the log file shows the version of every run.
+How to update the Raspberry Pi to the new version is in the README ([install dependencies](README.md#install-dependencies-into-a-virtual-environment)).
