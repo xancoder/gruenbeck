@@ -44,3 +44,20 @@ audit:
 
 # all checks in the order of the CI: hooks, secrets, audit, types, test
 check: hooks secrets audit types test
+
+# Steps 1 and 2 of a release (CONTRIBUTING.md, "release"): the version in pyproject.toml and
+# uv.lock, and CHANGELOG.md for it. The version is given without "v" (the tag gets it). It stops
+# if a tracked file has uncommitted changes, because the changelog lists commits only. It does
+# not commit, push or tag; it prints the steps that are left instead.
+
+# set the version and generate CHANGELOG.md for it, e.g. `just release 0.3.0` (no commit, no tag)
+release version:
+    @git diff --quiet HEAD -- || { echo "commit all changes first: the changelog lists commits only" >&2; exit 1; }
+    uv version {{ version }}
+    uv run git-cliff --tag v{{ version }} --output CHANGELOG.md
+    @echo ""
+    @echo "Left to do by hand (CONTRIBUTING.md, release):"
+    @echo "  1. review pyproject.toml, uv.lock and CHANGELOG.md and commit them as"
+    @echo "     'chore(release): v{{ version }}'"
+    @echo "  2. merge development into master with a pull request"
+    @echo "  3. set the tag v{{ version }} on master and push the tag to origin"

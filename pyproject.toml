@@ -3,11 +3,19 @@ name = "gruenbeck"
 version = "0.2.0"
 description = "Collects water consumption data from a Grünbeck soft water system and stores it as CSV"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Alexander Sommer" }]
 requires-python = ">=3.12"
 dependencies = [
     "requests>=2.32",
     "urllib3>=2.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/xancoder/gruenbeck"
+Changelog = "https://github.com/xancoder/gruenbeck/blob/master/CHANGELOG.md"
+Issues = "https://github.com/xancoder/gruenbeck/issues"
 
 [project.optional-dependencies]
 analysis = [
