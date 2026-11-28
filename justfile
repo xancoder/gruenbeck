@@ -1,6 +1,6 @@
 # The checks of the project: the same ones the CI runs (.github/workflows/ci.yml calls the
 # recipes), so "green here" means "green there". just is a dev dependency: `uv run just <recipe>`.
-# If a check changes, change its recipe here; the CI and the README follow.
+# If a check changes, change its recipe here; the CI and CONTRIBUTING.md follow.
 
 # list the recipes
 [private]

@@ -119,7 +119,7 @@ fail_under = 97
 #   uv run git-cliff --tag v<version> --output CHANGELOG.md
 # the <!-- n --> prefixes only set the order of the groups; the template strips them
 [tool.git-cliff.changelog]
-header = "# Changelog\n\nAll notable changes of this project. The file is generated from the commit messages with git-cliff (see \"release\" in the README); do not edit it by hand.\n\n"
+header = "# Changelog\n\nAll notable changes of this project. The file is generated from the commit messages with git-cliff (see \"release\" in CONTRIBUTING.md); do not edit it by hand.\n\n"
 body = """
 {% if version %}\
 ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
