@@ -31,5 +31,16 @@ hooks:
 secrets:
     uv run pre-commit run --hook-stage manual --all-files gitleaks-history
 
-# all checks in the order of the CI: hooks, secrets, types, test
-check: hooks secrets types test
+# `uv audit` asks the OSV database (network access needed) about every package in uv.lock,
+# including the extra "analysis" and the dev group; a known vulnerability fails the recipe.
+# The flag --preview-features only switches off the warning that the command is experimental.
+# An exception is one more argument `--ignore <ID>` (the ID uv prints, e.g. GHSA-…), with a
+# comment line above the command: package, why it does not affect this project, and when the
+# exception goes away. Prefer updating the package (uv lock --upgrade-package <name>).
+
+# known vulnerabilities of the locked dependencies (uv audit)
+audit:
+    uv audit --locked --preview-features audit-command
+
+# all checks in the order of the CI: hooks, secrets, audit, types, test
+check: hooks secrets audit types test

@@ -262,11 +262,12 @@ uv run just types          # mypy: the types of src, tests and deploy (strict, p
 uv run just test           # pytest with line and branch coverage of the code (src, deploy)
 uv run just hooks          # all pre-commit hooks on all files (ruff, file checks, spelling, zizmor)
 uv run just secrets        # gitleaks scan of the whole git history
+uv run just audit          # uv audit: known vulnerabilities of the locked dependencies (network access needed)
 ```
 
 Further arguments go to the tool: `uv run just test -k mail`, `uv run just format --check`.
 
-The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 97 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI. Every warning during the tests is an error (`filterwarnings` in `[tool.pytest]`); a test that expects a warning checks it with `pytest.warns`.
+The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 97 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as with it; CI runs both. Every warning during the tests is an error (`filterwarnings` in `[tool.pytest]`); a test that expects a warning checks it with `pytest.warns`.
 #### pre-commit
 
 [pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files), [typos](https://github.com/crate-ci/typos) (spelling of code, comments and documentation), [zizmor](https://docs.zizmor.sh/) (audits the GitHub Actions workflows and the Dependabot configuration, offline) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:
@@ -294,10 +295,10 @@ uv run just secrets
 
 #### continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request and on every push to `master` and `development` (a branch with an open pull request does not run twice; a newer run for the same branch or pull request cancels the older one). It always uses `uv sync --locked --all-extras`, so that the extra `analysis` (pandas, matplotlib) is installed and tested:
+`.github/workflows/ci.yml` runs on every pull request and on every push to `master` and `development` (a branch with an open pull request does not run twice; a newer run for the same branch or pull request cancels the older one). Every job starts with `uv sync --locked`; except for one test job it adds `--all-extras`, so that the extra `analysis` (pandas, matplotlib) is installed and tested:
 
-- job `checks` (Python 3.12): the recipes `hooks` (ruff, the file checks, spelling and zizmor; as separate steps the log of every check stays apart), `secrets` (the gitleaks scan of the git history) and `types` (mypy);
-- job `tests`: the recipe `test` (pytest with coverage) on Python 3.12 (lowest supported version), 3.14 and 3.15 (the version on the Raspberry Pi).
+- job `checks` (Python 3.12, all extras): the recipes `hooks` (ruff, the file checks, spelling and zizmor; as separate steps the log of every check stays apart), `secrets` (the gitleaks scan of the git history), `audit` (known vulnerabilities of the dependencies) and `types` (mypy);
+- job `tests`: the recipe `test` (pytest with coverage) in four runs: `tests (3.12)` (lowest supported version), `tests (3.14)` and `tests (3.15)` (the version on the Raspberry Pi) with the extra, and `tests (3.15, without analysis)`, exactly the state of the Pi: the tests of `analysis` are skipped there, and the coverage limit has to hold all the same.
 
 The steps call the recipes of the `justfile` (`uv run just hooks`, …), so no check is spelled out in `ci.yml`. Run the same checks locally before pushing:
 
@@ -306,9 +307,11 @@ uv sync --locked --all-extras
 uv run just check
 ```
 
-Another Python version can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest`.
+Another Python version, or the run without the extra, can be tried without touching `.venv`, e.g. `uv run --isolated --locked --all-extras --python 3.12 pytest` or `uv run --isolated --locked --python 3.15 pytest -rs --cov` (not `just test` there: the recipe calls `uv run` again, which uses `.venv`).
 
-The actions in `ci.yml` are pinned to the full commit SHA (with the version as a comment), not to a tag, because a tag can be moved. Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv, including ruff), the GitHub Actions (it updates SHA and comment) and the hook versions in `.pre-commit-config.yaml` (ecosystem `pre-commit`; the local ruff hooks have no version there) once a week and opens one pull request per ecosystem. Version updates wait 7 days after a release (`cooldown`); security updates are not delayed. `uv run pre-commit autoupdate` updates the hook versions by hand.
+The actions in `ci.yml` are pinned to the full commit SHA (with the version as a comment), not to a tag, because a tag can be moved. Dependabot (`.github/dependabot.yml`) checks the Python dependencies (uv, including ruff), the GitHub Actions (it updates SHA and comment) and the hook versions in `.pre-commit-config.yaml` (ecosystem `pre-commit`; the local ruff hooks have no version there) once a week and opens one pull request per ecosystem against `development` (`target-branch`; Dependabot reads the file from `master`, and security updates always go to `master`). Version updates wait 7 days after a release (`cooldown`); security updates are not delayed. `uv run pre-commit autoupdate` updates the hook versions by hand.
+
+`uv run just audit` (`uv audit --locked`) looks up every package in `uv.lock`, including the extra `analysis` and the dev tools, in the [OSV](https://osv.dev) database; a known vulnerability fails the recipe and so `just check` and CI. The fix is an update of the package (`uv lock --upgrade-package <name>`). Only if the vulnerability does not affect this project and no update is possible yet, the recipe gets `--ignore <ID>`, with a comment in the `justfile` that names the package, the reason and when the exception goes away.
 
 ### release
 

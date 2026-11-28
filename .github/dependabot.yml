@@ -1,8 +1,13 @@
 version: 2
 
+# target-branch: the pull requests of the version updates go to the working branch
+# `development` and reach `master` with the next pull request from there. Dependabot reads this
+# file from the default branch (`master`), so the setting only takes effect once it is merged
+# there; security updates always go to the default branch, whatever target-branch says.
 updates:
   - package-ecosystem: uv
     directory: /
+    target-branch: development
     schedule:
       interval: weekly
     cooldown:
@@ -16,6 +21,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: development
     schedule:
       interval: weekly
     cooldown:
@@ -30,6 +36,7 @@ updates:
   # the hook versions in .pre-commit-config.yaml (local hooks are skipped)
   - package-ecosystem: pre-commit
     directory: /
+    target-branch: development
     schedule:
       interval: weekly
     cooldown:
