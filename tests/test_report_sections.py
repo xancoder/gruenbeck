@@ -69,6 +69,14 @@ def test_there_is_no_current_month_on_the_1st_and_no_year_on_1_january() -> None
     assert "year" not in [section.key for section in on_new_year]
 
 
+def test_on_the_second_day_of_a_month_the_current_month_has_its_first_day() -> None:
+    found = sections_of(fill(D(2025, 1, 1), D(2026, 12, 1)), D(2026, 12, 2))
+
+    (current_month,) = [section for section in found if section.key == "current-month"]
+    assert current_month.title == "Current month so far: 2026-12-01 .. 2026-12-01"
+    assert current_month.periods[0].total == 10
+
+
 def test_a_section_has_the_period_of_the_run_first_then_the_earlier_years() -> None:
     found = sections_of(fill(D(2024, 1, 1), D(2026, 11, 22)), D(2026, 11, 23))
 

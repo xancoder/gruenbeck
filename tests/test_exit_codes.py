@@ -118,6 +118,30 @@ def test_successful_run_exits_with_0(
     assert mails == [("data", tmp_path / "data")]
 
 
+def test_the_device_is_asked_with_host_and_timeout_of_the_configuration(
+    collect: collections.abc.Callable[..., int],
+    config_data: dict[str, typing.Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_data["softWaterSystem"].update(host="softwater.lan:8080", timeout=7)
+    asked: list[tuple[str, float]] = []
+
+    def fetch(
+        host: str,
+        parameters: collections.abc.Iterable[str],
+        timeout: float,
+        session: object = None,
+    ) -> dict[str, str | None]:
+        asked.append((host, timeout))
+        return {"D_C_4_2": "16:00", **dict.fromkeys(MEMORY, "1")}
+
+    monkeypatch.setattr(device, "get_data_from_mux_http", fetch)
+
+    assert collect() == 0
+
+    assert asked == [("softwater.lan:8080", 7.0)]
+
+
 def test_missing_configuration_exits_with_1_without_mail(
     collect: collections.abc.Callable[..., int],
     mails: list[tuple[str, typing.Any]],

@@ -240,6 +240,18 @@ def test_a_mean_of_exactly_half_a_liter_is_rounded_up(
     assert row[2:4] == [total, mean]
 
 
+def test_a_note_below_a_table_follows_an_empty_line() -> None:
+    lines = text_of(fill(D(2026, 1, 1), D(2026, 11, 22))).splitlines()
+
+    notes = [
+        index
+        for index, line in enumerate(lines)
+        if line == "No earlier year has enough values for this period."
+    ]
+    assert len(notes) == 4
+    assert all(lines[index - 1] == "" for index in notes)
+
+
 def test_a_period_without_values_has_dashes() -> None:
     text = text_of({})
 
@@ -286,8 +298,15 @@ def with_gaps() -> Stored:
 
 @pytest.mark.parametrize(
     "stored",
-    [{}, full_data(), with_gaps(), fill(D(2025, 1, 1), D(2026, 11, 22), 10000)],
-    ids=["empty", "complete", "with-gaps", "seven-digit-totals"],
+    [
+        {},
+        full_data(),
+        with_gaps(),
+        fill(D(2025, 1, 1), D(2026, 11, 22), 10000),
+        # 21 earlier years: the note about the 16 that are left out has to be wrapped
+        fill(D(2005, 1, 1), D(2026, 11, 22)),
+    ],
+    ids=["empty", "complete", "with-gaps", "seven-digit-totals", "twenty-years"],
 )
 def test_text_is_ascii_with_short_lines_and_aligned_columns(stored: Stored) -> None:
     text = text_of(stored)

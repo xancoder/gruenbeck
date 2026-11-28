@@ -249,6 +249,12 @@ def test_unexpected_error_is_not_asked_again(fake: Fake, sleeps: list[float]) ->
     assert sleeps == []
 
 
+def test_error_without_arguments_gives_its_own_text() -> None:
+    error = requests.exceptions.ConnectionError()
+
+    assert device._describe(error) == str(error)
+
+
 def test_error_text_of_the_last_attempt_has_no_pool_and_url() -> None:
     pool = urllib3.HTTPConnectionPool("device.lan")
     reason = urllib3.exceptions.ReadTimeoutError(pool, "/mux_http", "Read timed out.")

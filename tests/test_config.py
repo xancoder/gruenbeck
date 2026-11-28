@@ -6,6 +6,7 @@ import copy
 import datetime
 import json
 import logging
+import math
 import pathlib
 import typing
 
@@ -127,6 +128,17 @@ def test_retries_and_retry_delay(
     assert type(result) is type(expected)
     # known keys: no warning about an unknown parameter
     assert caplog.records == []
+
+
+@pytest.mark.parametrize("port", [1, 25, 65535])
+def test_port_numbers_from_1_to_65535_are_valid(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    port: int,
+) -> None:
+    config_data["mail"]["smtpPort"] = port
+
+    assert configuration.load_configuration(write_config(config_data)).mail.smtp_port == port
 
 
 def test_retries_of_the_sections_are_independent(
@@ -363,6 +375,7 @@ def test_empty_credential_is_a_problem(
     with_key: bool,
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     if not with_key:
         del config_data["mail"]["senderPassword"]
@@ -372,6 +385,8 @@ def test_empty_credential_is_a_problem(
     assert problems(config_data, write_config) == [
         f"the credential {credentials / 'smtp-password'} is empty"
     ]
+    # the key is known: it is not reported as an unknown parameter as well
+    assert caplog.records == []
 
 
 def test_unreadable_credential_is_a_problem(
@@ -577,6 +592,20 @@ def test_missing_required_key_is_a_problem(
     assert problems(config_data, write_config) == [f"no config parameter: {key!r}"]
 
 
+def test_the_example_of_the_date_pattern_problem_is_a_valid_pattern(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    config_data["dataFile"]["datePattern"] = "%m-%d"
+    (problem,) = problems(config_data, write_config)
+    example = problem.rsplit("e.g. ", 1)[1].strip("'")
+
+    config_data["dataFile"]["datePattern"] = example
+    loaded = configuration.load_configuration(write_config(config_data))
+
+    assert loaded.data_file.date_pattern == example == "%Y-%m-%d"
+
+
 @pytest.mark.parametrize(
     ("key", "value", "reason"),
     [
@@ -629,6 +658,8 @@ def test_missing_required_key_is_a_problem(
         ("softWaterSystem.retryDelay", "5", "must be a number, 0 or greater"),
         ("softWaterSystem.retryDelay", True, "must be a number, 0 or greater"),
         ("softWaterSystem.retryDelay", None, "must be a number, 0 or greater"),
+        # json writes and reads float("inf") as Infinity
+        ("softWaterSystem.retryDelay", math.inf, "must be a number, 0 or greater"),
         ("mail.retries", -1, "must be a whole number, 0 or greater"),
         ("mail.retries", "3", "must be a whole number, 0 or greater"),
         ("mail.retryDelay", -0.5, "must be a number, 0 or greater"),
