@@ -805,3 +805,89 @@ def test_read_configuration_file_returns_the_json_object(tmp_path: pathlib.Path)
     assert configuration.read_configuration_file(path) == {
         "softWaterSystem": {"host": "device.lan"}
     }
+
+
+# --- only the section softWaterSystem -----------------------------------------------
+
+
+def test_load_soft_water_system_ignores_the_other_sections(
+    write_config: collections.abc.Callable[..., pathlib.Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    path = write_config(
+        {"softWaterSystem": {"host": "device.lan", "timeout": 7}, "mail": 5, "comment": "x"}
+    )
+
+    assert configuration.load_soft_water_system(path) == configuration.SoftWaterSystem(
+        host="device.lan",
+        timeout=7.0,
+        retries=configuration.DEVICE_RETRIES,
+        retry_delay=float(configuration.DEVICE_RETRY_DELAY),
+    )
+    # neither the invalid section mail nor the unknown key at the top is reported
+    assert caplog.records == []
+
+
+def test_load_soft_water_system_warns_about_unknown_keys_of_the_section(
+    write_config: collections.abc.Callable[..., pathlib.Path], caplog: pytest.LogCaptureFixture
+) -> None:
+    path = write_config({"softWaterSystem": {"host": "device.lan", "hots": "x"}})
+
+    assert configuration.load_soft_water_system(path).host == "device.lan"
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.WARNING, "unknown config parameter 'softWaterSystem.hots' is ignored")
+    ]
+
+
+@pytest.mark.parametrize(
+    "section",
+    [
+        None,
+        "device.lan",
+        ["device.lan"],
+        {},
+        {"host": ["a"]},
+        {"host": " "},
+        {"host": "", "timeout": 0, "retries": -1, "retryDelay": "5"},
+        {"host": "device.lan", "timeout": "x"},
+    ],
+    ids=repr,
+)
+def test_load_soft_water_system_has_the_problems_of_load_configuration(
+    config_data: dict[str, typing.Any],
+    write_config: collections.abc.Callable[..., pathlib.Path],
+    section: typing.Any,
+) -> None:
+    if section is None:
+        del config_data["softWaterSystem"]
+    else:
+        config_data["softWaterSystem"] = section
+    expected = problems(config_data, write_config)
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_soft_water_system(write_config(config_data))
+
+    assert err.value.problems == expected
+    assert err.value.mail is None
+
+
+def test_load_soft_water_system_lists_every_problem_of_the_section(
+    write_config: collections.abc.Callable[..., pathlib.Path],
+) -> None:
+    path = write_config({"softWaterSystem": {"timeout": 0, "retries": True}})
+
+    with pytest.raises(configuration.ConfigurationError) as err:
+        configuration.load_soft_water_system(path)
+
+    assert err.value.problems == [
+        "no config parameter: 'softWaterSystem.host'",
+        "invalid config parameter softWaterSystem.timeout 0: must be a number greater than 0",
+        "invalid config parameter softWaterSystem.retries True: must be a whole number, 0 or"
+        " greater",
+    ]
+
+
+def test_load_soft_water_system_without_file_raises_file_not_found_error(
+    tmp_path: pathlib.Path,
+) -> None:
+    with pytest.raises(FileNotFoundError):
+        configuration.load_soft_water_system(tmp_path / "missing.json")

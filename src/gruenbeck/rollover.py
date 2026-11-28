@@ -39,7 +39,7 @@ import gruenbeck.config
 import gruenbeck.device
 import gruenbeck.version
 
-CLOCK_PARAMETER = "D_C_4_2"
+CLOCK_PARAMETER = gruenbeck.device.DEVICE_CLOCK_PARAMETER
 VALUE_PARAMETERS = ("D_Y_2_1", "D_Y_2_2", "D_Y_2_3")
 # the rollover is detected on these values (the first two are enough and keep
 # the comparison independent of a late correction of older values)
@@ -224,13 +224,14 @@ def parse_args(argv: typing.Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def read_device_config(config_file: str) -> tuple[str, float]:
-    """host and timeout of the device from the configuration"""
-    config = gruenbeck.config.read_configuration_file(config_file)
-    device = config["softWaterSystem"]
-    timeout = float(device.get("timeout", gruenbeck.device.DEFAULT_TIMEOUT))
-    if not timeout > 0:
-        raise ValueError("softWaterSystem.timeout must be greater than 0")
-    return device["host"], timeout
+    """
+    host and timeout of the device from the section softWaterSystem of the configuration
+    (checked like the data collector does; the other sections are not needed)
+    :raises FileNotFoundError: the file does not exist
+    :raises gruenbeck.config.ConfigurationError: the file or the section is invalid
+    """
+    soft_water_system = gruenbeck.config.load_soft_water_system(config_file)
+    return soft_water_system.host, soft_water_system.timeout
 
 
 def main(argv: typing.Sequence[str] | None = None) -> int:
@@ -240,10 +241,7 @@ def main(argv: typing.Sequence[str] | None = None) -> int:
     except FileNotFoundError as err:
         print(f"[-] no configuration: {err}", file=sys.stderr)
         return 1
-    except KeyError as err:
-        print(f"[-] no config parameter: {err}", file=sys.stderr)
-        return 1
-    except (TypeError, ValueError) as err:
+    except gruenbeck.config.ConfigurationError as err:
         print(f"[-] invalid configuration: {err}", file=sys.stderr)
         return 1
 

@@ -335,22 +335,78 @@ def test_default_timeout_comes_from_gruenbeck(tmp_path: pathlib.Path) -> None:
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        (None, "[-] no configuration"),
-        ({}, "[-] no config parameter: 'softWaterSystem'"),
-        ({"softWaterSystem": {}}, "[-] no config parameter: 'host'"),
-        ({"softWaterSystem": {"host": "h", "timeout": 0}}, "[-] invalid configuration"),
-        ({"softWaterSystem": {"host": "h", "timeout": "x"}}, "[-] invalid configuration"),
+        (None, "[-] no configuration: [Errno 2] No such file or directory: "),
+        ({}, "[-] invalid configuration: no config parameter: 'softWaterSystem'"),
+        (
+            {"softWaterSystem": "device.lan"},
+            "[-] invalid configuration: invalid config parameter softWaterSystem 'device.lan':"
+            " expected an object",
+        ),
+        (
+            {"softWaterSystem": {}},
+            "[-] invalid configuration: no config parameter: 'softWaterSystem.host'",
+        ),
+        (
+            {"softWaterSystem": {"host": ["a"]}},
+            "[-] invalid configuration: invalid config parameter softWaterSystem.host ['a']:"
+            " expected a non-empty text",
+        ),
+        (
+            {"softWaterSystem": {"host": "h", "timeout": 0}},
+            "[-] invalid configuration: invalid config parameter softWaterSystem.timeout 0:"
+            " must be a number greater than 0",
+        ),
+        (
+            {"softWaterSystem": {"host": "h", "timeout": "x"}},
+            "[-] invalid configuration: invalid config parameter softWaterSystem.timeout 'x':"
+            " could not convert string to float: 'x'",
+        ),
+        (
+            {"softWaterSystem": {"timeout": 0}},
+            "[-] invalid configuration: no config parameter: 'softWaterSystem.host';"
+            " invalid config parameter softWaterSystem.timeout 0: must be a number greater than 0",
+        ),
+        ([], "[-] invalid configuration: configuration file "),
     ],
 )
 def test_invalid_configuration_exits_with_1(
-    tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str], config: typing.Any, message: str
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    config: typing.Any,
+    message: str,
 ) -> None:
     config_file = tmp_path / "config.json"
     if config is not None:
         config_file.write_text(json.dumps(config))
 
+    def unexpected(*args: object, **kwargs: object) -> typing.NoReturn:
+        raise AssertionError("the device must not be asked")
+
+    monkeypatch.setattr(rollover, "run", unexpected)
+
     assert rollover.main(["-c", str(config_file)]) == 1
-    assert message in capsys.readouterr().err
+    captured = capsys.readouterr()
+    # one line on stderr, no traceback, nothing on stdout
+    assert captured.err.startswith(message)
+    assert captured.err.count("\n") == 1
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
+def test_other_sections_of_the_configuration_are_not_needed(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"softWaterSystem": {"host": "device.lan"}, "mail": 5}))
+    monkeypatch.setattr(rollover, "run", lambda *args, **kwargs: 0)
+
+    assert rollover.main(["-c", str(config)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_clock_parameter_is_the_one_of_the_data_collector() -> None:
+    assert rollover.CLOCK_PARAMETER == device.DEVICE_CLOCK_PARAMETER
 
 
 @pytest.mark.parametrize("option", ["--interval", "--hours"])
