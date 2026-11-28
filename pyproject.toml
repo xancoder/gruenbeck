@@ -57,9 +57,23 @@ quote-style = "double"
 # LOG (flake8-logging): correct use of the logging functions
 # A (flake8-builtins): no names that shadow a builtin
 # TRY400: logger.error in an except block where logger.exception would add the traceback
+# RET (flake8-return): needless return values, else after return and assignments before return
+# FURB (refurb): more modern spellings of standard library calls
+# N (pep8-naming): names of classes, functions, arguments and constants
+# ERA (eradicate): no commented-out code
+# RSE (flake8-raise): no needless parentheses when raising an exception class
+# FLY (flynt): f-strings instead of str.join over a constant list of strings
+# PGH (pygrep-hooks): noqa and type: ignore only with a code
+# EXE (flake8-executable): shebang and executable bit match
+# PYI (flake8-pyi): type hints without redundant unions such as int | float
+# T10 (flake8-debugger): no breakpoint or debugger import left behind
+# TID (flake8-tidy-imports): no relative imports from parent packages
+# PLE (Pylint errors): errors that Python only reports at runtime
+# PLW (Pylint warnings): likely mistakes such as a redefined loop variable
 select = [
     "E", "F", "W", "I", "UP", "B", "SIM", "RUF", "G",
     "PT", "C4", "PIE", "PTH", "PERF", "LOG", "A", "TRY400",
+    "RET", "FURB", "N", "ERA", "RSE", "FLY", "PGH", "EXE", "PYI", "T10", "TID", "PLE", "PLW",
 ]
 
 [tool.mypy]
@@ -67,6 +81,16 @@ python_version = "3.12"
 files = ["src", "tests", "deploy"]
 mypy_path = "src"
 strict = true
+# beyond strict: code that can never run, conditions that are always true or false, overridden
+# methods without @typing.override, variables that may be undefined, ignores without a code
+warn_unreachable = true
+enable_error_code = [
+    "explicit-override",
+    "redundant-expr",
+    "truthy-bool",
+    "possibly-undefined",
+    "ignore-without-code",
+]
 
 # pandas and matplotlib only belong to the optional "analysis" extra, which is not part of
 # the dev environment, and pandas ships no type information
@@ -79,6 +103,8 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--import-mode=importlib"]
 strict = true
+# every warning fails the test; a test that expects a warning checks it with pytest.warns
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 branch = true
@@ -87,7 +113,7 @@ source = ["src", "deploy"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 95
+fail_under = 97
 
 # CHANGELOG.md is generated from the commit messages (Conventional Commits):
 #   uv run git-cliff --tag v<version> --output CHANGELOG.md

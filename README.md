@@ -258,7 +258,7 @@ The dev tools (`uv sync`) include ruff, mypy, pre-commit and [just](https://just
 uv run just check          # all of the following, in the order of the CI
 uv run just format         # format the code (double quotes, line length 100); `just format --check` only checks
 uv run just lint           # ruff check
-uv run just types          # mypy: the types of src, tests and deploy (strict)
+uv run just types          # mypy: the types of src, tests and deploy (strict, plus unreachable code and @typing.override)
 uv run just test           # pytest with line and branch coverage of the code (src, deploy)
 uv run just hooks          # all pre-commit hooks on all files (ruff, file checks, spelling, zizmor)
 uv run just secrets        # gitleaks scan of the whole git history
@@ -266,7 +266,7 @@ uv run just secrets        # gitleaks scan of the whole git history
 
 Further arguments go to the tool: `uv run just test -k mail`, `uv run just format --check`.
 
-The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 95 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI.
+The coverage settings are in `pyproject.toml` (`[tool.coverage.*]`): branches are measured, the tests themselves are not counted, the missing lines are listed, and the run fails below 97 % (`fail_under`). The value has to hold without the extra `analysis` (where `analysis.py` is not covered) as well as in CI. Every warning during the tests is an error (`filterwarnings` in `[tool.pytest]`); a test that expects a warning checks it with `pytest.warns`.
 #### pre-commit
 
 [pre-commit](https://pre-commit.com/) checks every commit before it is created: ruff (lint and format), basic file checks (trailing whitespace, end of file, YAML, TOML and JSON syntax, merge conflict markers, large files), [typos](https://github.com/crate-ci/typos) (spelling of code, comments and documentation), [zizmor](https://docs.zizmor.sh/) (audits the GitHub Actions workflows and the Dependabot configuration, offline) and [gitleaks](https://github.com/gitleaks/gitleaks), which looks for hard-coded secrets such as the SMTP password. The two ruff hooks are local hooks that run `uv run --no-sync ruff` (so `uv` has to be on the `PATH` and the virtual environment has to exist: `uv sync`); this way they use the ruff version from `uv.lock`, the same one as `uv run ruff`. Install the git hooks once per clone:

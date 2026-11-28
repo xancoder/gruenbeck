@@ -114,8 +114,8 @@ def test_retries_and_retry_delay(
     caplog: pytest.LogCaptureFixture,
     section: str,
     key: str,
-    value: float | int,
-    expected: float | int,
+    value: float,
+    expected: float,
 ) -> None:
     config_data[section][key] = value
 
@@ -152,7 +152,7 @@ def test_device_timeout(
     config_data: dict[str, typing.Any],
     write_config: collections.abc.Callable[..., pathlib.Path],
     key: str,
-    value: float | int | str,
+    value: float | str,
     expected: float,
 ) -> None:
     config_data["softWaterSystem"][key] = value

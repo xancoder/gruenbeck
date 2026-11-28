@@ -13,6 +13,7 @@ import logging
 import math
 import pathlib
 import tempfile
+import typing
 
 import hypothesis
 import hypothesis.strategies as st
@@ -235,6 +236,7 @@ class _Records(logging.Handler):
         super().__init__(logging.WARNING)
         self.records: list[logging.LogRecord] = []
 
+    @typing.override
     def emit(self, record: logging.LogRecord) -> None:
         self.records.append(record)
 

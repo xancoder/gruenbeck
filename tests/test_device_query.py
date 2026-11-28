@@ -327,6 +327,7 @@ def server() -> collections.abc.Iterator[tuple[str, Script]]:
             self.end_headers()
             self.wfile.write(body)
 
+        @typing.override
         def log_message(self, fmt: str, *args: typing.Any) -> None:
             pass
 

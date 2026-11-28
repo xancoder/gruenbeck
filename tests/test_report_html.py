@@ -4,6 +4,7 @@ import collections
 import datetime
 import html.parser
 import re
+import typing
 
 import pytest
 
@@ -74,6 +75,7 @@ class Page(html.parser.HTMLParser):
         if self.stack:
             self.problems.append(f"not closed: {self.stack}")
 
+    @typing.override
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags[tag] += 1
         self.classes.update((dict(attrs).get("class") or "").split())
@@ -90,9 +92,11 @@ class Page(html.parser.HTMLParser):
         elif tag == "h2":
             self._text = []
 
+    @typing.override
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self.tags[tag] += 1
 
+    @typing.override
     def handle_endtag(self, tag: str) -> None:
         if not self.stack or self.stack.pop() != tag:
             self.problems.append(f"unexpected </{tag}>")
@@ -104,6 +108,7 @@ class Page(html.parser.HTMLParser):
             self.headings.append(" ".join("".join(self._text).split()))
             self._text = None
 
+    @typing.override
     def handle_data(self, data: str) -> None:
         if self._cell is not None:
             self._cell.append(data)

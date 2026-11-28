@@ -247,9 +247,12 @@ def test_main_continues_from_last_complete_row(
     run(tmp_path, [values("105", "93")])
     (tmp_path / "log" / "device_rollover.csv").rename(output)
     seen: dict[str, typing.Any] = {}
-    monkeypatch.setattr(
-        rollover, "run", lambda *args, previous_row: seen.update(row=previous_row) or 0
-    )
+
+    def fake_run(*args: object, previous_row: dict[str, str] | None) -> int:
+        seen.update(row=previous_row)
+        return 0
+
+    monkeypatch.setattr(rollover, "run", fake_run)
 
     assert rollover.main(["-c", str(config), "--output", str(output)]) == 0
     assert seen["row"]["D_Y_2_1"] == "105"
