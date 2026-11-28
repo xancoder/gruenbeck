@@ -244,6 +244,31 @@ def test_data_folder_that_cannot_be_created_exits_with_1_and_error_mail(
     assert text.startswith("creation data folder failed: [Errno 2] No such file or directory")
 
 
+def test_data_folder_that_is_a_file_exits_with_1_and_error_mail(
+    collect: collections.abc.Callable[..., int],
+    mails: list[tuple[str, typing.Any]],
+    answers: list[dict[str, str | None] | BaseException],
+    tmp_path: pathlib.Path,
+) -> None:
+    (tmp_path / "data").write_text("not a folder\n")
+    # up to P013-S5 the run asked the device and failed only when writing (NotADirectoryError),
+    # as unexpected error with traceback
+    never = RuntimeError("the device must not be asked")
+    answers.append(never)
+
+    assert collect() == 1
+
+    (text,) = error_mails(mails)
+    assert text == f"creation data folder failed: [Errno 17] File exists: '{tmp_path / 'data'}'"
+    assert "unexpected error" not in text
+    log = (tmp_path / "errors.log").read_text()
+    assert "Traceback" not in log
+    # nothing written: the file is unchanged, besides it only the configuration and the log
+    assert (tmp_path / "data").read_text() == "not a folder\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["config.json", "data", "errors.log"]
+    assert answers == [never]
+
+
 def test_invalid_data_file_exits_with_1_and_error_mail(
     collect: collections.abc.Callable[..., int],
     mails: list[tuple[str, typing.Any]],
