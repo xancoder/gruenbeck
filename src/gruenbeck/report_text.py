@@ -76,11 +76,12 @@ def _table(periods: collections.abc.Sequence[Period]) -> list[str]:
 
 
 def _table_row(period: Period) -> str:
-    if period.total is None or period.mean is None:
+    liters = report_sections.period_mean(period)
+    if period.total is None or liters is None:
         total, mean = f"{'-':>7} ", "-"
     else:
         total = f"{period.total:>7}{'*' if period.interpolated else ' '}"
-        mean = f"{period.mean:.0f}"
+        mean = str(liters)
     return TABLE_ROW.format(
         year=period.year,
         period=f"{period.start:%m-%d}..{period.end:%m-%d}",

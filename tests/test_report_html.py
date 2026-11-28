@@ -125,6 +125,21 @@ def page_of(stored: Stored, today: datetime.date = MONDAY) -> tuple[Page, report
     return Page(report_html.format_html(stats)), stats
 
 
+@pytest.mark.parametrize(
+    ("low", "high", "total", "mean"),
+    [(1, 2, "45", "2"), (2, 3, "75", "3")],
+    ids=["1.5", "2.5"],
+)
+def test_a_mean_of_exactly_half_a_liter_is_rounded_up(
+    low: int, high: int, total: str, mean: str
+) -> None:
+    # September 2026 has 30 days: 15 days with `low` and 15 with `high` liters
+    page, _ = page_of(stored_days(D(2026, 9, 1), *[low, high] * 15), D(2026, 10, 5))
+
+    (row,) = [row for row in page.rows_of(6) if row[:2] == ["2026", f"09-01 {DASH} 09-30"]]
+    assert row[2:4] == [total, mean]
+
+
 # --- document --------------------------------------------------------------------------------
 
 

@@ -115,6 +115,46 @@ def test_incomplete_note_names_the_days(missing: int, no_data: int, note: str | 
     assert report_sections.incomplete_note(period_with(missing, no_data)) == note
 
 
+@pytest.mark.parametrize(
+    ("total", "days", "mean"),
+    [
+        (0, 1, 0),
+        (7, 7, 1),
+        (15, 30, 1),  # 0.5
+        (45, 30, 2),  # 1.5
+        (75, 30, 3),  # 2.5: half up, not half to even
+        (10, 4, 3),  # 2.5
+        (14, 4, 4),  # 3.5
+        (44, 30, 1),  # 1.47
+        (1100, 7, 157),
+    ],
+)
+def test_mean_liters_rounds_half_up(total: int, days: int, mean: int) -> None:
+    assert report_sections.mean_liters(total, days) == mean
+
+
+def test_period_mean_counts_the_interpolated_days_and_rounds_half_up() -> None:
+    # 11-17 interpolated (3), 11-22 missing: 2 + 3 + 4 + 2 + 2 + 2 = 15 liters on 6 days
+    stored = {**fill(D(2026, 11, 1), D(2026, 11, 15), 2), D(2026, 11, 16): 2}
+    stored.update({D(2026, 11, 18): 4, D(2026, 11, 19): 2, D(2026, 11, 20): 2})
+    stored[D(2026, 11, 21)] = 2
+
+    week = sections_of(stored, D(2026, 11, 23))[0].periods[0]
+
+    assert (week.start, week.total, week.interpolated, week.missing) == (
+        D(2026, 11, 16),
+        15,
+        1,
+        1,
+    )
+    assert week.mean == 2.5
+    assert report_sections.period_mean(week) == 3
+
+
+def test_period_mean_without_a_day_with_a_value_is_none() -> None:
+    assert report_sections.period_mean(period_with(no_data=7)) is None
+
+
 def test_legend_explains_interpolated_days_only_if_a_shown_period_has_some() -> None:
     complete = fill(D(2025, 1, 1), D(2026, 11, 22))
     with_gap = {day: value for day, value in complete.items() if day != D(2026, 11, 18)}
